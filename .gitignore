@@ -59,6 +59,15 @@ yarn-error.log*
 .DS_Store
 Thumbs.db
 
+# Metadata Git milik subdirektori.
+#
+# Repositori ini monorepo, jadi `.git` di dalam `frontend/` berarti `frontend/`
+# akan ter-*commit* sebagai embedded repository: yang tersimpan hanya pointer,
+# bukan kodenya. Hasil `git clone` di tempat lain akan berisi folder `frontend`
+# yang kosong. Aturan ini mencegahnya, dan berlaku untuk subdirektori mana pun.
+*/.git
+**/.git
+
 # Berkas sementara
 *.tmp
 *.bak
