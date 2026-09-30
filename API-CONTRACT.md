@@ -349,7 +349,7 @@ Mengubah judul satu percakapan. Aturan yang harus dipegang backend:
 ### `GET /api/v1/settings`
 
 ```json
-{ "top_k": 5, "similarity_threshold": 0.75 }
+{ "top_k": 5, "similarity_threshold": 0.5 }
 ```
 
 ### `PUT /api/v1/settings`
@@ -363,7 +363,7 @@ Rentang yang dipatuhi UI:
 | Parameter | Min | Maks | Default | PRD |
 | --- | --- | --- | --- | --- |
 | `top_k` | 3 | 10 | 5 | FR-2.1 |
-| `similarity_threshold` | 0.50 | 0.90 | 0.75 | FR-2.3 |
+| `similarity_threshold` | 0.50 | 0.90 | 0.50 | FR-2.3 |
 
 Perubahan harus berlaku pada query berikutnya tanpa restart (FR-6.2), jadi
 backend tidak boleh menyimpan parameter ini di memori proses yang sudah
@@ -438,13 +438,28 @@ kesenjangan antara dua dashboard.
 {
   "status": "ok",
   "llm": "ok", "vector_store": "ok", "memory": "ok",
-  "version": "1.0.0"
+  "version": "1.0.0",
+  "fallback": {
+    "repository": "sqlite",
+    "memory": "in-memory",
+    "vector_store": "chroma",
+    "vector_store_persistent": true,
+    "tracing": false,
+    "mode": "full"
+  }
 }
 ```
 
 `status` jadi `degraded` kalau ada komponen yang tidak terjangkau. Endpoint
 ini harus menjawab dalam waktu pendek dan tidak boleh menyentuh LLM, karena
 dipakai monitor.
+
+Field `fallback` memberi tahu mode apa yang sedang aktif -- bukan sekadar
+"sehat atau tidak". `mode: "reduced"` berarti salah satu komponen berjalan
+dalam mode fallback (misalnya vector store in-memory yang hilang saat
+restart), dan operator tidak boleh mengira data sudah persisten padahal belum.
+`tracing: false` menjelaskan kenapa kolom Trace di /analytics kosong: bukan
+error, memang dimatikan.
 
 ---
 

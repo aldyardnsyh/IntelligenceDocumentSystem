@@ -4,6 +4,7 @@ Jalankan dengan backend di :8000 dan frontend di :3000.
 Setiap langkah mencetak PASS/FAIL dan berhenti di kegagalan pertama.
 """
 
+import contextlib
 import json
 import sys
 import time
@@ -73,11 +74,13 @@ def main() -> int:
             types = set()
             for line in r.iter_lines():
                 if line.startswith("data:") and line.strip() != "data: [DONE]":
-                    try:
+                    with contextlib.suppress(json.JSONDecodeError):
                         types.add(json.loads(line[5:].strip()).get("type", "?"))
-                    except json.JSONDecodeError:
-                        pass
-        if not check("not_found saat indeks kosong", "not_found" in types, f"events={sorted(types)}"):
+        if not check(
+            "not_found saat indeks kosong",
+            "not_found" in types,
+            f"events={sorted(types)}",
+        ):
             return 1
 
         # 4. Endpoint terlindungi tanpa cookie -> 401
@@ -124,10 +127,8 @@ def main() -> int:
             types: set[str] = set()
             for line in r.iter_lines():
                 if line.startswith("data:") and line.strip() != "data: [DONE]":
-                    try:
+                    with contextlib.suppress(json.JSONDecodeError):
                         types.add(json.loads(line[5:].strip()).get("type", "?"))
-                    except json.JSONDecodeError:
-                        pass
         if not check("event sitasi ada", "citations" in types, f"events={sorted(types)}"):
             return 1
         if not check("event done ada", "done" in types):

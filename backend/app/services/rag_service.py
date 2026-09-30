@@ -48,6 +48,7 @@ from app.services.memory.store import (
     message_to_dict,
 )
 from app.services.retrieval.retriever import HybridRetriever
+from app.services.tracing import TraceContext, Tracer
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +117,7 @@ class RagService:
         retriever: HybridRetriever,
         embedding: EmbeddingProvider,
         chain: LLMChain,
+        tracer: Tracer | None = None,
     ) -> None:
         self._settings = settings
         self._repository = repository
@@ -123,6 +125,10 @@ class RagService:
         self._retriever = retriever
         self._embedding = embedding
         self._chain = chain
+        # Opsional supaya test dan skrip yang membangun RagService manual
+        # tidak wajib menyediakan tracer. Tanpa itu, trace_id selalu None --
+        # perilaku yang sama seperti tracing dimatikan.
+        self._tracer = tracer
 
     # ------------------------------------------------------------- aksesor
     # Diekspos sebagai properti supaya test dan health check tidak perlu
@@ -195,6 +201,20 @@ class RagService:
         started = time.perf_counter()
         retrieval_settings = await asyncio.to_thread(self._repository.get_settings)
 
+        # Jejak dimulai sebelum apa pun, supaya cache-hit pun tercatat.
+        # Kalau tracing mati, `start_trace` mengembalikan konteks kosong dan
+        # semua pemanggilan berikutnya menjadi no-op -- tidak ada `if` yang
+        # perlu ditulis di jalur utama.
+        trace = (
+            self._tracer.start_trace(
+                question=question,
+                session_id=session_id,
+                metadata={"top_k": retrieval_settings.top_k},
+            )
+            if self._tracer is not None
+            else TraceContext()
+        )
+
         # 1. Cache (FR-4.1)
         cache_id = cache_key(question, document_ids, retrieval_settings.top_k)
         cached = await self._memory.get_cached(cache_id)
@@ -223,12 +243,30 @@ class RagService:
                 not_found=not_found,
                 elapsed=elapsed,
                 from_cache=True,
+                trace_id=trace.trace_id,
             )
+            if self._tracer is not None:
+                await asyncio.to_thread(
+                    self._tracer.end_trace,
+                    trace,
+                    answer=answer_text,
+                    citations=len(citations),
+                    provider_name=None,
+                    from_cache=True,
+                    elapsed_ms=elapsed,
+                )
             yield StreamEvent(type="done", response_time_ms=elapsed)
             return
 
         # 2. Retrieval
         retrieved = await self.retrieve(question, retrieval_settings, document_ids)
+        if self._tracer is not None:
+            await asyncio.to_thread(
+                self._tracer.span_retrieval,
+                trace,
+                chunks=retrieved,
+                threshold=retrieval_settings.similarity_threshold,
+            )
 
         if session_id is None:
             session_id = new_id("ses")
@@ -249,7 +287,18 @@ class RagService:
                 not_found=True,
                 elapsed=elapsed,
                 from_cache=False,
+                trace_id=trace.trace_id,
             )
+            if self._tracer is not None:
+                await asyncio.to_thread(
+                    self._tracer.end_trace,
+                    trace,
+                    answer=NOT_FOUND_RESPONSE,
+                    citations=0,
+                    provider_name=None,
+                    from_cache=False,
+                    elapsed_ms=elapsed,
+                )
             yield StreamEvent(type="done", response_time_ms=elapsed)
             return
 
@@ -273,8 +322,23 @@ class RagService:
             message = "Layanan bahasa sedang tidak tersedia. Coba lagi sebentar lagi."
             logger.warning("Generasi gagal: %s", exc)
             await self._record_log(
-                session_id, question, elapsed, len(retrieved), from_cache=False
+                session_id,
+                question,
+                elapsed,
+                len(retrieved),
+                from_cache=False,
+                trace_id=trace.trace_id,
             )
+            if self._tracer is not None:
+                await asyncio.to_thread(
+                    self._tracer.end_trace,
+                    trace,
+                    answer=f"PROVIDER_ERROR: {exc}",
+                    citations=len(retrieved),
+                    provider_name=",".join(self._chain.provider_names),
+                    from_cache=False,
+                    elapsed_ms=elapsed,
+                )
             yield StreamEvent(type="error", value=message, retry_after_seconds=30)
             return
 
@@ -306,7 +370,21 @@ class RagService:
             not_found=False,
             elapsed=elapsed,
             from_cache=False,
+            trace_id=trace.trace_id,
         )
+        if self._tracer is not None:
+            # Nama provider tidak tersedia di sini (chain hanya mengembalikan
+            # token), jadi dicatat apa adanya. Yang penting untuk debugging
+            # adalah konteks dan hasilnya, bukan siapa yang menjawab.
+            await asyncio.to_thread(
+                self._tracer.end_trace,
+                trace,
+                answer=answer_text,
+                citations=len(citations),
+                provider_name=",".join(self._chain.provider_names),
+                from_cache=False,
+                elapsed_ms=elapsed,
+            )
         yield StreamEvent(type="done", response_time_ms=elapsed)
 
     # ------------------------------------------------------------- histori
@@ -328,6 +406,7 @@ class RagService:
         not_found: bool,
         elapsed: int,
         from_cache: bool,
+        trace_id: str | None = None,
     ) -> None:
         """Simpan ke memori sesi, metadata sesi, cache, dan log."""
         now = utc_now()
@@ -375,7 +454,9 @@ class RagService:
         session.message_count = len(existing)
         self._repository.upsert_session(session)
 
-        await self._record_log(session_id, question, elapsed, len(citations), from_cache)
+        await self._record_log(
+            session_id, question, elapsed, len(citations), from_cache, trace_id
+        )
 
     async def _record_log(
         self,
@@ -384,6 +465,7 @@ class RagService:
         elapsed: int,
         sources: int,
         from_cache: bool,
+        trace_id: str | None = None,
     ) -> None:
         await asyncio.to_thread(
             self._repository.add_log,
@@ -395,6 +477,7 @@ class RagService:
                 sources_count=sources,
                 created_at=utc_now(),
                 from_cache=from_cache,
+                trace_id=trace_id,
             ),
         )
 

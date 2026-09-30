@@ -399,8 +399,8 @@ class TestChat:
             files={
                 "file": (
                     "fokus.md",
-                    "Penyelesaian permintaan membutuhkan dua hari. "
-                    "Penyelesaian permintaan dicatat segera.".encode("utf-8"),
+                    b"Penyelesaian permintaan membutuhkan dua hari. "
+                    b"Penyelesaian permintaan dicatat segera.",
                     "text/markdown",
                 )
             },
@@ -440,8 +440,8 @@ class TestChat:
             files={
                 "file": (
                     "fokus.md",
-                    "Penyelesaian permintaan membutuhkan dua hari. "
-                    "Penyelesaian permintaan dicatat segera.".encode("utf-8"),
+                    b"Penyelesaian permintaan membutuhkan dua hari. "
+                    b"Penyelesaian permintaan dicatat segera.",
                     "text/markdown",
                 )
             },

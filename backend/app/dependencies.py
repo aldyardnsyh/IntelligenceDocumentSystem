@@ -19,6 +19,7 @@ from app.services.memory.store import MemoryStore, build_memory_store
 from app.services.rag_service import RagService
 from app.services.retrieval.retriever import HybridRetriever
 from app.services.retrieval.vector_store import VectorStore, build_vector_store
+from app.services.tracing import Tracer
 
 logger = logging.getLogger(__name__)
 
@@ -31,12 +32,13 @@ _ingestion: IngestionService | None = None
 _rag: RagService | None = None
 _chain: LLMChain | None = None
 _limiter: RateLimiter | None = None
+_tracer: Tracer | None = None
 
 
 def init_services(app_settings: Settings | None = None) -> None:
     """Bangun semua service. Dipanggil sekali di lifespan."""
     global _settings, _repository, _memory, _store, _retriever
-    global _ingestion, _rag, _chain, _limiter
+    global _ingestion, _rag, _chain, _limiter, _tracer
 
     _settings = app_settings or get_settings()
 
@@ -61,7 +63,12 @@ def init_services(app_settings: Settings | None = None) -> None:
     from app.providers.base import build_fallback_chain  # noqa: PLC0415
 
     _chain = LLMChain(build_fallback_chain(_settings))
-    _rag = RagService(_settings, _repository, _memory, _retriever, embedding, _chain)
+    # Tracer dibuat di sini supaya satu instans dipakai seluruh query.
+    # Kalau tracing mati, objeknya tetap ada tapi semua method-nya no-op.
+    _tracer = Tracer(_settings)
+    _rag = RagService(
+        _settings, _repository, _memory, _retriever, embedding, _chain, _tracer
+    )
     _limiter = RateLimiter(_memory, _settings)
 
     # Bangun ulang indeks retrieval dari metadata yang tersimpan.
@@ -116,7 +123,15 @@ def _index_entries(repository: MetadataRepository) -> list:
 def shutdown_services() -> None:
     """Kosongkan referensi service. Dipanggil saat aplikasi berhenti."""
     global _settings, _repository, _memory, _store, _retriever
-    global _ingestion, _rag, _chain, _limiter
+    global _ingestion, _rag, _chain, _limiter, _tracer
+
+    # Flush antrean Langfuse sebelum referensinya hilang. Tanpa ini, jejak
+    # dari beberapa query terakhir tidak pernah sampai ke server.
+    if _tracer is not None:
+        try:
+            _tracer.flush()
+        except Exception:  # noqa: BLE001
+            logger.exception("Gagal flush tracer saat shutdown")
 
     _settings = None
     _repository = None
@@ -127,6 +142,7 @@ def shutdown_services() -> None:
     _rag = None
     _chain = None
     _limiter = None
+    _tracer = None
 
 
 # --------------------------------------------------------------- accessors
@@ -175,6 +191,14 @@ def get_rate_limiter() -> RateLimiter:
     return _limiter
 
 
+def get_tracer() -> Tracer:
+    """Tracer aktif. Dipakai health check untuk melaporkan status tracing."""
+    if _tracer is None:
+        init_services()
+    assert _tracer is not None
+    return _tracer
+
+
 __all__ = [
     "get_app_settings",
     "get_ingestion",
@@ -182,6 +206,7 @@ __all__ = [
     "get_rag",
     "get_rate_limiter",
     "get_repository",
+    "get_tracer",
     "init_services",
     "shutdown_services",
 ]

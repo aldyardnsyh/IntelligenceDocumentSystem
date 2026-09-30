@@ -589,6 +589,10 @@ async def health(
     repository_ok = await asyncio.to_thread(repository.ping)
     vector_ok = await asyncio.to_thread(ingestion.store.ping)
 
+    from app.dependencies import get_tracer  # noqa: PLC0415
+
+    tracing_on = get_tracer().enabled
+
     components_ok = llm_status == "ok" and memory_ok and repository_ok and vector_ok
 
     return HealthResponse(
@@ -601,12 +605,15 @@ async def health(
         memory="ok" if memory_ok else "unreachable",
         version=config.version,
         # Mode fallback yang sedang aktif, supaya operator tidak salah
-        # mengira data sudah persisten padahal belum.
+        # mengira data sudah persisten padahal belum. Tracing ikut
+        # dilaporkan agar kolom Trace di /analytics bisa menjelaskan kenapa
+        # kosong: bukan error, memang dimatikan.
         fallback={
             "repository": repository.name,
             "memory": rag.memory.name,
             "vector_store": ingestion.store.name,
             "vector_store_persistent": ingestion.store.persistent,
+            "tracing": tracing_on,
             "mode": "full" if components_ok and ingestion.store.persistent else "reduced",
         },
     )
