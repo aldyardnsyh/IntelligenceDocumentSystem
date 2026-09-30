@@ -1,0 +1,93 @@
+# Deployment satu instance: backend FastAPI + Caddy sebagai reverse proxy.
+#
+# ## Kenapa tidak perlu database, Redis, atau object storage
+#
+# Ini satu instance dengan disk persisten, jadi:
+#
+# - **SQLite** untuk metadata. Persisten di volume yang sama, nol konfigurasi.
+#   Supabase/Turso hanya relevan kalau nanti diskalakan ke banyak instance.
+# - **Dict in-process** untuk memori sesi. Redis menyelesaikan masalah
+#   "banyak instance berbagi state"; di sini tidak ada banyak instance.
+# - **ChromaDB** untuk vektor, disimpan di volume yang sama seperti SQLite.
+#
+# Menambah layanan untuk kebutuhan yang belum ada berarti menambah failure
+# mode, biaya operasional, dan tempat Things silently gagal. Itu ditunda
+# sampai ada alasan, bukan ditunda karena tidak jadi.
+
+name: ida
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ida-backend:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Override supaya path data selalu menunjuk ke volume, apa pun isi
+      # .env. Kalau kedua nilai ini lupa diisi, container akan menulis ke
+      # filesystem miliknya sendiri dan semua hilang saat di-restart.
+      CHROMA_PERSIST_DIR: /data/chroma
+      SQLITE_FALLBACK_PATH: /data/metadata.db
+    volumes:
+      # Volume bernama, bukan bind mount ke path host. Alasannya: saat image
+      # ditulis ulang (deploy versi baru), bind mount bisa tertimpa kalau
+      # path-nya berubah; volume punya identitas sendiri dan tidak ikut
+      # terhapus saat `docker compose down`.
+      - ida-data:/data
+    expose:
+      # Hanya jaringan internal Compose yang boleh menjangkau. Port tidak
+      # dipetakan ke host karena lalu lintas lewat Caddy; memetakannya juga
+      # akan membuka API tanpa TLS ke seluruh internet.
+      - "8000"
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/v1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
+    logging:
+      driver: json-file
+      options:
+        # Log tak berbatas akan memakan disk sampai instans tidak bisa menulis
+        # sama sekali. 10 MB x 3 file sudah cukup untuk diagnosa.
+        max-size: "10m"
+        max-file: "3"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Sertifikat dan kunci Let's Encrypt. Volume wajib, bukan bind mount ke
+      # path yang bisa terhapus: tanpa ini Caddy meminta sertifikat baru tiap
+      # restart dan bisa kena rate limit Let's Encrypt.
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - internal
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  ida-data:
+  caddy-data:
+  caddy-config:
+
+networks:
+  internal:
+    driver: bridge

@@ -1,0 +1,62 @@
+# Caddy sebagai reverse proxy + penerbit TLS otomatis.
+#
+# Kenapa Caddy, bukan nginx + certbot: Caddy otomatis menemukan kebutuhan
+# sertifikat, memperbaruinya, dan memuatkannya tanpa interaksi. Nginx +
+# certbot perlu cron yang harus tetap jalan; kalau cron itu mati, sertifikat
+# kadaluarsa dalam 90 hari dan situs mati tanpa ada yang salah. Untuk deployment
+# yang berjalan tanpa disentuh seperti ini, satu proses yang mengurus
+# sendiri adalah pilihan yang tepat.
+#
+# Ganti domain di bawah dengan domain Anda. Untuk uji coba lokal, lihat bagian
+# `localhost` di README.
+
+{
+	# Email ini hanya dipakai untuk pemberitahuan kedaluwarsa sertifikat.
+	# Kosongkan kalau tidak ingin memberi tahu siapa pun.
+	email admin@example.com
+
+	# Prioritas OCSP: menentukan seberapa sering sertifikat diperiksa
+	# ke penerbit. `native` lebih hemat koneksi untuk server kecil.
+	ocsp_stapling on
+}
+
+# Frontend dan API dilayani dari satu domain agar cookie sesi bekerja tanpa
+# CORS. Frontend (Next.js) diasumsikan sudah berjalan -- lihat README bagian
+# "Menjalankan frontend".
+example.com {
+	encode zstd gzip
+
+	# Header keamanan dasar. `Content-Security-Policy` sengaja tidak
+	# disetel ketat di sini karena frontend Next.js memakai inline script
+	# untuk hydration; tighten nanti kalau sudah ada kebijakan konkret.
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+
+	# API. Prefix `/api/v1` diteruskan apa adanya; upstream tidak boleh
+	# ditulis ulang ke `/`, karena FastAPI sudah tahu path lengkapnya dan
+	# menulis ulang ke / akan memecahkan path OpenAPI.
+	handle /api/v1/* {
+		reverse_proxy api:8000 {
+			# SSE (streaming jawaban) butuh buffering dimatikan. Tanpa ini,
+			# respons terkirim utuh di akhir dan pengguna melihat jawaban
+			# tiba-tiba sekaligus -- bukan streaming sama sekali.
+			flush_interval -1
+
+			# Batas timeout lebih longgar dari default 60 detik supaya
+			# generasi LLM yang lambat tidak diputus di tengah.
+			transport http {
+				read_timeout 300s
+			}
+		}
+	}
+
+	# Sisanya ditangani frontend Next.js.
+	handle {
+		reverse_proxy frontend:3000
+	}
+}

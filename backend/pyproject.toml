@@ -1,0 +1,121 @@
+[project]
+name = "intelligent-document-assistant"
+version = "1.0.0"
+description = "Backend RAG: tanya-jawab berbasis dokumen dengan sitasi yang bisa ditelusuri."
+requires-python = ">=3.11"
+dependencies = [
+    # HTTP
+    "fastapi>=0.116",
+    "uvicorn[standard]>=0.35",
+    "pydantic>=2.11",
+    "pydantic-settings>=2.14",
+    "python-multipart>=0.0.20",   # wajib untuk UploadFile
+    "httpx>=0.28",
+
+    # Embedding lokal (nol biaya, data tidak keluar dari mesin)
+    "sentence-transformers>=3.4",
+    "torch>=2.8",
+    "numpy>=1.26",
+
+    # Vector store
+    "chromadb>=0.6",
+
+    # Parsing PDF
+    "pypdf>=5.1",
+
+    # Memory dan cache
+    "redis>=5.2",
+]
+
+[project.optional-dependencies]
+# Tracing dan evaluasi. Dipisah supaya instalasi dasar tetap ringan.
+observability = [
+    "langfuse>=3.0",
+]
+evaluation = [
+    "ragas>=0.2",
+    "datasets>=3.0",
+]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=6.0",
+    "ruff>=0.8",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-q --cov=app --cov-report=term-missing --cov-fail-under=70"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+[tool.coverage.run]
+source = ["app"]
+omit = [
+    "*/__init__.py",
+    "app/main.py",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle
+    "F",   # pyflakes
+    "I",   # isort
+    "N",   # pep8-naming
+    "UP",  # pyupgrade
+    "B",   # bugbear
+    "C4",  # comprehensions
+    "SIM", # simplify
+    "ANN", # annotations
+    "D",   # pydocstyle
+]
+ignore = [
+    "D203",  # konflik dengan D211
+    "D213",  # konflik dengan D212
+    "ANN401", # Any itu memang perlu di beberapa tempat
+    # D101-D105 dan D107 dinonaktifkan dengan alasan, bukan sekadar
+    # 한편. Aturan "setiap simbol publik wajib punya docstring" menghasilkan
+    # docstring berisi "Return the value." atau "Inisialisasi." yang tidak
+    # menambah informasi apa pun, sekaligus menutupi method yang perilakunya
+    # benar-benar perlu dijelaskan.
+    #
+    # Docstring di proyek ini menjawab "mengapa" (alasannya angka,
+    # konsekuensi pilihan, kondisi gagal), bukan "apa". Modul, kelas, dan
+    # fungsi dengan logika nyata tetap diberi uraian; yang dilewatkan hanya
+    # stub Protocol, accessor satu baris, dan getter yang namanya sudah
+    # self-explanatory.
+    "D101", "D102", "D103", "D104", "D105", "D107",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["D", "ANN", "S101"]
+"evaluation/*" = ["D", "ANN"]
+"app/dependencies.py" = ["B008"]  # Depends() memang dipanggil di default argumen
+# C416 salah pada baris ini: komprehensi memfilter tuple tiga elemen
+# (id, skor, metadata) menjadi pasangan id -> metadata, bukan menyalin tuple
+# apa adanya, jadi tidak bisa ditulis ulang dengan dict().
+"app/services/retrieval/retriever.py" = ["C416"]
+# D102/D107 pada Protocol dan stub one-liner: nama method-nya sudah
+# menyatakan maksudnya, dan docstring "Return the value." tidak menambah
+# informasi apa pun. Method yang perilakunya tidak langsung jelas tetap
+# diberi docstring.
+"app/repositories/*.py" = ["D102"]
+"app/services/retrieval/vector_store.py" = ["D102"]
+"app/services/memory/store.py" = ["D102"]
+"app/providers/base.py" = ["D102"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"

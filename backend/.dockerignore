@@ -1,0 +1,49 @@
+# .dockerignore
+#
+# Berkas yang tidak boleh masuk ke context build. Masing-masing punya alasan,
+# bukan sekadar "biar image kecil":
+
+# VCS dan editor
+.git
+.gitignore
+.github
+.idea
+.vscode
+
+# Python bytecode dan cache
+__pycache__
+*.py[cod]
+.pytest_cache
+.ruff_cache
+.mypy_cache
+
+# Test dan evaluasi: tidak ada di image produksi, dan men-copy-nya membuat
+# layer build lebih besar tanpa gunanya.
+tests
+evaluation
+
+# Rahasia. `*.env*` sengaja memakai wildcard supaya `.env`, `.env.local`, dan
+# variasi lain ikut tertangkap. File ini hanya berisi konfigurasi lokal
+# developer; menyalinnya ke image berarti kredensial ikut ter-deploy.
+*.env
+*.env.*
+!.env.example
+
+# Dokumentasi
+*.md
+!README.md
+
+# Data runtime. Volume bind mount mengambil preceden atas isi image, jadi data
+# yang sudah ditulis di host tidak akan tertutupi oleh salinan basi yang
+# ikut ter-*bake* ke dalam image. `data/` berisi metadata SQLite dan indeks
+# ChromaDB; ikut disalin berarti data produksi di host bisa tertimpa.
+data/
+*.db
+*.sqlite
+
+# Python packaging leftovers
+*.egg-info
+build/
+dist/
+.venv/
+venv/

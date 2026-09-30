@@ -1,0 +1,65 @@
+# =============================================================================
+# Rahasia — ini baris paling penting di berkas ini.
+#
+# `ACCESS_PASSCODE_SHA256` dan `GROQ_API_KEY` hanya ada sebagai variabel env
+# di server. Kalau `.env` ikut ter-commit, nilainya tersimpan permanen di
+# riwayat git: menghapus berkasnya sekarang tidak menghapusnya dari riwayat,
+# dan riwayat yang sudah ter-push tidak bisa dibersihkan tanpa rewrite.
+# =============================================================================
+.env
+.env.*
+!.env.example
+
+# Node
+node_modules/
+.npm
+.pnpm-store/
+next-env.d.ts
+
+# Next.js
+.next/
+out/
+.vercel
+.turbo
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Data runtime. SQLite metadata dan indeks ChromaDB lived di sini; ikut
+# ter-commit berarti data pengguna menyatu di repositori.
+data/
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Cache dan hasil test
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Log
+*.log
+npm-debug.log*
+yarn-error.log*
+
+# Editor dan OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Berkas sementara
+*.tmp
+*.bak
+*.orig
