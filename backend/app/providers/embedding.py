@@ -36,16 +36,27 @@ class EmbeddingProvider(Protocol):
 
 
 class HashingEmbeddingProvider:
-    """Embedding deterministik berbasis hashing, tanpa dependensi model.
+    """Embedding deterministik memakai hashing trick, tanpa dependensi model.
 
-    Bukan embedding semantik: vektor ini hanya bisa mencocokkan kata yang
-    identik. Dipakai sebagai fallback ketika sentence-transformers belum
-    terpasang, dan di test yang tidak butuh semantik.
+    Bukan embedding semantik. Yang dilakukan adalah `hashing trick` klasik
+    (seperti `HashingVectorizer`): setiap token di-hash ke satu slot dari 384
+    dimensi, lalu slot itu ditambah satu. Cosine similarity dari dua vektor
+    seperti ini **mendekati tumpang tindih token**: teks identik berskor 1.0,
+    teks tanpa token bersama berskor ~0 (hanya tabrakan hash acak), dan teks
+    yang berbagi separuh token berada di antaranya.
 
-    Penting untuk disebut terang-terang: kalau provider ini aktif di
-    produksi, kualitas retrieval anjlok jauh di bawah embedding sungguhan.
-    Statusnya dilaporkan lewat ``/api/v1/health`` supaya tidak terlihat seola-ola
-    sistem yang bekerja penuh.
+    Ini berbeda dari vektor bit yang dense (setiap token menyalakan separuh
+    dimensi), yang membuat semua teks saling tumpang tindih sekitar 0.8.
+    Desain dense itu sudah dicoba dan gagal diukur: "xyz abc qwerty" terhadap
+    dokumen SOP berskor 0.84, hampir sama dengan pertanyaan sungguhan 0.94,
+    sehingga ambang berapa pun tidak bisa memisahkan keduanya.
+
+    Yang tetap belum ada: kemampuan menangkap parafrase. "batas tanggung
+    jawab" dan "siapa yang bertanggung jawab" tetap tidak mirip, karena tidak
+    ada token bersama. Untuk itu memang perlu model sungguhan.
+
+    Dipakai sebagai fallback dan di test. Kalau aktif di produksi, kualitas
+    jelas di bawah embedding sungguhan; statusnya dilaporkan lewat health.
     """
 
     name = "hashing-fallback"
@@ -54,25 +65,16 @@ class HashingEmbeddingProvider:
         self.dimension = dimension
         self._cache: dict[str, list[float]] = {}
 
-    def _token_vector(self, token: str) -> list[float]:
-        """Vektor dense dari bit-bit hash satu token.
-
-        Serat nilai biner, bukan acak bertanda. Karena setiap bit selalu
-        ``+1``, dua token yang berbeda tetap menghasilkan tumpang tindih
-        positif pada slot yang sama, sehingga cosine similarity antar teks
-        mencerminkan tumpang tindih token, bukan mendekati nol.
-        """
-        digest = hashlib.blake2b(token.encode("utf-8"), digest_size=32).digest()
-        bits = int.from_bytes(digest, "big")
-        return [1.0 if (bits >> position) & 1 else 0.0 for position in range(self.dimension)]
-
     def _hash_vector(self, text: str) -> list[float]:
         vector = [0.0] * self.dimension
         tokens = _TOKEN_RE.findall(text.lower())
         for token in tokens:
-            token_vector = self._token_vector(token)
-            for position, value in enumerate(token_vector):
-                vector[position] += value
+            digest = hashlib.blake2b(token.encode("utf-8"), digest_size=8).digest()
+            slot = int.from_bytes(digest[:4], "big") % self.dimension
+            # Tanpa tanda: slot hanya menghitung kehadiran. Tanda acak justru
+            # menambah varians yang menenggelamkan sinyal overlap pada teks
+            # pendek -- persis kondisi chunk dan pertanyaan.
+            vector[slot] += 1.0
         norm = sum(value * value for value in vector) ** 0.5
         if norm == 0.0:
             return vector

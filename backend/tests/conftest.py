@@ -162,7 +162,16 @@ async def indexed_ingestion(ingestion: IngestionService) -> IngestionService:
 
     Dipanggil langsung ke method internal, bukan lewat ``register``, supaya
     test tidak perlu menunggu background task.
+
+    Threshold repository diturunkan ke nilai yang cocok untuk stub embedding.
+    Stub hashing memberi skor cosine 0.3-0.5 untuk pertanyaan relevan,
+    sedangkan default produksi 0.5 dikalibrasi untuk embedding dense sungguhan
+    (cosine 0.6+). Tanpa penyesuaian ini, test yang membutuhkan sitasi akan
+    gagal bukan karena logikanya salah, tapi karena stub dan model asli punya
+    distribusi skor yang berbeda. Test yang menguji gate-nya sendiri memakai
+    threshold eksplisit (mis. 0.99), jadi tidak terpengaruh.
     """
+    ingestion.repository.update_settings({"similarity_threshold": 0.2})
     from app.models.domain import Document, DocumentStatus
     from app.services.ingestion.parser import parse_document
     from app.services.retrieval.retriever import COLLECTION, IndexEntry

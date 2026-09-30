@@ -28,7 +28,22 @@ export interface LoginState {
  */
 async function checkPasscode(passcode: string) {
   if (!isMockMode) {
-    const response = await fetch(`${API_BASE_URL}/api/v1/auth/verify`, {
+    // URL harus absolut. `fetch` di server action berjalan di runtime Node,
+    // dan keandalan URL relatif di sana bergantung pada versi Next.js.
+    // Mengandalkan itu di jalur auth terlalu berisiko: kalau gagal, gejalanya
+    // "login selalu gagal" tanpa pesan yang jelas.
+    //
+    // Host diambil dari header request, jadi permintaannya kembali ke origin
+    // yang sama dengan tempat frontend disajikan. Di belakang reverse proxy
+    // seperti Caddy, `x-forwarded-host` adalah host publik, bukan nama
+    // container -- mengambil dari sana membuat hasilnya benar baik di
+    // localhost maupun di produksi.
+    const headersList = await headers();
+    const host = headersList.get("x-forwarded-host") ?? headersList.get("host");
+    const proto = headersList.get("x-forwarded-proto") ?? (host?.includes("localhost") ? "http" : "https");
+    const origin = host ? `${proto}://${host}` : "http://localhost:3000";
+
+    const response = await fetch(`${origin}${API_BASE_URL}/api/v1/auth/verify`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ passcode }),

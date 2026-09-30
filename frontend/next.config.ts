@@ -5,30 +5,53 @@ import type { NextConfig } from "next";
  * memakai prefix `NEXT_PUBLIC_`: alamat backend tidak perlu masuk ke bundle
  * browser.
  *
- * Kosong berarti tidak ada rewrite dan `NEXT_PUBLIC_API_BASE_URL` kosong
- * membuat frontend berjalan dengan fixture lokal.
+ * **Default-nya bukan string kosong.** Nilai kosong membuat rewrite dimatikan
+ * sepenuhnya saat build, karena `rewrites()` dievaluasi sekali di build time
+ * lalu hasilnya dibekukan di `routes-manifest.json`. Gejalanya halus sekali:
+ * aplikasi tetap jalan, tapi setiap request `/api/v1/*` jatuh ke halaman Next
+ * sehingga login mengembalikan HTML alih-alih JSON.
+ *
+ * Karena itu nilai defaultnya `http://api:8000` (nama service di compose).
+ * Mode fixture di-browser dikendalikan `NEXT_PUBLIC_USE_BACKEND`, bukan
+ * lewat nilai kosong di sini.
  */
-const BACKEND_ORIGIN = process.env.BACKEND_ORIGIN ?? "http://localhost:8000";
+const BACKEND_ORIGIN = process.env.BACKEND_ORIGIN ?? "http://api:8000";
 
 const nextConfig: NextConfig = {
   /**
+   * Build mandiri, tanpa `node_modules` di image runtime.
+   *
+   * Tanpa ini, image frontend ikut membawa seluruh dependency Next.js
+   * (~400 MB). Dengan `standalone`, Next cuma menyalin modul yang benar-benar
+   * dipakai -- biasanya image turun ke ~150 MB.
+   */
+  output: "standalone",
+
+  /**
    * Prefix `/api/v1` diproxy ke FastAPI.
    *
-   * Ini bukan Detail kosmetik; ini yang membuat alur login berfungsi.
+   * Ini bukan detail kosmetik; ini yang membuat alur login berfungsi.
    * Endpoint login mengembalikan `Set-Cookie: ida_session`. Kalau browser
-   * memanggil backend secara langsung dari origin berbeda, cookie itu
-   * management milik origin backend, sedangkan server action Next berjalan di
-   * origin frontend dan tidak punya cookie jar -- sehingga `Set-Cookie` dari
-   * backend dibuang dan tidak pernah sampai ke browser.
+   * memanggil backend dari origin berbeda, cookie itu milik origin backend,
+   * sedangkan server action Next berjalan di origin frontend dan tidak punya
+   * cookie jar -- sehingga `Set-Cookie` dari backend dibuang dan tidak pernah
+   * sampai ke browser.
    *
    * Dengan rewrite, browser hanya mengenal satu origin. Login, API, dan
    * `Set-Cookie` mengalir lewat origin frontend, lalu Next meneruskannya ke
    * backend. Cookie ikut naik-turun bersama setiap permintaan, di localhost
-   * maupun di domain terpisah saat deploy. CORS dan cookie lintas-domain
-   * tidak lagi jadi syarat.
+   * maupun saat deploy dengan dua domain terpisah. CORS dan cookie
+   * lintas-domain tidak lagi jadi syarat.
+   *
+   * `BACKEND_ORIGIN` dibaca saat build, jadi nilainya harus ada sebagai
+   * build-argumen kalau nanti berubah. Compose sudah mengaturnya.
    */
   async rewrites() {
-    if (!process.env.BACKEND_ORIGIN) return [];
+    // Tidak ada kondisi "dimatikan" di sini. Dulu ada `if (!BACKEND_ORIGIN)
+    // return []`, dan itulah penyebab request `/api/v1/*` sampai ke halaman
+    // Next alih-alih backend. Sekarang mematikan rewrite dilakukan lewat
+    // `NEXT_PUBLIC_USE_BACKEND=0` di sisi frontend, bukan lewat menyalakan
+    // proxy ke tujuan yang tidak ada.
     return [
       {
         source: "/api/v1/:path*",

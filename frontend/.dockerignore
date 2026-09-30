@@ -1,0 +1,34 @@
+# .dockerignore frontend
+#
+# Berkas yang tidak boleh masuk ke context build. Yang paling penting adalah
+# `.next` dan `node_modules`: keduanya besar, dan `node_modules` di dalam
+# image akan menimpa hasil `npm ci` di stage deps dengan versi yang bisa berbeda
+# dari lockfile.
+
+# Rahasia. `*.env*` memakai wildcard supaya `.env.local` dan variannya ikut
+# tertangkap; `.env.example` dikecualikan karena memang perlu ikut sebagai
+# dokumentasi.
+.env
+.env.*
+!.env.example
+.env*.local
+
+# Dependency dan hasil build
+node_modules
+.next
+out
+.vercel
+.turbo
+npm-debug.log*
+
+# Git dan editor
+.git
+.gitignore
+.vscode
+.idea
+*.swp
+.DS_Store
+
+# Dokumentasi dan aset yang tidak dipakai runtime
+*.md
+!README.md

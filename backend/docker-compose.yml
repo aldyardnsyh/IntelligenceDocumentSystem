@@ -58,11 +58,60 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  frontend:
+    build:
+      # Context di luar direktori compose. Compose mendukungnya, tapi path
+      # relatif dihitung dari berkas compose, bukan dari shell -- jadi ditulis
+      # eksplisit supaya jelas mana yang dipakai.
+      context: ../frontend
+      dockerfile: Dockerfile
+      args:
+        # `NEXT_PUBLIC_*` di-*inline* ke bundle JavaScript saat `next build`.
+        # Karena itu nilainya harus ada di sini sebagai build-argumen;
+        # `environment:` di bawah hanya dibaca Next di server dan tidak akan
+        # pernah sampai ke browser.
+        #
+        # `BACKEND_ORIGIN` juga build-time: rewrite di next.config.ts
+        # dievaluasi saat build, bukan saat request. Nilai yang salah di sini
+        # menghasilkan proxy yang menunjuk ke host yang tidak benar.
+        BACKEND_ORIGIN: http://api:8000
+        NEXT_PUBLIC_USE_BACKEND: "1"
+        # Sengaja kosong: request ke `/api/v1/...` jadi path relatif yang
+        # diteruskan rewrite Next.js. URL absolut hanya perlu kalau browser
+        # benar-benar menembak backend langsung -- dan itu merusak cookie
+        # sesi saat login (lihat README).
+        NEXT_PUBLIC_API_BASE_URL: ""
+        NEXT_PUBLIC_REPO_URL: "${NEXT_PUBLIC_REPO_URL:-}"
+        NEXT_PUBLIC_API_DOCS_URL: "${NEXT_PUBLIC_API_DOCS_URL:-}"
+        NEXT_PUBLIC_LANGFUSE_URL: "${NEXT_PUBLIC_LANGFUSE_URL:-}"
+    image: ida-frontend:latest
+    restart: unless-stopped
+    environment:
+      # Route /api/healthz butuh var ini. Kosong berarti route itu tidak
+      # dievaluasi sama sekali, jadi health check akan selalu gagal walau
+      # Next-nya sehat.
+      PORT: "3000"
+      HOSTNAME: "0.0.0.0"
+    depends_on:
+      api:
+        condition: service_healthy
+    expose:
+      - "3000"
+    networks:
+      - internal
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
     depends_on:
       api:
+        condition: service_healthy
+      frontend:
         condition: service_healthy
     ports:
       - "80:80"

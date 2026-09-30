@@ -38,8 +38,18 @@ export function proxy(request: NextRequest) {
 export const config = {
   matcher: [
     /*
-     * Semua route kecuali aset statis dan file internal Next.
+     * Route halaman saja. `/api/*` **wajib dikecualikan**.
+     *
+     * Middleware berjalan sebelum rewrite, jadi kalau `/api/v1/*` ikut
+     * dicakup, request API akan kena redirect ke halaman login dan
+     * membalas HTML. Akibatnya `fetch` di browser gagal parse JSON dan
+     * cookie `ida_session` tidak pernah sampai -- persis bug yang membuat
+     * login ditolak, padahal backend-nya sehat.
+     *
+     * API tidak butuh gate frontend: backend punya `/api/v1/auth/verify`
+     * dan `require_session`-nya sendiri, yang memeriksa `ida_session`.
+     * Dua lapis gate untuk hal yang sama justru hanya menambah tempat gagal.
      */
-    "/((?!_next/static|_next/image|favicon.ico|icon.svg|.*\\.png$|.*\\.svg$|robots.txt).*)",
+    "/((?!api/|_next/static|_next/image|favicon.ico|icon.svg|.*\\.png$|.*\\.svg$|robots.txt).*)",
   ],
 };

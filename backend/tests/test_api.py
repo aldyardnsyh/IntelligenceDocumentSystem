@@ -388,15 +388,28 @@ class TestChunks:
 
 class TestChat:
     async def test_tanya_dan_stream_sse(self, client: AsyncClient) -> None:
+        # Dokumen fokus dipakai, bukan SOP penuh. Alasannya: stub embedding
+        # (hashing trick) memberi skor cosine ~0.3 untuk SOP yang panjang,
+        # di bawah ambang produksi 0.5. Dokumen pendek dengan overlap tinggi
+        # memberi 0.78, sehingga test ini menguji *mekanisme* SSE dan sitasi
+        # lewat HTTP -- bukan kalibrasi threshold, yang sudah diuji di unit
+        # test dengan threshold eksplisit.
         upload = await client.post(
             "/api/v1/documents/upload",
-            files={"file": ("panduan.md", SAMPLE_DOCUMENT.encode("utf-8"), "text/markdown")},
+            files={
+                "file": (
+                    "fokus.md",
+                    "Penyelesaian permintaan membutuhkan dua hari. "
+                    "Penyelesaian permintaan dicatat segera.".encode("utf-8"),
+                    "text/markdown",
+                )
+            },
         )
         document_id = upload.json()["id"]
         await _wait_ready(client, document_id)
 
         response = await client.post(
-            "/api/v1/chat/query", json={"question": "berapa hari untuk penyelesaian"}
+            "/api/v1/chat/query", json={"question": "penyelesaian permintaan"}
         )
         assert response.status_code == 200
         assert response.headers["content-type"].startswith("text/event-stream")
@@ -421,9 +434,17 @@ class TestChat:
         assert "not_found" in [event["type"] for event in events]
 
     async def test_event_citations_bisa_dibaca_frontend(self, client: AsyncClient) -> None:
+        # Dokumen fokus, bukan SOP. Lihat penjelasan di test_tanya_dan_stream_sse.
         upload = await client.post(
             "/api/v1/documents/upload",
-            files={"file": ("panduan.md", SAMPLE_DOCUMENT.encode("utf-8"), "text/markdown")},
+            files={
+                "file": (
+                    "fokus.md",
+                    "Penyelesaian permintaan membutuhkan dua hari. "
+                    "Penyelesaian permintaan dicatat segera.".encode("utf-8"),
+                    "text/markdown",
+                )
+            },
         )
         await _wait_ready(client, upload.json()["id"])
         response = await client.post(
