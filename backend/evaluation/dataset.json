@@ -1,46 +1,57 @@
 [
   {
     "question": "Berapa lama batas waktu maksimal penyelesaian permintaan informasi?",
-    "ground_truth": "Batas waktu maksimal penyelesaian adalah dua hari kerja sejak permintaan dicatat."
+    "ground_truth": "Batas waktu maksimal penyelesaian adalah dua hari kerja sejak permintaan dicatat.",
+    "document_name": "contoh-sop-layanan.md"
   },
   {
     "question": "Siapa yang bertanggung jawab mencatat setiap permintaan?",
-    "ground_truth": "Receiving Officer wajib mencatat setiap permintaan pada Sistem Tiket dalam waktu paling lama satu jam kerja."
+    "ground_truth": "Receiving Officer wajib mencatat setiap permintaan pada Sistem Tiket dalam waktu paling lama satu jam kerja.",
+    "document_name": "contoh-sop-layanan.md"
   },
   {
     "question": "Apa yang dilakukan Receiving Officer saat berkas yang diterima belum lengkap?",
-    "ground_truth": "Bila berkas tidak lengkap, pemohon diberi pemberitahuan tertulis dalam tempo dua hari kerja."
+    "ground_truth": "Bila berkas tidak lengkap, pemohon diberi pemberitahuan tertulis dalam tempo dua hari kerja.",
+    "document_name": "contoh-sop-layanan.md"
   },
   {
     "question": "Kapan berkas yang lengkap diteruskan ke unit yang diminta?",
-    "ground_truth": "Berkas yang lengkap diteruskan ke unit yang diminta setelah verifikasi kelengkapan berkas."
+    "ground_truth": "Berkas yang lengkap diteruskan ke unit yang diminta setelah verifikasi kelengkapan berkas.",
+    "document_name": "contoh-sop-layanan.md"
   },
   {
     "question": "Permintaan informasi bisa masuk lewat jalur apa saja?",
-    "ground_truth": "Permintaan diterima melalui formulir elektronik atau loket fisik."
+    "ground_truth": "Permintaan diterima melalui formulir elektronik atau loket fisik.",
+    "document_name": "contoh-sop-layanan.md"
   },
   {
     "question": "Apakah prosedur ini berlaku untuk permintaan data pribadi pihak ketiga?",
-    "ground_truth": "Prosedur ini tidak berlaku untuk permintaan yang berkaitan dengan data pribadi pihak ketiga yang belum memperoleh persetujuan tertulis."
+    "ground_truth": "Prosedur ini tidak berlaku untuk permintaan yang berkaitan dengan data pribadi pihak ketiga yang belum memperoleh persetujuan tertulis.",
+    "document_name": "contoh-sop-layanan.md"
   },
   {
     "question": "Apa itu SLA Penyelesaian?",
-    "ground_truth": "SLA Penyelesaian adalah batas waktu maksimal penyelesaian permintaan, yaitu dua hari kerja sejak permintaan dicatat."
+    "ground_truth": "SLA Penyelesaian adalah batas waktu maksimal penyelesaian permintaan, yaitu dua hari kerja sejak permintaan dicatat.",
+    "document_name": "contoh-sop-layanan.md"
   },
   {
     "question": "Bagaimana hasil akhir permintaan disampaikan dan dicatat?",
-    "ground_truth": "Hasil akhir disampaikan kepada pemohon dan dicatat pada Sistem Tiket."
+    "ground_truth": "Hasil akhir disampaikan kepada pemohon dan dicatat pada Sistem Tiket.",
+    "document_name": "contoh-sop-layanan.md"
   },
   {
     "question": "Bagaimana cara uploading berkas ke sistem tiket?",
-    "ground_truth": "TIDAK ADA JAWABAN. Dokumen tidak membahas cara mengunggah berkas ke Sistem Tiket."
+    "ground_truth": "TIDAK ADA JAWABAN. Dokumen tidak membahas cara mengunggah berkas ke Sistem Tiket.",
+    "document_name": "contoh-sop-layanan.md"
   },
   {
     "question": "Berapa biaya pengajuan informasi layanan?",
-    "ground_truth": "TIDAK ADA JAWABAN. Dokumen tidak membahas biaya pengajuan informasi layanan."
+    "ground_truth": "TIDAK ADA JAWABAN. Dokumen tidak membahas biaya pengajuan informasi layanan.",
+    "document_name": "contoh-sop-layanan.md"
   },
   {
     "question": "Siapa kepala unit kerja yang menandatangani persetujuan?",
-    "ground_truth": "TIDAK ADA JAWABAN. Dokumen tidak membahas kepala unit yang menandatangani persetujuan."
+    "ground_truth": "TIDAK ADA JAWABAN. Dokumen tidak membahas kepala unit yang menandatangani persetujuan.",
+    "document_name": "contoh-sop-layanan.md"
   }
 ]

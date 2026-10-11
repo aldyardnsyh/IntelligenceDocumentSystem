@@ -6,13 +6,18 @@ Setiap langkah mencetak PASS/FAIL dan berhenti di kegagalan pertama.
 
 import contextlib
 import json
+import os
 import sys
 import time
 
 import httpx
 
-BASE = "http://127.0.0.1:3000"
-PASSCODE = "uji-e2e"
+BASE = os.environ.get("E2E_BASE_URL", "http://127.0.0.1:3000")
+# Passcode diambil dari env, bukan ditulis mati di sini. Nilai bawaan ini
+# hanya cocok kalau `.env` lokal dibuat dengan passcode yang sama; pada clone
+# baru `make_passcode` menghasilkan hash acak dan skrip ini akan selalu gagal
+# di langkah login tanpa memberi tahu cara memperbaikinya.
+PASSCODE = os.environ.get("E2E_PASSCODE", "uji-e2e")
 SAMPLE = (
     "# Panduan\n\nSLA Penyelesaian adalah batas waktu maksimal penyelesaian "
     "permintaan, yaitu dua hari kerja sejak permintaan dicatat.\n"
@@ -24,7 +29,7 @@ results: list[tuple[str, bool, str]] = []
 def check(name: str, ok: bool, detail: str = "") -> bool:
     results.append((name, ok, detail))
     mark = "PASS" if ok else "FAIL"
-    print(f"[{mark}] {name}" + (f" -- {detail}" if detail else ""))
+    print(f"[{mark}] {name}" + (f", {detail}" if detail else ""))
     return ok
 
 
@@ -43,6 +48,13 @@ def main() -> int:
         # 2. Login
         r = client.post("/api/v1/auth/verify", json={"passcode": PASSCODE})
         if not check("login 200", r.status_code == 200, r.text[:60]):
+            if r.status_code == 401:
+                print(
+                    f"\nHint: passcode skrip ini adalah {PASSCODE!r}. "
+                    "Cocokkan dengan ACCESS_PASSCODE_SHA256 di backend/.env, "
+                    "atau jalankan dengan E2E_PASSCODE=<passcode>.",
+                    file=sys.stderr,
+                )
             return 1
         token = client.cookies.get("ida_session")
         if not check("cookie ida_session diterbitkan", bool(token)):
@@ -64,7 +76,7 @@ def main() -> int:
             return 1
 
         # 4. Gerbang not_found: tanyakan saat indeks masih kosong. Tanpa satu
-        # pun kandidat, gate harus menolak -- pada threshold berapa pun. Ini
+        # pun kandidat, gate harus menolak, pada threshold berapa pun. Ini
         # membuktikan gate-nya bekerja pada kondisi yang pasti, tanpa
         # bergantung pada kalibrasi skor stub vs model asli.
         with client.stream(
@@ -90,7 +102,7 @@ def main() -> int:
                 return 1
 
         # 5. Upload dokumen fokus. Dipilih yang overlap-nya tinggi supaya lolos
-        # ambang produksi 0.5 bahkan dengan stub -- yang diuji di sini adalah
+        # ambang produksi 0.5 bahkan dengan stub, yang diuji di sini adalah
         # pipeline ujung-ke-ujung pada pengaturan default, bukan kalibrasi.
         doc_text = (
             "Penyelesaian permintaan membutuhkan dua hari. "
@@ -134,10 +146,72 @@ def main() -> int:
         if not check("event done ada", "done" in types):
             return 1
 
-        # 8. (Dihapus: dulu menguji not_found dengan pertanyaan asing pada
-        # threshold 0. Itu tidak valid -- threshold 0 menerima apa pun yang
-        # punya satu tabrakan hash. not_found sudah diuji pada langkah 4
-        # dengan indeks kosong, yang pasti benar pada threshold berapa pun.)
+        # 8. Guardrail: pertanyaan di luar dokumen.
+        #    Mode ketat (default API) harus menolak; dengan izin, LLM harus
+        #    menjawab dan menandai jawabannya `ungrounded` TANPA sitasi.
+        with client.stream(
+            "POST", "/api/v1/chat/query",
+            json={"question": "berapa harga tiket bioskop di jakarta?"},
+        ) as r:
+            types = set()
+            for line in r.iter_lines():
+                if line.startswith("data:") and line.strip() != "data: [DONE]":
+                    with contextlib.suppress(json.JSONDecodeError):
+                        types.add(json.loads(line[5:].strip()).get("type", "?"))
+        if not check(
+            "luar konteks ditolak di mode ketat",
+            "not_found" in types,
+            f"events={sorted(types)}",
+        ):
+            return 1
+
+        with client.stream(
+            "POST", "/api/v1/chat/query",
+            json={
+                "question": "berapa harga tiket bioskop di jakarta?",
+                "allow_ungrounded": True,
+            },
+        ) as r:
+            types = set()
+            for line in r.iter_lines():
+                if line.startswith("data:") and line.strip() != "data: [DONE]":
+                    with contextlib.suppress(json.JSONDecodeError):
+                        types.add(json.loads(line[5:].strip()).get("type", "?"))
+        if not check(
+            "luar konteks dijawab + dilabeli",
+            "ungrounded" in types and "token" in types and "not_found" not in types,
+            f"events={sorted(types)}",
+        ):
+            return 1
+        if not check("jawaban tanpa dokumen tidak bersitasi", "citations" not in types):
+            return 1
+
+        # 8b. Chat privat per dokumen: sesi menyimpan scope-nya.
+        with client.stream(
+            "POST", "/api/v1/chat/query",
+            json={"question": "penyelesaian permintaan", "document_id": doc_id},
+        ) as r:
+            session_id = None
+            for line in r.iter_lines():
+                if line.startswith("data:") and line.strip() != "data: [DONE]":
+                    with contextlib.suppress(json.JSONDecodeError):
+                        event = json.loads(line[5:].strip())
+                        if event.get("type") == "session":
+                            session_id = event.get("session_id")
+        history = client.get(f"/api/v1/chat/{session_id}/history")
+        if not check(
+            "sesi menyimpan scope dokumen",
+            history.status_code == 200
+            and history.json()["session"].get("document_id") == doc_id,
+        ):
+            return 1
+
+        r = client.post(
+            "/api/v1/chat/query",
+            json={"question": "apa isinya?", "document_id": "doc_tidak_ada"},
+        )
+        if not check("scope dokumen tak dikenal ditolak", r.status_code == 404, r.text[:80]):
+            return 1
 
         # 9. Analitik terisi dari log nyata
         r = client.get("/api/v1/analytics/summary")

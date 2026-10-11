@@ -15,7 +15,7 @@ Lihat ``evaluation/dataset.json`` untuk formatnya.
 Kenapa default provider-nya LLM: RAGAS menilai faithfulness dengan
 meminta LLM lain menilai apakah jawaban benar-benar bersandar pada konteks.
 Tanpa LLM, metric-nya hanya keyword overlap yang tidak mengukur apa pun tentang
-hallusinasi -- persis hal yang paling ingin diukur.
+hallusinasi, persis hal yang paling ingin diukur.
 """
 
 from __future__ import annotations
@@ -24,15 +24,17 @@ import argparse
 import asyncio
 import json
 import logging
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
 
 from app.core.config import get_settings
+from app.dependencies import _index_entries
 from app.providers.base import build_fallback_chain
 from app.repositories.sqlite_repo import SqliteRepository, new_id, utc_now
 from app.services.generation.generator import LLMChain
-from app.services.ingestion.service import build_ingestion_service
+from app.services.ingestion.service import IngestionService, build_ingestion_service
 from app.services.memory.store import InMemoryStore
 from app.services.rag_service import RagService
 
@@ -67,7 +69,7 @@ async def collect_answers(
 
     Konteks yang diteruskan ke RAGAS diambil dari event sitasi, bukan dari
     prompt. Yang dinilai seharusnya "apa yang sebenarnya dilihat model", bukan
-    "apa yang kita karang ulang di sini" -- kalau berbeda, metriknya
+    "apa yang kita karang ulang di sini", kalau berbeda, metriknya
     mengukur sistem yang salah.
     """
     rows: list[dict[str, Any]] = []
@@ -77,10 +79,13 @@ async def collect_answers(
 
         answer_parts: list[str] = []
         contexts: list[str] = []
+        not_found = False
         try:
             async for event in rag.answer(question, None, item.get("document_ids")):
                 if event.type == "token":
                     answer_parts.append(str(event.value))
+                elif event.type == "not_found":
+                    not_found = True
                 elif event.type == "citations":
                     contexts = [
                         f"{getattr(c, 'document_name', '')} "
@@ -97,11 +102,59 @@ async def collect_answers(
             {
                 "question": question,
                 "ground_truth": item["ground_truth"],
+                # Penolakan menjawab adalah perilaku yang harus dinilai, jadi
+                # jawaban "tidak ditemukan" ikut disimpan utuh. Versi lama
+                # mengambil nilai dari `value` yang tidak ada di event ini
+                # sehingga barisnya selalu kosong.
                 "answer": "".join(answer_parts),
                 "contexts": contexts,
+                # Label dataset: TIDAK ADA JAWABAN berarti sistem wajib
+                # menjawab "tidak ditemukan".
+                "expect_not_found": _expects_not_found(item),
+                "not_found": not_found,
             }
         )
     return rows
+
+
+#: Nilai `ground_truth` yang menandai pertanyaan tanpa jawaban.
+_NO_ANSWER_MARKERS = ("tidak ada", "no answer", "n/a")
+
+
+def _expects_not_found(item: dict[str, Any]) -> bool:
+    """Apakah pertanyaan ini wajib dijawab "tidak ditemukan"?
+
+    Label eksplisit di dataset selalu menang. Tanpa itu, pencocokan teks
+    `ground_truth` dipakai sebagai cadangan, dan pencocokan substring
+    menyesatkan: jawaban sah yang diawali "Tidak ada bukti bahwa..." akan
+    ikut terklasifikasi sebagai kasus tanpa jawaban, lalu dibuang dari skor.
+    """
+    explicit = item.get("has_answer")
+    if isinstance(explicit, bool):
+        return not explicit
+    truth = str(item.get("ground_truth", "")).strip().lower()
+    return any(marker in truth for marker in _NO_ANSWER_MARKERS)
+
+
+def report_refusal(rows: list[dict[str, Any]]) -> dict[str, int]:
+    """Hitung seberapa sering sistem menolak menjawab dengan benar.
+
+    Ini metrik yang paling penting di sistem ini, dan selama ini tidak pernah
+    dihitung: baris "harus tidak ditemukan" justru dibuang dari skor RAGAS
+    karena konteksnya kosong, sehingga kemampuan menolak menjawab, kemampuan
+    yang paling menentukan apakah sistem boleh dipercaya, tidak pernah
+    tervalidasi.
+    """
+    summary = {"expected": 0, "refused": 0, "leaked": 0}
+    for row in rows:
+        if not row.get("expect_not_found"):
+            continue
+        summary["expected"] += 1
+        if row.get("not_found"):
+            summary["refused"] += 1
+        else:
+            summary["leaked"] += 1
+    return summary
 
 
 def score_with_ragas(rows: list[dict[str, Any]]) -> dict[str, float | None]:
@@ -109,33 +162,51 @@ def score_with_ragas(rows: list[dict[str, Any]]) -> dict[str, float | None]:
 
     Ragas dan dependensinya bersifat opsional (`pip install -e ".[evaluation]"`).
     Kalau belum terpasang, fungsi ini mengembalikan None untuk semua metric dan
-    Explain kenapa -- bukan angka placeholder yang terlihat seperti hasil
+    Explain kenapa, bukan angka placeholder yang terlihat seperti hasil
     pengukuran sungguhan.
     """
     try:
         from datasets import Dataset
         from ragas import evaluate
         from ragas.metrics import (
-            answer_relevance,
+            answer_relevancy,
             context_precision,
             faithfulness,
         )
-    except ImportError:
+    except ImportError as exc:
         logger.warning(
-            "RAGAS belum terpasang. Jalankan: pip install -e \".[evaluation]\""
+            "RAGAS belum terpasang atau versinya tidak cocok (%s). "
+            "Jalankan: pip install -e \".[evaluation]\"",
+            exc,
         )
-        return {"faithfulness": None, "context_precision": None, "answer_relevance": None}
+        return {"faithfulness": None, "precision": None, "answer_relevance": None}
 
     # Ragas menolak baris kosong; baris seperti itu akan gagal diam-diam
-    # kalau tidak difilter lebih dulu.
-    usable = [row for row in rows if row["answer"] and row["contexts"]]
+    # kalau tidak difilter lebih dulu. Baris "tidak ditemukan" juga dikecualikan
+    # di sini, tidak ada konteks untuk dinilai, dan ketidakhadirannya sudah
+    # dihitung lewat `report_refusal`.
+    usable = [
+        row
+        for row in rows
+        if row["answer"] and row["contexts"] and not row.get("expect_not_found")
+    ]
     if not usable:
         logger.warning("Tidak ada baris yang bisa dinilai (jawaban atau konteks kosong).")
-        return {"faithfulness": None, "context_precision": None, "answer_relevance": None}
+        return {"faithfulness": None, "precision": None, "answer_relevance": None}
 
     dataset = Dataset.from_list(
         [
             {
+                # Ragas 0.2 mengganti nama kolomnya. Skrip ini dipasang lewat
+                # `pip install -e ".[evaluation]"` yang mengikat versi
+                # terbaru, jadi nama lama hanya menghasilkan KeyError yang
+                # tidak menjelaskan apa pun.
+                "user_input": row["question"],
+                "response": row["answer"],
+                "reference": row["ground_truth"],
+                "retrieved_contexts": row["contexts"],
+                # Kolom lama tetap diisi agar Ragas versi 0.1 (jika terpasang)
+                # tidak langsung menolak barisnya.
                 "question": row["question"],
                 "answer": row["answer"],
                 "ground_truth": row["ground_truth"],
@@ -145,40 +216,101 @@ def score_with_ragas(rows: list[dict[str, Any]]) -> dict[str, float | None]:
         ]
     )
 
-    result = evaluate(
-        dataset,
-        metrics=[faithfulness, context_precision, answer_relevance],
-    )
+    try:
+        result = evaluate(
+            dataset,
+            metrics=[faithfulness, context_precision, answer_relevancy],
+        )
+    except Exception:  # noqa: BLE001
+        # Kegagalan di dalam Ragas (LLM evaluator tidak dikonfigurasi,
+        # versi tidak cocok, API error) harus muncul sebagai pesan, bukan
+        # traceback yang membuat pengguna mengira sistemnya yang rusak.
+        logger.exception("RAGAS gagal dijalankan.")
+        print(
+            "RAGAS gagal dijalankan. Penyebab paling umum: LLM evaluator belum "
+            "dikonfigurasi (set OPENAI_API_KEY atau LLM_API_KEY sesuai versi "
+            "ragas yang terpasang).",
+            file=sys.stderr,
+        )
+        return {"faithfulness": None, "precision": None, "answer_relevance": None}
 
     def _value(metric_name: str) -> float | None:
+        item = result.get(metric_name) if hasattr(result, "get") else None
+        if item is None:
+            return None
+        # Ragas >= 0.2 membalikkan dict per metrik dengan kunci `score`;
+        # versi lama mengembalikan float biasa.
+        raw = item.get("score") if isinstance(item, dict) else item
         try:
-            return float(result[metric_name])
-        except (KeyError, TypeError, ValueError):
+            return float(raw)
+        except (TypeError, ValueError):
             return None
 
     return {
         "faithfulness": _value("faithfulness"),
-        "context_precision": _value("context_precision"),
-        "answer_relevance": _value("answer_relevance"),
+        # `context_precision` disimpan ke kolom `precision`. Versi lama
+        # mengirim key `context_precision` apa adanya, sementara repository
+        # membaca `run.get("precision")`, jadi kolomnya selalu NULL dan
+        # metrik retrieval yang paling relevan tidak pernah muncul di analitik.
+        "precision": _value("context_precision"),
+        "answer_relevance": _value("answer_relevancy"),
     }
+
+
+def _evaluation_repository(settings: object) -> SqliteRepository:
+    """Repository sementara berisi salinan database aplikasi.
+
+    Evaluasi menjawab setiap pertanyaan dataset melalui pipeline penuh, dan
+    pipeline itu memang menulis sesi serta log query. Kalau itu terjadi di
+    database yang sedang dipakai aplikasi, satu run evaluasi mengisi sidebar
+    dengan puluhan sesi palsu dan mengotori analitik pengguna.
+
+    Karena itu database produksi disalin ke berkas sementara lebih dulu.
+    Kegagalan membaca corpus berarti tidak ada yang bisa dinilai, jadi
+    menyalin lebih baik daripada menulis ke data yang salah.
+    """
+    source = Path(settings.sqlite_fallback_path)  # type: ignore[attr-defined]
+    if not source.exists():
+        raise SystemExit(
+            f"Database tidak ditemukan: {source}. Jalankan `python -m scripts.seed_demo` dulu."
+        )
+    target = source.with_name(source.stem + ".evaluasi.db")
+    shutil.copy2(source, target)
+    logger.info("Evaluasi memakai salinan database: %s", target)
+    return SqliteRepository(str(target))
+
+
+def _rebuild_index(ingestion: IngestionService, repository: SqliteRepository) -> int:
+    """Bangun ulang indeks retrieval dari metadata yang sudah tersimpan.
+
+    Fungsi sinkron karena dipanggil lewat ``asyncio.to_thread``: I/O SQLite
+    dan iterasi BM25 cukup berat untuk memblokir event loop.
+    """
+    return ingestion.retriever.rebuild(_index_entries(repository))
 
 
 async def run(dataset_path: Path, *, dry_run: bool) -> int:
     settings = get_settings()
 
-    repository: SqliteRepository
-    if settings.is_sqlite_mode:
-        repository = SqliteRepository(settings.sqlite_fallback_path)
-    else:
-        from app.repositories.supabase_repo import SupabaseRepository  # noqa: PLC0415
-
-        repository = SupabaseRepository(settings)
+    # Evaluasi memakai salinan database, bukan database yang sedang dipakai
+    # aplikasi. Satu run menulis sesi dan query log untuk setiap pertanyaan;
+# kalau ditulis langsung ke DB produksi, sidebar pengguna terisi puluhan sesi
+    # palsu dan tabel analitik ikut tercemar.
+    repository = _evaluation_repository(settings)
 
     memory = InMemoryStore()
-    chain = LLMChain(build_fallback_chain(settings))
+    chain = LLMChain(build_fallback_chain(settings), max_retries=settings.llm_max_retries)
     # Ingestion di sini hanya untuk membangun indeks; dokumen sudah ada dari
     # pemakaian sebelumnya.
     ingestion = build_ingestion_service(settings, repository, memory)
+
+    # Indeks kata dan metadata chunk harus dibangun ulang dari metadata yang
+    # tersimpan. Tanpa ini `retrieve()` membuang semua hit vektor yang
+    # entry-nya kosong, jadi seluruh baris evaluasi dijawab "tidak ditemukan"
+    # tanpa satu pun error yang menunjuk penyebabnya.
+    rebuilt = await asyncio.to_thread(_rebuild_index, ingestion, repository)
+    logger.info("Indeks retrieval dipulihkan: %d chunk.", rebuilt)
+
     rag = RagService(
         settings,
         repository,
@@ -194,6 +326,16 @@ async def run(dataset_path: Path, *, dry_run: bool) -> int:
     for row in rows:
         if not row["answer"]:
             logger.warning("Jawaban kosong untuk: %s", row["question"])
+
+    refusal = report_refusal(rows)
+    if refusal["expected"]:
+        print(
+            "Penolakan menjawab: "
+            f"{refusal['refused']}/{refusal['expected']} ditolak dengan benar, "
+            f"{refusal['leaked']} justru dijawab."
+        )
+    else:
+        print("Dataset tidak memuat pertanyaan 'tidak ada jawaban'.")
 
     if dry_run:
         print(json.dumps(rows, ensure_ascii=False, indent=2))
@@ -211,9 +353,20 @@ async def run(dataset_path: Path, *, dry_run: bool) -> int:
         )
         print(f"Skor tersimpan: {scores}")
     else:
-        print("RAGAS tidak terpasang, jadi tidak ada skor yang disimpan.")
+        print("RAGAS tidak terpasang atau tidak bisa dipakai, jadi tidak ada skor.")
         print("Jalankan: pip install -e \".[evaluation]\"")
+        print("RAGAS juga butuh evaluator LLM/embedding sendiri (mis. OPENAI_API_KEY).")
 
+    # Penolakan menjawab adalah kegagalan paling mahal di sistem ini, jadi
+    # kemunculannya yang menentukan exit code, bukan skor yang tidak pernah
+    # dihitung.
+    if refusal["leaked"]:
+        print(
+            f"PERINGATAN: {refusal['leaked']} pertanyaan tanpa jawaban tetap dijawab. "
+            "Artinya sistem mengarang saat tidak tahu.",
+            file=sys.stderr,
+        )
+        return 1
     return 0
 
 

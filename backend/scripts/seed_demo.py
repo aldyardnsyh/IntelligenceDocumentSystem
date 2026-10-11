@@ -2,7 +2,7 @@
 
 Portofolio yang dibuka pertama kali dalam keadaan kosong terlihat rusak,
 padahal sistemnya sehat. Skrip ini mengunggah satu SOP contoh supaya pengunjung
-langsung bisa bertanya dan melihat sitasi bekerja -- tanpa harus paham dulu
+langsung bisa bertanya dan melihat sitasi bekerja, tanpa harus paham dulu
 cara upload dokumen.
 
 Idempoten: aman dijalankan berulang. Kalau dokumen contoh sudah ada (dicek
@@ -93,7 +93,7 @@ async def run() -> int:
 
         await ingestion.wait_pending()
 
-        # Baca ulang statusnya. Kalau gagal, laporkan pesannya -- jangan
+        # Baca ulang statusnya. Kalau gagal, laporkan pesannya, jangan
         # diam-diam mengklaim berhasil padahal ingestion-nya error.
         if isinstance(repository, SqliteRepository):
             final = repository.get_document(document.id)

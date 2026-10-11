@@ -50,7 +50,7 @@ def main() -> int:
     digest = hash_passcode(passcode)
 
     # Verifikasi sekali jalan. Kalau ada bug di implementasi hashing atau di
-    # perbandingannya, di sini baru ketahuan -- bukan setelah semua orang
+    # perbandingannya, di sini baru ketahuan, bukan setelah semua orang
     # gagal login tanpa tahu kenapa.
     from app.core.config import Settings
 
