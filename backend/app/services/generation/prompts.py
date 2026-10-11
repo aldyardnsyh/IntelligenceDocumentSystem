@@ -54,7 +54,7 @@ Aturan tanda baca:
 13. Jangan memakai tanda hubung untuk menyambung klausa. Tanda hubung hanya
     untuk kata ulang dan kata majemuk seperti "dua hari kerja"."""
 
-#: Dikirim kalau retrieval tidak menemukan yang cukup. Perigten ini
+#: Dikirim kalau retrieval tidak menemukan yang cukup. Peringatan ini
 #: dikirim SEBELUM memanggil LLM, jadi tidak ada panggilan model yang bisa
 #: mengarang jawaban dari konteks kosong.
 NOT_FOUND_RESPONSE = (
