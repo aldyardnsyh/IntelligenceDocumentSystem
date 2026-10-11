@@ -1,5 +1,25 @@
 # Intelligent Document Assistant
 
+<!-- Stack teknologi. Versinya disamakan dengan pyproject.toml dan
+     package.json, jadi badge ini ikut berubah saat dependency diperbarui. -->
+[![Next.js](https://img.shields.io/badge/Next.js-16.3.7-000000?logo=nextdotjs&logoColor=white)](https://nextjs.org)
+[![React](https://img.shields.io/badge/React-19.2-61DAFB?logo=react&logoColor=black)](https://react.dev)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-4-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.116+-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)](https://www.python.org)
+[![ChromaDB](https://img.shields.io/badge/ChromaDB-0.6+-FF6B35)](https://www.trychroma.com)
+[![SQLite](https://img.shields.io/badge/SQLite-metadata-003B57?logo=sqlite&logoColor=white)](https://www.sqlite.org)
+[![Groq](https://img.shields.io/badge/Groq-LLM-F55036)](https://groq.com)
+[![Ollama](https://img.shields.io/badge/Ollama-fallback-000000?logo=ollama&logoColor=white)](https://ollama.com)
+
+<!-- Status kualitas. Angkanya berasal dari perintah di bagian verifikasi,
+     bukan klaim. -->
+[![pytest](https://img.shields.io/badge/pytest-420_passed-0A9EDC?logo=pytest&logoColor=white)](#verifikasi-dan-pengujian)
+[![Playwright](https://img.shields.io/badge/Playwright-39_specs-2EAD33?logo=playwright&logoColor=white)](#verifikasi-dan-pengujian)
+[![coverage](https://img.shields.io/badge/coverage-83%25-4C1)](#verifikasi-dan-pengujian)
+[![Lisensi](https://img.shields.io/badge/lisensi-PSHT-blue)](LICENSE.md)
+
 Asisten tanya jawab untuk dokumen pribadi Anda. Unggah berkas PDF, TXT, atau
 Markdown, lalu ajukan pertanyaan dalam Bahasa Indonesia dan dapatkan jawaban
 yang disertai sumber yang bisa diklik.
@@ -43,6 +63,7 @@ Tiga aturan yang menjaga sistem ini bisa dipercaya:
 - [Verifikasi dan pengujian](#verifikasi-dan-pengujian)
 - [Deployment ke server](#deployment-ke-server)
 - [Struktur proyek](#struktur-proyek)
+- [Kualitas dan pengujian](#kualitas-dan-pengujian)
 - [Keputusan teknis penting](#keputusan-teknis-penting)
 - [Lisensi](#lisensi)
 
@@ -296,18 +317,31 @@ Dua hal yang wajib dilakukan sebelum `docker compose up`:
 
 ```
 frontend/             Next.js 16 + React 19 + Tailwind v4 (9 halaman)
+frontend/e2e/         39 skenario Playwright
+frontend/scripts/     Pembuat favicon dari logo aplikasi
 backend/              FastAPI + ChromaDB + SQLite + Groq atau Ollama
 backend/samples/      Tiga dokumen contoh untuk uji manual
 backend/evaluation/   Golden dataset untuk mengukur kualitas retrieval
-Design/               Mockup referensi (11 layar)
-PRD-SRS_*.md          Spesifikasi kebutuhan, sumber kebenaran fungsional
+backend/scripts/      Seed, reindex, uji ujung ke ujung, evaluasi RAGAS
 API-CONTRACT.md       Kontrak endpoint frontend dan backend
-design.md             Spesifikasi desain UI
-QA-REPORT.md          Hasil audit QA dan status perbaikannya
-BACKLOG.md            Target lanjutan, dengan alasan dan opsi perbaikan
-CARA-MENJALANKAN.md   Panduan menjalankan dan checklist pengujian manual
 LICENSE.md            Ketentuan lisensi
 ```
+
+## Kualitas dan pengujian
+
+Angka di badge atas bukan klaim, tapi hasil perintah berikut:
+
+| Pemeriksaan | Perintah | Hasil |
+|---|---|---|
+| Test backend | `python -m pytest` | 420 test, coverage 83% |
+| Lint backend | `python -m ruff check app tests scripts` | Bersih |
+| Tipe dan lint frontend | `npx tsc --noEmit; npm run lint` | Bersih |
+| Build frontend | `npm run build` | Sukses |
+| Uji browser | `npx playwright test` | 39 skenario |
+| Uji ujung ke ujung | `python -m scripts.e2e_check` | 20 pemeriksaan |
+
+Cara menjalankan semuanya ada di bagian
+[Verifikasi dan pengujian](#verifikasi-dan-pengujian).
 
 ## Keputusan teknis penting
 
