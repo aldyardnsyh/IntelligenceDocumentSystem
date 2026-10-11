@@ -40,6 +40,10 @@ class ProviderError(RuntimeError):
     berikutnya. 429 (kuota habis) retryable, karena itu memang kondisi
     sementara. 401 (API key salah) tidak retryable: provider berikutnya punya
     key sendiri, dan mencoba lagi hanya menambah lambat.
+
+    ``retry_after_seconds`` diisi dari header ``Retry-After`` kalau provider
+    mengirimkannya, sehingga rantai bisa menunggu tepat sebanyak yang diminta
+    server, bukan menebak dengan backoff buta.
     """
 
     def __init__(
@@ -48,10 +52,12 @@ class ProviderError(RuntimeError):
         *,
         retryable: bool = False,
         status_code: int | None = None,
+        retry_after_seconds: float | None = None,
     ) -> None:
         super().__init__(message)
         self.retryable = retryable
         self.status_code = status_code
+        self.retry_after_seconds = retry_after_seconds
 
 
 @runtime_checkable
@@ -87,7 +93,26 @@ def build_provider(settings: Settings) -> LLMProvider:
     provider_cls = _registry().get(settings.llm_provider)
     if provider_cls is None:
         raise ValueError(f"LLM_PROVIDER tidak dikenal: {settings.llm_provider}")
+    _guard_mock(settings, settings.llm_provider)
     return provider_cls(settings)  # type: ignore[return-value]
+
+
+def _guard_mock(settings: Settings, provider_name: str) -> None:
+    """Peringatan keras kalau provider mock dipakai di luar mode dev.
+
+    Provider mock menyalin cuplikan dokumen, bukan sintesis. Dari luar ia
+    terlihat identik: health ``ok``, jawaban muncul, sitasi lengkap. Yang
+    berbeda baru terasa saat kualitasnya diukur, jadi sistem harus tetap
+    boot, tapi operator harus diberi tahu lewat log dan health, bukan lewat
+    crash loop yang membuat masalah sebenarnya tidak terlihat.
+    """
+    if provider_name != "mock" or settings.debug:
+        return
+    logger.error(
+        "LLM_PROVIDER=mock dipakai saat DEBUG=false: jawaban yang muncul "
+        "adalah cuplikan dokumen, bukan sintesis LLM. Health akan melaporkan "
+        "mode reduced. Set LLM_PROVIDER=groq atau ollama untuk produksi."
+    )
 
 
 def build_fallback_chain(settings: Settings) -> list[LLMProvider]:
@@ -109,4 +134,6 @@ def build_fallback_chain(settings: Settings) -> list[LLMProvider]:
                 f"Pilihan yang tersedia: {', '.join(sorted(registry))}."
             )
         chain.append(provider_cls(settings))  # type: ignore[arg-type]
+    for provider in chain:
+        _guard_mock(settings, provider.name)
     return chain

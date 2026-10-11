@@ -2,33 +2,54 @@
 
 Modul ini menjawab: "setelah jawaban keluar, bisakah kita melihat kembali
 langkah apa yang diambil sistem untuk sampai ke sana?" Tanpa tracing, debugging
-kualitas RAG hanya bisa lewat log teks -- tidak ada yang mencatat prompt
+kualitas RAG hanya bisa lewat log teks, tidak ada yang mencatat prompt
 lengkap, konteks yang dipakai, dan provider mana yang akhirnya menjawab.
 
 Desainnya defensif berlapis:
 
 1. **Opsional penuh.** Kalau `langfuse` tidak terpasang atau
    `TRACING_ENABLED=0`, semua fungsi di sini menjadi no-op yang mengembalikan
-   `None`. Kode pemanggil tidak perlu `if` di setiap baris -- cukup teruskan
+   `None`. Kode pemanggil tidak perlu `if` di setiap baris, cukup teruskan
    hasilnya (yang mungkin `None`) ke log. Jejak yang mati tidak boleh
    mematikan jawaban.
 2. **Sinkron, di thread.** Langfuse SDK melakukan I/O jaringan. Semua
    pemanggilan dibungkus `asyncio.to_thread` oleh pemanggil, bukan di sini,
    supaya event loop tidak terblokir saat Langfuse lambat.
 3. **Gagal diam-diam tapi tercatat.** Kalau Langfuse down, query tetap jalan
-   dan hanya kehilangan jejaknya. Error-nya masuk log server -- bukan ke
+   dan hanya kehilangan jejaknya. Error-nya masuk log server, bukan ke
    pengguna, bukan juga ditelan tanpa jejak.
 """
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import os
 from dataclasses import dataclass, field
 from typing import Any
 
 from app.core.config import Settings
 
 logger = logging.getLogger(__name__)
+
+#: Panjang cuplikan yang dikirim. Kosong secara bawaan: cuplikan pertanyaan
+#: dan jawaban tetap keluar dari mesin, hanya dipotong saja.
+#: Nyalakan hanya kalau ini memang Langfuse milik sendiri.
+_PREVIEW_CHARS = int(os.environ.get("TRACING_INCLUDE_PREVIEW", "0") or 0)
+
+
+def _redact(text: str) -> str:
+    """Kirim bentuk teks, bukan isinya.
+
+    Pertanyaan dan jawaban bisa memuat data dokumen pengguna. Yang dibutuhkan
+    untuk debugging adalah "seperti apa pertanyaannya" dan "seberapa panjang
+    jawabannya", bukan isi lengkapnya.
+    """
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+    if _PREVIEW_CHARS <= 0:
+        return f"[{len(text)} chars sha256:{digest}]"
+    preview = " ".join(text.split())[:_PREVIEW_CHARS]
+    return f"[{len(text)} chars sha256:{digest}] {preview}"
 
 
 @dataclass(slots=True)
@@ -49,7 +70,7 @@ class Tracer:
 
     Dibuat sekali di `init_services` dan diteruskan ke `RagService`. Kalau
     tracing mati, instansinya tetap ada tapi semua method mengembalikan
-    `None` -- pemanggil tidak perlu tahu bedanya.
+    `None`, pemanggil tidak perlu tahu bedanya.
     """
 
     def __init__(self, settings: Settings) -> None:
@@ -70,8 +91,8 @@ class Tracer:
                 )
             except Exception as exc:  # noqa: BLE001
                 # SDK tidak terpasang atau kredensial salah. Tracing mati,
-                # aplikasi tetap jalan. Ini dicatat sebagai warning -- bukan
-                # error -- karena dari sudut pandang pengguna tidak ada yang
+                # aplikasi tetap jalan. Ini dicatat sebagai warning, bukan
+                # error, karena dari sudut pandang pengguna tidak ada yang
                 # rusak.
                 logger.warning("Langfuse tidak bisa dipakai (%s). Tracing dimatikan.", exc)
                 self._enabled = False
@@ -94,7 +115,12 @@ class Tracer:
         try:
             trace = self._client.trace(
                 name="rag-query",
-                input=question,
+                # Isi pertanyaan dan jawaban bisa memuat data dokumen pengguna,
+                # dan Langfuse adalah layanan pihak ketiga. Yang dikirim hanya
+                # bentuknya (panjang + hash). Isi teks hanya ikut kalau
+                # `TRACING_INCLUDE_PREVIEW` dinyalakan secara eksplisit,
+                # itu keputusan sadar, bukan default.
+                input=_redact(question),
                 session_id=session_id,
                 metadata=metadata or {},
             )
@@ -120,7 +146,7 @@ class Tracer:
             return
         try:
             trace.update(
-                output=answer[:4000],
+                output=_redact(answer[:4000]),
                 metadata={
                     "citations": citations,
                     "provider": provider_name,

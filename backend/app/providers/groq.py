@@ -19,7 +19,11 @@ import httpx
 
 from app.core.config import Settings
 from app.providers.base import ProviderError
-from app.providers.openai_compatible import _extract_full_text, _extract_token
+from app.providers.openai_compatible import (
+    _extract_full_text,
+    _extract_token,
+    _retry_after_seconds,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -34,10 +38,35 @@ class GroqProvider:
         self._api_key = settings.groq_api_key
         self._base_url = settings.groq_base_url.rstrip("/")
         self._model = settings.llm_model
+        self._shared: httpx.AsyncClient | None = None
 
     def is_configured(self) -> bool:
         """Groq butuh API key. Tanpa itu, provider ini dilewati diam-diam."""
         return bool(self._api_key)
+
+    async def _shared_client(self, timeout: float) -> httpx.AsyncClient:
+        """Klien HTTP yang dipakai bersama antar request.
+
+        Membuat klien baru tiap panggilan berarti handshake TLS baru tiap
+        kali. Pada free tier, biaya itu tidak kecil, dan tidak ada alasan
+        teknis untuk tidak memakai koneksi yang sama.
+        """
+        if self._shared is None:
+            self._shared = httpx.AsyncClient(
+                base_url=self._base_url,
+                headers={
+                    "authorization": f"Bearer {self._api_key}",
+                    "content-type": "application/json",
+                },
+                timeout=httpx.Timeout(timeout, connect=5.0),
+            )
+        return self._shared
+
+    async def aclose(self) -> None:
+        """Tutup klien bersama. Dipanggil saat shutdown aplikasi."""
+        if self._shared is not None:
+            await self._shared.aclose()
+            self._shared = None
 
     def _client(self, timeout: float) -> httpx.AsyncClient:
         return httpx.AsyncClient(
@@ -62,14 +91,18 @@ class GroqProvider:
             "stream": stream,
         }
 
-    def _classify(self, status_code: int) -> ProviderError:
+    def _classify(self, status_code: int, retry_after: float | None = None) -> ProviderError:
         if status_code == 429:
+            # 429 dari Groq bisa berarti batas per menit (RPM/TPM) atau batas
+            # harian. Menyebut "batas harian" untuk keduanya membuat operator
+            # salah mendiagnosis; indikator retry-after dibawa apa adanya dari provider.
+            detail = "atas permintaan provider" if retry_after else "atas kuota"
             return ProviderError(
-                "Groq free tier sudah mencapai batas harian. "
-                "Batas ini berlaku per organisasi dan tidak bertambah dengan API key baru. "
+                f"Groq membatasi laju permintaan, {detail}. "
                 "Rantai fallback akan mencoba provider berikutnya.",
                 retryable=True,
                 status_code=429,
+                retry_after_seconds=retry_after,
             )
         if status_code in (401, 403):
             return ProviderError(
@@ -99,16 +132,27 @@ class GroqProvider:
     async def stream(self, prompt: str, system: str | None = None) -> AsyncIterator[str]:
         payload = self._payload(prompt, system, stream=True)
         try:
-            async with (
-                self._client(self._settings.llm_timeout_seconds) as client,
-                client.post("/chat/completions", json=payload) as response,
-            ):
+            client = await self._shared_client(self._settings.llm_timeout_seconds)
+            # Klien bersama tidak boleh dipakai sebagai async context manager:
+            # keluar dari `async with` menutupnya, lalu pemakaian berikutnya
+            # melempar RuntimeError "Cannot reopen a client instance", yang
+            # artinya pertanyaan pertama berhasil dan semua berikutnya gagal.
+            # Yang ditutup di sini hanya objek respons.
+            response = await client.send(
+                client.build_request("POST", "/chat/completions", json=payload),
+                stream=True,
+            )
+            try:
                 if response.status_code != 200:
-                    raise self._classify(response.status_code)
+                    raise self._classify(
+                        response.status_code, _retry_after_seconds(response)
+                    )
                 async for line in response.aiter_lines():
                     token = _extract_token(line)
                     if token:
                         yield token
+            finally:
+                await response.aclose()
         except httpx.TimeoutException as exc:
             raise ProviderError("Groq tidak merespons dalam batas waktu.", retryable=True) from exc
         except httpx.HTTPError as exc:
@@ -117,13 +161,13 @@ class GroqProvider:
     async def complete(self, prompt: str, system: str | None = None) -> str:
         payload = self._payload(prompt, system, stream=False)
         try:
-            async with self._client(self._settings.llm_timeout_seconds) as client:
-                response = await client.post("/chat/completions", json=payload)
+            client = await self._shared_client(self._settings.llm_timeout_seconds)
+            response = await client.post("/chat/completions", json=payload)
         except httpx.TimeoutException as exc:
             raise ProviderError("Groq tidak merespons dalam batas waktu.", retryable=True) from exc
         except httpx.HTTPError as exc:
             raise ProviderError(f"Kesalahan jaringan ke Groq: {exc}", retryable=True) from exc
 
         if response.status_code != 200:
-            raise self._classify(response.status_code)
+            raise self._classify(response.status_code, _retry_after_seconds(response))
         return _extract_full_text(response.json())

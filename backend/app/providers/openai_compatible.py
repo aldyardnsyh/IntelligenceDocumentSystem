@@ -30,6 +30,7 @@ class OpenAICompatibleProvider:
         self._base_url = ""
         self._model = ""
         self._api_key: str | None = None
+        self._shared: httpx.AsyncClient | None = None
 
     def is_configured(self) -> bool:
         """Provider lokal selalu terkonfigurasi: tidak butuh API key.
@@ -39,6 +40,32 @@ class OpenAICompatibleProvider:
         fallback lanjut ke provider berikutnya.
         """
         return True
+
+    async def _client_async(self, timeout: float) -> httpx.AsyncClient:
+        """Klien yang dipakai bersama antar request.
+
+        Versi lama membuat ``AsyncClient`` baru untuk tiap panggilan, jadi tiap
+        request membuka koneksi TCP+TLS baru. Pada free tier dengan kuota
+        terbatas, ongkos handshake itu lebih besar daripada biaya permintaannya.
+
+        Klien disimpan per instance dan ditutup saat aplikasi berhenti.
+        """
+        if self._shared is None:
+            headers: dict[str, str] = {"content-type": "application/json"}
+            if self._api_key:
+                headers["authorization"] = f"Bearer {self._api_key}"
+            self._shared = httpx.AsyncClient(
+                base_url=self._base_url,
+                headers=headers,
+                timeout=httpx.Timeout(timeout, connect=5.0),
+            )
+        return self._shared
+
+    async def aclose(self) -> None:
+        """Tutup klien bersama. Dipanggil saat shutdown aplikasi."""
+        if self._shared is not None:
+            await self._shared.aclose()
+            self._shared = None
 
     def _client(self, timeout: float) -> httpx.AsyncClient:
         headers: dict[str, str] = {"content-type": "application/json"}
@@ -64,13 +91,14 @@ class OpenAICompatibleProvider:
         }
 
     @staticmethod
-    def _classify(status_code: int) -> ProviderError:
+    def _classify(status_code: int, retry_after: float | None = None) -> ProviderError:
         """Petakan status HTTP ke pesan yang bisa ditindaklanjuti."""
         if status_code == 429:
             return ProviderError(
                 "Provider sedang membatasi laju permintaan.",
                 retryable=True,
                 status_code=status_code,
+                retry_after_seconds=retry_after,
             )
         if status_code in (401, 403):
             return ProviderError(
@@ -101,16 +129,27 @@ class OpenAICompatibleProvider:
         payload = self._payload(prompt, system, stream=True)
 
         try:
-            async with (
-                self._client(self._settings.llm_timeout_seconds) as client,
-                client.post("/chat/completions", json=payload) as response,
-            ):
+            client = await self._client_async(self._settings.llm_timeout_seconds)
+            # Klien bersama tidak boleh dipakai sebagai async context manager:
+            # `__aexit__` menutupnya, dan `__aenter__` berikutnya melempar
+            # RuntimeError "Cannot reopen a client instance". Gejalanya sangat
+            # menyesatkan: pertanyaan pertama berhasil, semua berikutnya gagal.
+            # Yang ditutup di sini hanya objek respons, bukan kliennya.
+            response = await client.send(
+                client.build_request("POST", "/chat/completions", json=payload),
+                stream=True,
+            )
+            try:
                 if response.status_code != 200:
-                    raise self._classify(response.status_code)
+                    raise self._classify(
+                        response.status_code, _retry_after_seconds(response)
+                    )
                 async for line in response.aiter_lines():
                     token = _extract_token(line)
                     if token:
                         yield token
+            finally:
+                await response.aclose()
         except httpx.TimeoutException as exc:
             raise ProviderError(
                 "Provider tidak merespons dalam batas waktu.", retryable=True
@@ -133,8 +172,8 @@ class OpenAICompatibleProvider:
         payload["stream"] = False
 
         try:
-            async with self._client(self._settings.llm_timeout_seconds) as client:
-                response = await client.post("/chat/completions", json=payload)
+            client = await self._client_async(self._settings.llm_timeout_seconds)
+            response = await client.post("/chat/completions", json=payload)
         except httpx.TimeoutException as exc:
             raise ProviderError(
                 "Provider tidak merespons dalam batas waktu.", retryable=True
@@ -146,7 +185,7 @@ class OpenAICompatibleProvider:
             ) from exc
 
         if response.status_code != 200:
-            raise self._classify(response.status_code)
+            raise self._classify(response.status_code, _retry_after_seconds(response))
         return _extract_full_text(response.json())
 
 
@@ -180,6 +219,23 @@ class SGLangProvider(OpenAICompatibleProvider):
         super().__init__(settings)
         self._base_url = settings.sglang_base_url.rstrip("/")
         self._model = settings.sglang_model
+
+
+def _retry_after_seconds(response: httpx.Response) -> float | None:
+    """Baca header ``Retry-After`` kalau ada.
+
+    Tanpa ini, rantai hanya menebak kapan mencoba lagi. Provider yang memang
+    sedang membatasi laju tahu persis kapan kuotanya pulih, dan mengabaikannya
+    membuat percobaan ulang beruntun memperpanjang masalah.
+    """
+    raw = response.headers.get("retry-after")
+    if not raw:
+        return None
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        # Bentuk tanggal (HTTP-date) tidak diparse; backoff default yang dipakai.
+        return None
 
 
 def _extract_token(line: str) -> str:

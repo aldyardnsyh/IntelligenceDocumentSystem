@@ -22,7 +22,7 @@ import uuid
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from app.models.domain import (
     ChatSession,
@@ -31,6 +31,9 @@ from app.models.domain import (
     QueryLog,
     RetrievalSettings,
 )
+
+if TYPE_CHECKING:
+    from app.core.config import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +103,11 @@ class MetadataRepository(Protocol):
     def ping(self) -> bool: ...
 
 
+#: Batas baris yang dipindai saat menghitung agregasi harian. Dipakai di
+#: ``LIMIT`` SQL supaya permintaan dashboard tidak membaca seluruh tabel yang
+#: terus bertambah.
+_ANALYTICS_SCAN_LIMIT = 20_000
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS documents (
     id TEXT PRIMARY KEY,
@@ -126,6 +134,7 @@ CREATE INDEX IF NOT EXISTS idx_chunks_index ON chunks(document_id, chunk_index);
 CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
+    document_id TEXT,
     created_at TEXT NOT NULL,
     last_active_at TEXT NOT NULL,
     message_count INTEGER NOT NULL DEFAULT 0
@@ -161,12 +170,31 @@ class SqliteRepository:
 
     name = "sqlite"
 
-    def __init__(self, path: str) -> None:
+    def __init__(self, path: str, defaults: Settings | None = None) -> None:
         self._path = Path(path)
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
+        # Settings dipakai untuk nilai default saat baris belum ada. Diterima
+        # sebagai argumen, bukan dibaca dari env global: kalau dibaca dari
+        # env, aplikasi yang dibangun dengan Settings khusus (test, script,
+        # instance kedua) diam-diam memakai default instance lain.
+        self._defaults = defaults
         with self._connect() as connection:
             connection.executescript(_SCHEMA)
+            self._migrate(connection)
+
+    @staticmethod
+    def _migrate(connection: sqlite3.Connection) -> None:
+        """Tambah kolom baru pada database yang sudah ada.
+
+        `CREATE TABLE IF NOT EXISTS` tidak pernah menyentuh tabel yang sudah
+        dibuat, jadi kolom baru hanya ada di database baru. Tanpa migrasi
+        ini, `INSERT` yang menyebut kolom `document_id` gagal pada database
+        pengguna yang sudah berjalan, bukan error yang hilang sendiri.
+        """
+        columns = {row["name"] for row in connection.execute("PRAGMA table_info(sessions)")}
+        if "document_id" not in columns:
+            connection.execute("ALTER TABLE sessions ADD COLUMN document_id TEXT")
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self._path, check_same_thread=False)
@@ -306,14 +334,15 @@ class SqliteRepository:
         with self._lock, self._connect() as connection:
             connection.execute(
                 "INSERT OR REPLACE INTO sessions "
-                "(id, title, created_at, last_active_at, message_count) "
-                "VALUES (?, ?, ?, ?, ?)",
+                "(id, title, created_at, last_active_at, message_count, document_id) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
                 (
                     session.id,
                     session.title,
                     session.created_at,
                     session.last_active_at,
                     session.message_count,
+                    session.document_id,
                 ),
             )
 
@@ -358,19 +387,20 @@ class SqliteRepository:
     def get_settings(self) -> RetrievalSettings:
         """Baca parameter retrieval yang aktif.
 
-        Import di dalam fungsi, bukan di atas modul: nama modul
-        ``get_settings`` sama dengan nama method ini, dan import di atas akan
-        tertutupi oleh ``self`` sehingga ambigu.
+        Default diambil dari Settings instance ini kalau ada; env global hanya
+        upaya terakhir. Membaca env langsung membuat aplikasi yang dibangun
+        dengan Settings khusus (test, script, instance kedua) diam-diam
+        memakai default instance lain.
         """
-        from app.core.config import get_settings as load_settings
-
         with self._connect() as connection:
             rows = connection.execute("SELECT key, value FROM settings").fetchall()
         stored = {row["key"]: row["value"] for row in rows}
-        # Default diambil dari Settings, bukan ditulis ulang di sini. Nilai
-        # yang ditulis dua kali pasti akan berbeda suatu hari, dan saat itu
-        # tidak ada yang ingat mana yang benar.
-        defaults = load_settings()
+        if self._defaults is not None:
+            defaults = self._defaults
+        else:
+            from app.core.config import get_settings as load_settings
+
+            defaults = load_settings()
         return RetrievalSettings(
             top_k=int(stored.get("top_k", defaults.default_top_k)),
             similarity_threshold=float(
@@ -422,30 +452,44 @@ class SqliteRepository:
         return [_row_to_log(row) for row in rows], int(total)
 
     def latency_by_day(self, days: int) -> list[dict[str, object]]:
-        """Agregasi latensi per hari dari log yang benar-benar tercatat."""
+        """Agregasi latensi per hari dari log yang benar-benar tercatat.
+
+        Baris yang dipindai dibatasi dengan ``LIMIT`` di SQL, bukan dipotong
+        di Python. Versi lama memuat seluruh tabel ``query_logs`` ke memori
+        setiap kali dashboard dibuka, jadi biaya permintaan tumbuh seiring
+        pemakaian padahal yang dibutuhkan hanya ``days`` terakhir.
+        """
         with self._connect() as connection:
             rows = connection.execute(
                 "SELECT SUBSTR(created_at, 1, 10) AS day, response_time_ms "
-                "FROM query_logs ORDER BY day ASC"
+                "FROM query_logs ORDER BY day DESC LIMIT ?",
+                (_ANALYTICS_SCAN_LIMIT,),
             ).fetchall()
 
         buckets: dict[str, list[int]] = {}
         for row in rows:
             buckets.setdefault(row["day"], []).append(int(row["response_time_ms"]))
 
-        return [_latency_point(day, values) for day, values in list(buckets.items())[-days:]]
+        # Diurutkan ulang sebelum dipotong: query diambil DESC supaya yang
+        # terbaru masuk lebih dulu, dan dashboard ingin urutan kronologis.
+        return [_latency_point(day, values) for day, values in sorted(buckets.items())[-days:]]
 
     def tokens_by_day(self, days: int) -> list[dict[str, object]]:
         """Token usage yang dihitung dari log.
 
         Frontend menampilkan angka ini apa adanya, jadi backend harus
-        mengatakannya dengan jujur: ini estimasi dari panjang pertanyaan,
-        bukan jumlah token yang dilaporkan penyedia.
+        mengatakannya dengan jujur: ini estimasi dari panjang pertanyaan dan
+        jumlah sumber, bukan jumlah token yang dilaporkan penyedia. Angka tetap
+        tidak membuat estimasi berubah menjadi pengukuran.
+
+        Karena itu respons analitik menyertakan flag ``estimated`` supaya
+        frontend bisa menandainya, bukan memamerkannya sebagai fakta.
         """
         with self._connect() as connection:
             rows = connection.execute(
                 "SELECT SUBSTR(created_at, 1, 10) AS day, question, sources_count "
-                "FROM query_logs ORDER BY day ASC"
+                "FROM query_logs ORDER BY day DESC LIMIT ?",
+                (_ANALYTICS_SCAN_LIMIT,),
             ).fetchall()
 
         buckets: dict[str, dict[str, int]] = {}
@@ -459,7 +503,8 @@ class SqliteRepository:
             bucket["output_tokens"] += int(row["sources_count"]) * 480 + 180
 
         return [
-            {"date": day, **values} for day, values in list(buckets.items())[-days:]
+            {"date": day, **values, "estimated": True}
+            for day, values in sorted(buckets.items())[-days:]
         ]
 
     # ----------------------------------------------------------------- eval
@@ -539,7 +584,7 @@ def _row_to_chunk(row: sqlite3.Row) -> object:
 
     # `row.keys()` dipakai, bukan `in row`: `sqlite3.Row` mengimplementasikan
     # `keys()` dan `__getitem__`, tetapi `__contains__`-nya menguji nilai,
-    # bukan nama kolom -- jadi `in row` akan selalu salah untuk kolom string.
+    # bukan nama kolom, jadi `in row` akan selalu salah untuk kolom string.
     columns = set(row.keys())
 
     return Chunk(
@@ -561,12 +606,15 @@ def _row_to_chunk(row: sqlite3.Row) -> object:
 
 
 def _row_to_session(row: sqlite3.Row) -> ChatSession:
+    keys = row.keys()
     return ChatSession(
         id=row["id"],
         title=row["title"],
         created_at=row["created_at"],
         last_active_at=row["last_active_at"],
         message_count=int(row["message_count"] or 0),
+        # Kolom hanya ada setelah migrasi; baris lama dibaca sebagai sesi global.
+        document_id=row["document_id"] if "document_id" in keys else None,
     )
 
 

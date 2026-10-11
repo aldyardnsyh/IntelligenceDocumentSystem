@@ -234,7 +234,7 @@ class SupabaseRepository:
 
         Sengaja tidak dipaginasi: rebuild indeks butuh SELURUH corpus dalam
         satu-pass, bukan satu halaman. Aman untuk skala portofolio. Kalau
-        corpus tumbuh sampai ratusan ribu baris, ganti ke stream/cursor --
+        corpus tumbuh sampai ratusan ribu baris, ganti ke stream/cursor,
         memuat semuanya ke memori akan jadi masalah sebelum jadi lambat.
         """
         from app.models.domain import Chunk  # noqa: PLC0415

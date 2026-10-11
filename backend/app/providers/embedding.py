@@ -73,7 +73,7 @@ class HashingEmbeddingProvider:
             slot = int.from_bytes(digest[:4], "big") % self.dimension
             # Tanpa tanda: slot hanya menghitung kehadiran. Tanda acak justru
             # menambah varians yang menenggelamkan sinyal overlap pada teks
-            # pendek -- persis kondisi chunk dan pertanyaan.
+            # pendek, persis kondisi chunk dan pertanyaan.
             vector[slot] += 1.0
         norm = sum(value * value for value in vector) ** 0.5
         if norm == 0.0:
@@ -113,14 +113,39 @@ class SentenceTransformerEmbeddingProvider:
         self._model_name = settings.embedding_model
         self._model = SentenceTransformer(settings.embedding_model, device="cpu")
         self.dimension = int(settings.embedding_dimension)
+        # Prefix asimetris hanya milik keluarga E5. Model lain (bge,
+        # gte, MiniLM) dilatih tanpa prefix; menusuntiknya tidak menambah
+        # kualitas, hanya menggeser teks yang di-encode.
+        self._uses_e5_prefix = "e5" in settings.embedding_model.lower()
         self._lock = threading.Lock()
+
+        # Dimensi dicek untuk **semua** model, bukan hanya keluarga E5.
+        # Model non-E5 pun punya dimensi sendiri (bge-m3 1024, MiniLM 384),
+        # dan nilai default di konfigurasi hanya cocok untuk model yang
+        # dipakai saat ini. Salah dimensi membuat cosine similarity meledak
+        # dan retrieval kosong tanpa pesan yang menjelaskan penyebabnya.
+        probe = self._model.encode(
+            ["probe"] if not self._uses_e5_prefix else ["query: probe"],
+            normalize_embeddings=True,
+            show_progress_bar=False,
+            convert_to_numpy=True,
+        )
+        actual = int(probe[0].shape[0])
+        if actual != self.dimension:
+            raise ValueError(
+                f"{settings.embedding_model} menghasilkan {actual} dimensi, "
+                f"tidak {self.dimension}. Set EMBEDDING_DIMENSION={actual}."
+            )
 
     def _encode(self, texts: list[str], is_query: bool) -> list[list[float]]:
         # Model Model E5 dilatih dengan prefix asimetris: dokumen diberi
-        # "passage: " dan pertanyaan diberi "query: ". Menghilangan prefix ini
+        # "passage: " dan pertanyaan diberi "query: ". Menghapus prefix ini
         # menurunkan kualitas retrieval, jadi harus dijaga.
-        prefix = "query: " if is_query else "passage: "
-        prepared = [f"{prefix}{text}" for text in texts]
+        if self._uses_e5_prefix:
+            prefix = "query: " if is_query else "passage: "
+            prepared = [f"{prefix}{text}" for text in texts]
+        else:
+            prepared = list(texts)
         vectors = self._model.encode(
             prepared,
             batch_size=self._settings.embedding_batch_size,
@@ -143,21 +168,35 @@ class SentenceTransformerEmbeddingProvider:
 
 _provider_singleton: EmbeddingProvider | None = None
 _singleton_lock = threading.Lock()
+#: Kunci yang dipakai cache singleton. Model, dimensi, dan mode lokal ikut
+#: masuk karena semuanya mengubah vektor yang dihasilkan; tanpa itu, test atau
+#: reload konfigurasi diam-diam memakai provider milik konfigurasi lama.
+_singleton_key: tuple[str, int, bool] | None = None
+
+
+def embedding_provider_key(settings: Settings) -> tuple[str, int, bool]:
+    return (
+        settings.embedding_model,
+        int(settings.embedding_dimension),
+        settings.use_local_embedding,
+    )
 
 
 def build_embedding_provider(settings: Settings) -> EmbeddingProvider:
     """Bangun provider embedding, atau fallback kalau model tak tersedia."""
-    global _provider_singleton
+    global _provider_singleton, _singleton_key
 
-    if _provider_singleton is not None:
+    wanted = embedding_provider_key(settings)
+    if _provider_singleton is not None and _singleton_key == wanted:
         return _provider_singleton
 
     with _singleton_lock:
-        if _provider_singleton is not None:
+        if _provider_singleton is not None and _singleton_key == wanted:
             return _provider_singleton
 
         if not settings.use_local_embedding:
             _provider_singleton = HashingEmbeddingProvider(settings.embedding_dimension)
+            _singleton_key = wanted
             return _provider_singleton
 
         try:
@@ -166,7 +205,7 @@ def build_embedding_provider(settings: Settings) -> EmbeddingProvider:
         except Exception as exc:  # noqa: BLE001
             # Model gagal dimuat, misal offline atau paket belum terpasang.
             # Sistem tetap jalan dengan kualitas retrieval yang lebih rendah,
-            # dan health endpoint akan melaporkan hal ini.
+            # dan health endpoint melaporkan hal ini sebagai mode terbatas.
             logger.warning(
                 "Embedding model %s gagal dimuat (%s). "
                 "Memakai hashing fallback: retrieval hanya cocok untuk kata identik.",
@@ -174,11 +213,13 @@ def build_embedding_provider(settings: Settings) -> EmbeddingProvider:
                 exc,
             )
             _provider_singleton = HashingEmbeddingProvider(settings.embedding_dimension)
+        _singleton_key = wanted
         return _provider_singleton
 
 
 def reset_embedding_provider() -> None:
     """Bersihkan singleton. Dipakai test."""
-    global _provider_singleton
+    global _provider_singleton, _singleton_key
     with _singleton_lock:
         _provider_singleton = None
+        _singleton_key = None
