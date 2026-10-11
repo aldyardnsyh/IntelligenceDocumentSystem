@@ -237,8 +237,20 @@ dari riwayat.
 
 ```json
 // request
-{ "session_id": "ses_..." | null, "question": "apa isi klausul 14?" }
+{
+  "session_id": "ses_..." | null,
+  "question": "apa isi klausul 14?",
+  "document_id": "doc_..." | null,
+  "allow_ungrounded": false
+}
 ```
+
+| Field | Wajib? | Arti |
+| --- | --- | --- |
+| `session_id` | tidak | `null` = sesi baru; server yang membuat id-nya |
+| `question` | ya | 1-8000 karakter, tidak boleh kosong |
+| `document_id` | tidak | **scope dokumen**: kalau diisi, retrieval hanya mencari di dokumen itu (chat privat per dokumen). `404` kalau dokumen tidak ada, `409` kalau belum `ready` |
+| `allow_ungrounded` | tidak | `true` = kalau tidak ada konteks, LLM menjawab dari pengetahuan umum dengan label; `false` = mode ketat ("tidak ditemukan") |
 
 Jawaban berupa SSE. Setiap event dipisahkan baris kosong ganda, dan payload
 -nya adalah satu objek JSON pada baris `data:`.
@@ -261,6 +273,7 @@ data: {"type":"done","response_time_ms":1420}
 | `token` | ya | potongan teks. Frontend menempelkan apa adanya |
 | `citations` | kalau ada sumber | daftar sitasi untuk jawaban ini |
 | `not_found` | kalau di bawah ambang | menggantikan jawaban dengan pesan tidak ditemukan |
+| `ungrounded` | kalau mode longgar dipakai | dikirim **sebelum** token pertama: jawaban berikut datang dari pengetahuan umum model, bukan dari dokumen |
 | `done` | ya | penanda stream selesai |
 | `error` | kalau gagal | `{ "type":"error","message":"...","retry_after_seconds":30 }` |
 
@@ -269,6 +282,13 @@ Aturan yang tidak boleh dilanggar:
 - `not_found` dikirim **setelah** retrieval dan **sebelum** panggilan LLM
   (FR-2.3). Kalau `token` sudah sempat terkirim lalu ternyata `not_found`,
   jawabannya terlambat dihentikan.
+- `ungrounded` dikirim **sebelum** token pertama. Label yang datang setelah
+  jawaban sudah terbaca terlambat untuk mencegah salah paham.
+- Jawaban `ungrounded` **tidak boleh** disertai `citations`. Jawaban dari
+  pengetahuan umum tidak memakai sumber mana pun; menampilkan sumber di
+  bawahnya membuatnya terlihat bersumber.
+- Jawaban yang menolak ("tidak ditemukan") juga tidak dikirim bersama
+  `citations`, meski retrieval sempat meloloskan chunk.
 - `citations` berisi `document_name` dan `page_number`. `page_number` boleh
   `null` untuk berkas tanpa paginasi; frontend lalu menampilkan nomor chunk.
 - Setelah event `done`, stream ditutup.
@@ -281,13 +301,20 @@ Aturan yang tidak boleh dilanggar:
   "title": "pertanyaan pertama pengguna, dipotong 60 karakter",
   "created_at": "2026-09-29T02:20:00Z",
   "last_active_at": "2026-09-29T02:31:00Z",
-  "message_count": 6
+  "message_count": 6,
+  "document_id": "doc_..." | null
 }
 ```
 
-Urut `last_active_at` menurun. Hanya sesi yang masih hidup di Redis
-(FR-3.1, TTL default 1 jam). Sesi yang sudah kedaluwarsa tidak dikembalikan;
-frontend menampilkannya sebagai daftar kosong, bukan error.
+`document_id` adalah scope sesi: kalau terisi, sesi itu hanya mencari di
+dokumen tersebut (chat privat per dokumen); `null` berarti sesi lintas
+dokumen. Sesi lama yang dibuat sebelum fitur ini ada dibaca sebagai `null`,
+bukan error.
+
+Urut `last_active_at` menurun. Hanya sesi yang masih hidup di memory store
+(FR-3.1, TTL default 1 jam) yang dikembalikan; sesi yang sudah kedaluwarsa
+tidak dikembalikan dan frontend menampilkannya sebagai daftar kosong, bukan
+error.
 
 ### `GET /api/v1/chat/{session_id}/history`
 
@@ -296,10 +323,16 @@ frontend menampilkannya sebagai daftar kosong, bukan error.
   "session": { "...": "..." },
   "messages": [
     { "id": "msg_...", "role": "assistant", "content": "...",
-      "created_at": "...", "citations": [], "not_found": false }
+      "created_at": "...", "citations": [], "not_found": false,
+      "ungrounded": false }
   ]
 }
 ```
+
+`ungrounded: true` berarti jawaban itu datang dari pengetahuan umum model.
+Frontend **wajib** menampilkan labelnya, termasuk saat riwayat dibuka ulang --
+label yang hanya ada saat streaming dan hilang setelah reload membuat jawaban
+lama terlihat bersumber.
 
 Sesi tidak ada atau sudah kedaluwarsa: `404`. Frontend menampilkan
 `ErrorState`, bukan halaman kosong.
@@ -454,7 +487,7 @@ kesenjangan antara dua dashboard.
 ini harus menjawab dalam waktu pendek dan tidak boleh menyentuh LLM, karena
 dipakai monitor.
 
-Field `fallback` memberi tahu mode apa yang sedang aktif -- bukan sekadar
+Field `fallback` memberi tahu mode apa yang sedang aktif, bukan sekadar
 "sehat atau tidak". `mode: "reduced"` berarti salah satu komponen berjalan
 dalam mode fallback (misalnya vector store in-memory yang hilang saat
 restart), dan operator tidak boleh mengira data sudah persisten padahal belum.
