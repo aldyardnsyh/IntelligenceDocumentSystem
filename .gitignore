@@ -99,6 +99,11 @@ desktop.ini
 
 # Model embedding yang diunduh saat runtime. Ratusan MB, dan diunduh ulang
 # otomatis kalau hilang.
-models/
+#
+# Polanya HARUS berakar di direktori ini (`/models/`), bukan `models/`.
+# Tanpa garis miring di depan, pola itu juga mencocokkan
+# `backend/app/models/`, yaitu direktori kode sumber, dan seluruh model
+# domain ikut tidak ter-commit.
+/models/
 .cache/
-huggingface/
+/huggingface/
