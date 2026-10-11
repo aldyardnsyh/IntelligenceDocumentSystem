@@ -2,9 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 import { BarChart3, FileText, LogOut, MessageSquare, Settings } from "lucide-react";
 import { Logo, Wordmark } from "@/components/brand/logo";
 import { Button } from "@/components/ui/button";
+import { getHealth } from "@/lib/api";
 import { isMockMode } from "@/lib/api/config";
 
 /**
@@ -21,6 +23,19 @@ const NAV = [
 
 export function SiteHeader() {
   const pathname = usePathname();
+
+  // Status backend hanya dicek saat terhubung ke FastAPI sungguhan.
+  // Di mode demo, banner demo di bawah yang berlaku, bukan banner ini.
+  const health = useQuery({
+    queryKey: ["health"],
+    queryFn: ({ signal }) => getHealth(signal),
+    enabled: !isMockMode,
+    refetchInterval: 60_000,
+    retry: false,
+  });
+  const degraded = !isMockMode
+    && health.data
+    && (health.data.status === "degraded" || health.data.fallback?.mode === "reduced");
 
   return (
     // Blur dipakai di sini dan di sticky input chat, dua elemen yang memang
@@ -77,9 +92,21 @@ export function SiteHeader() {
 
       {isMockMode ? (
         <p className="border-t border-border bg-brand-wash px-4 py-1.5 text-center text-[12px] text-brand-ink">
-          Mode demo: retrieval berjalan di browser memakai fixture lokal. Isi
-          <code className="mx-1 font-mono">NEXT_PUBLIC_API_BASE_URL</code>
-          untuk menghubungkan backend FastAPI.
+          Mode demo: retrieval berjalan di browser memakai fixture lokal. Set
+          <code className="mx-1 font-mono">NEXT_PUBLIC_USE_BACKEND=1</code>
+          di <code className="font-mono">frontend/.env.local</code>, lalu restart
+          dev server, untuk menghubungkan backend FastAPI.
+        </p>
+      ) : null}
+      {degraded ? (
+        <p className="border-t border-border bg-warning/10 px-4 py-1.5 text-center text-[12px] text-warning-ink">
+          Backend berjalan dalam mode terbatas ({health.data?.fallback?.vector_store ?? "storage"}
+          {health.data?.fallback?.vector_store_persistent === false ? ", tidak persisten" : ""}).
+          Data bisa hilang saat restart, cek
+          <Link href="/analytics" className="mx-1 underline underline-offset-2 hover:no-underline">
+            analitik
+          </Link>
+          atau endpoint /api/v1/health.
         </p>
       ) : null}
     </header>

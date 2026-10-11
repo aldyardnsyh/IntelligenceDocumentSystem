@@ -1,8 +1,10 @@
 "use client";
 
+import { useEffect } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ApiError } from "@/lib/api/error";
+import { resetStaleBrowserState } from "@/lib/boot-reset";
 
 /**
  * Query client dibuat per render agar tidak dibagikan antar request server.
@@ -37,6 +39,14 @@ function getQueryClient() {
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const queryClient = getQueryClient();
+
+  // Satu kali per pemuatan halaman: kalau backend ternyata baru dijalankan
+  // ulang, sesi browser yang tersisa dibuang dan pengguna diminta masuk
+  // ulang. Sesi memori tidak bertahan melewati restart, jadi mempertahankan
+  // penanda login hanya membuat pengguna menemukan riwayat yang kosong.
+  useEffect(() => {
+    void resetStaleBrowserState();
+  }, []);
 
   return (
     <QueryClientProvider client={queryClient}>

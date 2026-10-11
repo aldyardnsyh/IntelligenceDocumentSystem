@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { CloudUpload, Loader2 } from "lucide-react";
 import { cn } from "cn";
 import { Button } from "@/components/ui/button";
@@ -25,6 +25,26 @@ export function UploadDropzone({ onSelect, busy = false, compact = false, classN
   const describedBy = useId();
 
   const acceptAttr = ACCEPTED_EXTENSIONS.join(",");
+
+  // Menyeret file di luar drop zone membuat browser membuka berkas itu dan
+  // mengganti seluruh halaman. State aplikasi (sesi, filter, hasil pencarian)
+  // ikut hilang. Pencegahan dilakukan di level window supaya berlaku di mana
+  // pun pointer-nya dilepas, bukan hanya di dalam drop zone.
+  useEffect(() => {
+    const prevent = (event: DragEvent) => {
+      event.preventDefault();
+    };
+    const preventNavigation = (event: DragEvent) => {
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "none";
+    };
+    window.addEventListener("dragover", prevent);
+    window.addEventListener("drop", preventNavigation);
+    return () => {
+      window.removeEventListener("dragover", prevent);
+      window.removeEventListener("drop", preventNavigation);
+    };
+  }, []);
 
   const handleFiles = useCallback(
     (files: FileList | null) => {

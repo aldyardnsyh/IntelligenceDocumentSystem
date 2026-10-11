@@ -4,8 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, ChevronLeft, ChevronRight, MessageSquareText, Search, Trash2, TriangleAlert } from "lucide-react";
-import { toast } from "sonner";
+import { ArrowLeft, ChevronLeft, ChevronRight, FileText, MessageSquareText, Search, Trash2, TriangleAlert } from "lucide-react";
+import { notify } from "@/lib/notify";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,8 +13,10 @@ import { ConfirmDialog } from "@/components/common/confirm-dialog";
 import { EmptyState } from "@/components/common/empty-state";
 import { ErrorState } from "@/components/common/error-state";
 import { LinkButton } from "@/components/common/link-button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ChunkListSkeleton } from "@/components/common/skeletons";
 import { ChunkList } from "@/components/documents/chunk-list";
+import { DocumentPreview } from "@/components/documents/document-preview";
 import { DocumentStatusBadge } from "@/components/documents/document-card";
 import { deleteDocument, getDocument, getDocumentChunks } from "@/lib/api";
 import { queryKeys } from "@/lib/queries";
@@ -28,18 +30,28 @@ export function DocumentDetailView() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const queryClient = useQueryClient();
-  const [search, setSearch] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [page, setPage] = useState(1);
-  const [confirmOpen, setConfirmOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const documentId = params.id;
   const highlightRaw = searchParams.get("chunk");
   const parsedHighlight = highlightRaw === null ? null : Number.parseInt(highlightRaw, 10);
-  const highlightChunkIndex = parsedHighlight !== null && !Number.isNaN(parsedHighlight)
-    ? parsedHighlight
-    : null;
+  const highlightChunkIndex =
+    parsedHighlight !== null && !Number.isNaN(parsedHighlight) ? parsedHighlight : null;
+
+  // Halaman awal dihitung dari `?chunk=`: sitasi menunjuk chunk yang bisa
+  // berada di halaman lain. Nilainya dipakai sebagai nilai AWAL state, bukan
+  // di-set lewat effect, `setState` di dalam effect memicu render berantai,
+  // dan pada halaman ini effect debounce di bawah juga menulis `page`,
+  // sehingga keduanya bisa saling memicu sampai halaman membeku.
+  const highlightPage =
+    highlightChunkIndex === null
+      ? 1
+      : Math.floor(highlightChunkIndex / CHUNKS_PER_PAGE) + 1;
+  const [page, setPage] = useState(highlightPage);
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const seenHighlightRef = useRef(highlightChunkIndex);
 
   // Pencarian didebounce 300ms supaya tidak memanggil server tiap ketikan,
   // dan filter dijalankan di server, bukan di atas seluruh daftar chunk.
@@ -52,6 +64,22 @@ export function DocumentDetailView() {
     }, 300);
     return () => clearTimeout(timer);
   }, [search]);
+
+  // Sitasi BARU saat komponen sudah ter-mount (URL berubah tanpa remount)
+  // tetap harus mengosongkan pencarian dan melompat ke halaman chunk-nya.
+  // Ditunda ke task berikutnya supaya tidak ada dua penulisan state berurutan
+  // di dalam satu body effect.
+  useEffect(() => {
+    if (highlightChunkIndex === null) return;
+    if (seenHighlightRef.current === highlightChunkIndex) return;
+    seenHighlightRef.current = highlightChunkIndex;
+    const timer = setTimeout(() => {
+      setSearch("");
+      setDebouncedSearch("");
+      setPage(Math.floor(highlightChunkIndex / CHUNKS_PER_PAGE) + 1);
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [highlightChunkIndex]);
 
   const document = useQuery({
     queryKey: queryKeys.document(documentId),
@@ -80,11 +108,15 @@ export function DocumentDetailView() {
     mutationFn: () => deleteDocument(documentId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.documents });
-      toast.success("Dokumen berhasil dihapus beserta indeksnya.");
+      notify.success(
+        "Dokumen dihapus",
+        "Seluruh chunk dan indeks vektornya ikut dibuang, jadi sitasi ke dokumen ini "
+          + "tidak akan muncul lagi.",
+      );
       router.push("/documents");
     },
     onError: (error) => {
-      toast.error(error instanceof ApiError ? error.message : "Dokumen gagal dihapus.");
+      notify.error(error instanceof ApiError ? error.message : "Dokumen gagal dihapus.")
     },
   });
 
@@ -223,6 +255,47 @@ export function DocumentDetailView() {
         ))}
       </dl>
 
+      {/*
+        Dua cara melihat dokumen yang sama, dan keduanya menjawab pertanyaan
+        berbeda:
+
+        - "Pratinjau isi": teks berurutan seperti di dokumen aslinya. Dipakai
+          untuk cross-check apakah jawaban chat benar.
+        - "Chunk hasil ingestion": bagaimana dokumen dipecah, beserta posisi
+          karakter tiap potongan. Dipakai untuk memeriksa kualitas chunking.
+
+        Sebelumnya hanya ada chunk. Daftar chunk tidak bisa dipakai menilai
+        jawaban chat karena potongannya terpisah-pisah dan konteks di
+        sekitarnya tidak terlihat.
+      */}
+      <Tabs defaultValue={highlightChunkIndex !== null ? "chunks" : "preview"}>
+        <TabsList>
+          <TabsTrigger value="preview">Pratinjau isi</TabsTrigger>
+          <TabsTrigger value="chunks">Chunk hasil ingestion</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="preview" className="mt-4">
+          {isProcessing || isFailed ? (
+            <EmptyState
+              Icon={FileText}
+              title={
+                isFailed
+                  ? "Dokumen gagal diproses"
+                  : "Isi dokumen belum tersedia"
+              }
+              description={
+                isFailed
+                  ? (data.error_message
+                      ?? "Ingestion gagal, jadi tidak ada teks yang bisa ditampilkan.")
+                  : "Teks tampil setelah ingestion selesai. Status di atas menunjukkan progresnya."
+              }
+            />
+          ) : (
+            <DocumentPreview documentId={data.id} filename={data.filename} />
+          )}
+        </TabsContent>
+
+        <TabsContent value="chunks" className="mt-4">
       <section className="flex flex-col gap-3">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div className="flex flex-col gap-1">
@@ -346,6 +419,8 @@ export function DocumentDetailView() {
           </>
         )}
       </section>
+        </TabsContent>
+      </Tabs>
 
       <ConfirmDialog
         open={confirmOpen}

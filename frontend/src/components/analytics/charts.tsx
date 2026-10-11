@@ -109,7 +109,11 @@ export function TokenChart({ data }: { data: TokenPoint[] }) {
           </h3>
           <p className="text-[12px] text-muted-foreground">
             Token input (pertanyaan dan konteks retrieval) dibanding token output
-            (jawaban).
+            (jawaban). Angka ini{" "}
+            <span className="text-warning-ink">
+              estimasi dari panjang pertanyaan, bukan hitungan penyedia
+            </span>{" "}
+           , pakai untuk melihat tren, bukan untuk tagihan.
           </p>
         </div>
         {total > 0 ? (

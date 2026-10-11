@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Accordion,
   AccordionContent,
@@ -21,6 +21,33 @@ export function ChunkList({ documentId, chunks, highlightChunkIndex }: ChunkList
   const scrollerRef = useRef<HTMLDivElement>(null);
   const highlightRef = useRef<HTMLDivElement>(null);
 
+  // Accordion dikendalikan (bukan `defaultValue`) supaya klik sitasi kedua
+  // ke dokumen yang sama benar-benar membuka chunk yang baru. Dengan
+  // `defaultValue`, nilai itu hanya dibaca saat mount dan navigasi berikutnya
+  // hanya menyorot tanpa membuka apa pun.
+  //
+  // Nilai highlight dari URL dipakai sebagai nilai awal; penyesuaian saat
+  // URL berubah dilakukan lewat `key` pada pemanggil (lihat ChunkList di
+  // halaman dokumen). Menulis state di dalam effect di sini pernah membuat
+  // render berantai yang membekukan halaman.
+  const [openChunk, setOpenChunk] = useState<string | null>(
+    highlightChunkIndex === null || highlightChunkIndex === undefined
+      ? null
+      : String(highlightChunkIndex),
+  );
+  const [openedFor, setOpenedFor] = useState(highlightChunkIndex);
+
+  // Sinkronisasi nilai awal saat prop berubah, tanpa effect dan tanpa
+  // render berantai: React merender ulang sekali dengan nilai baru.
+  if (openedFor !== highlightChunkIndex) {
+    setOpenedFor(highlightChunkIndex);
+    setOpenChunk(
+      highlightChunkIndex === null || highlightChunkIndex === undefined
+        ? null
+        : String(highlightChunkIndex),
+    );
+  }
+
   // Menuju chunk tertentu dari sitasi: buka, lalu scroll ke posisinya.
   useEffect(() => {
     if (highlightChunkIndex === null || highlightChunkIndex === undefined) return;
@@ -37,11 +64,8 @@ export function ChunkList({ documentId, chunks, highlightChunkIndex }: ChunkList
         // Satu chunk terbuka pada satu waktu: membandingkan dua chunk
         // berdampingan adalah kasus yang jarang, dan accordion yang bisa
         // dibuka semua menghasilkan daftar setinggi dokumen penuh.
-        defaultValue={
-          highlightChunkIndex === null || highlightChunkIndex === undefined
-            ? []
-            : [String(highlightChunkIndex)]
-        }
+        value={openChunk === null ? [] : [openChunk]}
+        onValueChange={(next) => setOpenChunk(next[0] ?? null)}
       >
         {chunks.map((chunk) => {
           const isHighlighted = chunk.chunk_index === highlightChunkIndex;

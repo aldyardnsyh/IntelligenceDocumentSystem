@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, RotateCcw, Trash2, TriangleAlert } from "lucide-react";
-import { toast } from "sonner";
+import { notify } from "@/lib/notify";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { ConfirmDialog } from "@/components/common/confirm-dialog";
@@ -25,10 +25,15 @@ import type { RetrievalSettings } from "@/types/api";
  */
 const LIMITS = {
   top_k: { min: 3, max: 10, step: 1 },
-  similarity_threshold: { min: 0.5, max: 0.9, step: 0.05 },
+  // Rentang ini mengikuti `min_similarity_threshold`/`max_similarity_threshold`
+  // di backend, yang diukur untuk model `multilingual-e5-small`. Slider yang
+  // menawarkan nilai di luar rentang server membuat pengguna menggeser kontrol
+  // yang hasilnya langsung diklem balik, terlihat seperti pengaturan tidak
+  // tersimpan.
+  similarity_threshold: { min: 0.75, max: 0.92, step: 0.01 },
 } as const;
 
-const DEFAULTS: RetrievalSettings = { top_k: 5, similarity_threshold: 0.5 };
+const DEFAULTS: RetrievalSettings = { top_k: 5, similarity_threshold: 0.82 };
 
 export function SettingsView() {
   const router = useRouter();
@@ -56,10 +61,14 @@ export function SettingsView() {
     onSuccess: (saved) => {
       queryClient.setQueryData(["settings"], saved);
       setDraft(saved);
-      toast.success("Pengaturan disimpan.");
+      notify.success(
+        "Pengaturan disimpan",
+        "Nilai baru dipakai pada pertanyaan berikutnya. Jawaban yang sudah di-cache "
+          + "tidak terpengaruh.",
+      );
     },
     onError: (error) => {
-      toast.error(error instanceof ApiError ? error.message : "Pengaturan gagal disimpan.");
+      notify.error(error instanceof ApiError ? error.message : "Pengaturan gagal disimpan.")
     },
   });
 
@@ -67,20 +76,31 @@ export function SettingsView() {
     mutationFn: () => resetAllSessions(),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
-      toast.success("Seluruh sesi percakapan dihapus.");
+      notify.success(
+        "Seluruh sesi dihapus",
+        "Riwayat percakapan dan cache jawabannya sudah dibersihkan.",
+      );
       router.push("/chat");
     },
     onError: (error) => {
-      toast.error(error instanceof ApiError ? error.message : "Sesi gagal direset.");
+      notify.error(error instanceof ApiError ? error.message : "Sesi gagal direset.")
     },
   });
 
   // Penyimpanan otomatis dengan debounce 800ms: mengubah slider terasa langsung
   // tanpa mengetik ulang (design.md 7), tapi tidak menembak API tiap gerakan.
+// Patch yang belum dikirim digabung, bukan ditimpa. Kalau tidak, mengubah
+  // top-k lalu threshold dalam jendela 800 ms membuat perubahan top-k hilang
+  // tanpa jejak: timer berikutnya hanya membawa satu kunci.
+  const pendingPatchRef = useRef<Partial<RetrievalSettings>>({});
+
   const scheduleSave = (patch: Partial<RetrievalSettings>) => {
+    pendingPatchRef.current = { ...pendingPatchRef.current, ...patch };
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
-      saveMutation.mutate(patch);
+      const merged = pendingPatchRef.current;
+      pendingPatchRef.current = {};
+      saveMutation.mutate(merged);
     }, 800);
   };
 
@@ -188,12 +208,14 @@ export function SettingsView() {
             aria-label="Ambang kemiripan minimum"
           />
           <div className="flex justify-between text-[11px] text-muted-foreground tnum">
-            <span>0.50 fleksibel</span>
-            <span>0.70 seimbang</span>
-            <span>0.90 ketat</span>
+            <span>{LIMITS.similarity_threshold.min.toFixed(2)} longgar</span>
+            <span>0.84 seimbang</span>
+            <span>{LIMITS.similarity_threshold.max.toFixed(2)} ketat</span>
           </div>
           <p className="text-[12px] leading-relaxed text-muted-foreground">
             Batas skor kemiripan minimum agar sebuah chunk dipakai sebagai sumber.
+            Rentang ini diukur untuk model embedding yang dipakai: pertanyaan
+            relevan biasanya berskor 0.84-0.91, yang tidak relevan 0.72-0.81.
             Semakin tinggi, semakin sering sistem menjawab &ldquo;tidak
             ditemukan&rdquo;.
           </p>

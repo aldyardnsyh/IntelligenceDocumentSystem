@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FolderOpen, Loader2, Search } from "lucide-react";
-import { toast } from "sonner";
+import { notify } from "@/lib/notify";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { EmptyState } from "@/components/common/empty-state";
@@ -13,7 +13,6 @@ import { DocumentCard } from "@/components/documents/document-card";
 import { UploadDropzone } from "@/components/documents/upload-dropzone";
 import { listDocuments, uploadDocument } from "@/lib/api";
 import { queryKeys } from "@/lib/queries";
-import { ApiError } from "@/lib/api/error";
 import type { DocumentStatus } from "@/types/api";
 
 const FILTERS = [
@@ -55,11 +54,17 @@ export function DocumentsView() {
     mutationFn: (file: File) => uploadDocument(file),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.documents });
-      toast.success("Berkas diterima. Pemrosesan dokumen berjalan di server.");
+      notify.success(
+        "Berkas diterima",
+        "Pemrosesan berjalan di server. Status di kartu dokumen akan berubah "
+          + "menjadi Siap ditanyai setelah selesai.",
+      );
     },
     onError: (error) => {
-      toast.error(
-        error instanceof ApiError ? error.message : "Gagal mengunggah berkas. Periksa format berkas.",
+      notify.fromApiError(
+        "Unggahan gagal",
+        error,
+        "Periksa format berkas (PDF, TXT, Markdown) dan ukurannya.",
       );
     },
   });

@@ -1,15 +1,18 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
-import { FlaskConical, LineChart as LineChartIcon } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { LineChart as LineChartIcon } from "lucide-react";
+import { toast } from "sonner";
 import { EmptyState } from "@/components/common/empty-state";
 import { ErrorState } from "@/components/common/error-state";
 import { ChartSkeleton, StatCardSkeleton } from "@/components/common/skeletons";
 import { LatencyChart, TokenChart } from "./charts";
+import { EvaluationSetup } from "./evaluation-setup";
 import { QueryLogTable } from "./query-log-table";
 import { StatCard, type StatTone } from "./stat-card";
-import { getAnalyticsSummary } from "@/lib/api";
-import { queryKeys } from "@/lib/queries";
+import { getAnalyticsSummary, runRetrievalEvaluation } from "@/lib/api";
+import { ApiError } from "@/lib/api/error";
+import { queryKeys, useDocuments } from "@/lib/queries";
 
 /** Ambang target dari PRD Section 1.3. */
 const TARGETS = {
@@ -25,10 +28,41 @@ function toneForScore(value: number, target: number): StatTone {
 }
 
 export function AnalyticsView() {
+  const queryClient = useQueryClient();
+  const documents = useDocuments();
+  // Hanya dokumen siap yang bisa diuji; yang masih diproses akan
+  // ditolak server, dan itu pesan error yang tidak perlu ditampilkan.
+  const readyDocuments = (documents.data ?? []).filter(
+    (item) => item.status === "ready",
+  );
   const summary = useQuery({
     queryKey: queryKeys.analyticsSummary,
     queryFn: ({ signal }) => getAnalyticsSummary(signal),
     refetchInterval: 30_000,
+  });
+
+  /**
+   * Jalankan evaluasi retrieval langsung dari halaman ini.
+   *
+   * Sebelumnya halaman hanya menampilkan "belum ada data evaluasi" dan
+   * menyuruh menjalankan job lewat CLI, tanpa memberi tahu caranya, dan
+   * tanpa jalan keluar kalau kredensial RAGAS belum ada. Evaluasi ini tidak
+   * butuh LLM, jadi selalu bisa dijalankan.
+   */
+  const evaluate = useMutation({
+    mutationFn: (documentIds: string[]) => runRetrievalEvaluation(documentIds),
+    onSuccess: (run) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.analyticsSummary });
+      toast.success(
+        `Evaluasi selesai. Precision ${run.precision?.toFixed(2) ?? "-"}, `
+        + `hit rate ${run.answer_relevance?.toFixed(2) ?? "-"}.`,
+      );
+    },
+    onError: (error) => {
+      toast.error(
+        error instanceof ApiError ? error.message : "Evaluasi gagal dijalankan.",
+      );
+    },
   });
 
   if (summary.isPending) {
@@ -100,12 +134,30 @@ export function AnalyticsView() {
           ) : null}
         </div>
       ) : (
-        <EmptyState
-          Icon={FlaskConical}
-          title="Belum ada data evaluasi"
-          description="Skor RAGAS muncul setelah job evaluasi berjalan terhadap golden dataset. Jalankan evaluasi terlebih dahulu, lalu muat ulang halaman ini."
+        <EvaluationSetup
+          documents={readyDocuments}
+          isLoading={documents.isPending}
+          pending={evaluate.isPending}
+          onRun={(ids) => evaluate.mutate(ids)}
         />
       )}
+
+      {/*
+        Skor RAGAS (faithfulness, answer relevance) butuh LLM penilai dan
+        kredensial tambahan. Dijelaskan di sini supaya pengguna tahu metrik
+        mana yang belum ada dan kenapa, bukan dibiarkan mengira angkanya
+        hilang.
+      */}
+      {evalRun && evalRun.faithfulness === null ? (
+        <p className="rounded-lg border border-border bg-muted/40 px-4 py-3 text-[12px] leading-relaxed text-muted-foreground">
+          Skor <span className="font-medium">faithfulness</span> belum ada:
+          metrik itu dinilai oleh LLM kedua dan butuh kredensial evaluator
+          (<code className="font-mono">OPENAI_API_KEY</code>). Jalankan{" "}
+          <code className="font-mono">python -m scripts.evaluate_ragas</code>{" "}
+          setelah kredensial tersedia untuk melengkapinya. Angka di atas
+          dihitung tanpa LLM, jadi tidak memerlukan kredensial apa pun.
+        </p>
+      ) : null}
 
       {hasLatency || hasTokens ? (
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">

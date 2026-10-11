@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import Link from "next/link";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { FileText, MoreHorizontal, RotateCw, Trash2 } from "lucide-react";
-import { toast } from "sonner";
+import { notify } from "@/lib/notify";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -75,12 +75,13 @@ export function DocumentCard({ document }: DocumentCardProps) {
     mutationFn: () => deleteDocument(document.id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.documents });
-      toast.success(`Dokumen "${document.filename}" berhasil dihapus.`);
+      notify.success(
+        "Dokumen dihapus",
+        `"${document.filename}" beserta seluruh chunk dan indeksnya sudah dibuang.`,
+      );
     },
     onError: (error) => {
-      toast.error(
-        error instanceof ApiError ? error.message : "Dokumen gagal dihapus. Coba lagi.",
-      );
+      notify.error(error instanceof ApiError ? error.message : "Dokumen gagal dihapus. Coba lagi.",)
     },
   });
 
@@ -92,10 +93,13 @@ export function DocumentCard({ document }: DocumentCardProps) {
     mutationFn: (file: File) => uploadDocument(file),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.documents });
-      toast.success("Dokumen dikirim ulang ke antrean ingestion.");
+      notify.success(
+        "Dokumen dikirim ulang",
+        "Ingestion berjalan lagi di server. Tunggu status berubah menjadi Siap ditanyai.",
+      );
     },
     onError: (error) => {
-      toast.error(error instanceof ApiError ? error.message : "Gagal mengunggah ulang.");
+      notify.error(error instanceof ApiError ? error.message : "Gagal mengunggah ulang.")
     },
   });
 
@@ -199,7 +203,9 @@ export function DocumentCard({ document }: DocumentCardProps) {
             </>
           ) : (
             <Link
-              href="/chat"
+              // `?doc=` mengikat sesi baru ke dokumen ini, sehingga pencarian
+              // hanya berjalan di dalamnya, bukan di seluruh korpus.
+              href={`/chat?doc=${document.id}`}
               className="rounded text-[12px] font-medium text-brand-ink underline-offset-2 hover:underline"
             >
               Tanya dokumen ini
