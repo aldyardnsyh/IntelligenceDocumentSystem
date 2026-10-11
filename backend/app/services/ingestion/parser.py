@@ -3,7 +3,7 @@
 Parsing sendiri bukan bagian yang rumit, tapi tiga hal di sini menentukan
 apakah hasilnya berguna:
 
-1. **PDF di luar scope OCR** (PRD 8.2). PDF hasil pindai tidak punya layer
+1. **PDF di luar scope OCR**. PDF hasil pindai tidak punya layer
    teks, dan hasilnya dokumen kosong. Itu harus gagal dengan pesan yang
    jelas, bukan diam-diam mengindeks nol byte.
 2. **Nomor halaman harus dipertahankan.** Tanpa itu, Citation Card tidak
@@ -74,7 +74,7 @@ class ParsedDocument:
         Aturan berbeda per format, dan itu disengaja:
 
         - **PDF** memakai ambang ``MIN_CHARS_PER_PAGE`` per halaman. Halaman
-          yang nyaris kosong adalah tanda kuat dokumen hasil pindai (PRD 8.2),
+          yang nyaris kosong adalah tanda kuat dokumen hasil pindai,
           dan itu memang harus gagal dengan pesan yang jelas.
         - **TXT/Markdown** tidak memakai ambang itu sama sekali. Catatan
           20 karakter adalah dokumen yang valid dan sering muncul; menolaknya
@@ -139,7 +139,7 @@ def validate_extension(filename: str, settings: Settings) -> str:
 
 
 def validate_size(size_bytes: int, settings: Settings) -> None:
-    """Tolak berkas yang melebihi batas (FR-1.1)."""
+    """Tolak berkas yang melebihi batas."""
     if size_bytes <= 0:
         raise ParseError("Berkas kosong.")
     if size_bytes > settings.max_file_size_bytes:
@@ -215,8 +215,8 @@ def _parse_text(raw: bytes, filename: str) -> ParsedDocument:
         raise ParseError("Berkas teks tidak berisi karakter yang bisa dibaca.")
 
     # Teks tidak berpaginasikan, jadi satu halaman dengan nomor None. Citation
-    # Card lalu menampilkan nomor chunk, sesuai FR-2.2 yang mengizinkan
-    # "halaman atau chunk".
+    # Card lalu menampilkan nomor chunk, karena sitasi boleh menunjuk halaman
+    # atau chunk.
     return ParsedDocument(pages=[ParsedPage(text=text.strip(), page_number=None)], page_count=1)
 
 

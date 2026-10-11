@@ -2,7 +2,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 /**
  * Skeleton mengikuti bentuk konten asli, bukan kotak abu generik, supaya
- * tidak ada "lompatan" saat data datang (design.md 10).
+ * tidak ada "lompatan" saat data datang.
  */
 
 export function SessionListSkeleton({ rows = 4 }: { rows?: number }) {

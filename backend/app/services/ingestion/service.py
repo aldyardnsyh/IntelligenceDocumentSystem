@@ -3,7 +3,7 @@
 Pipeline ini berjalan asinkron setelah upload diterima. Endpoint upload
 mengembalikan ``202 Accepted`` dan tidak menunggu sampai selesai, karena
 embedding satu dokumen bisa memakan puluhan detik dan frontend sudah punya
-polling status (FR-1.4).
+polling status.
 """
 
 from __future__ import annotations
@@ -307,7 +307,7 @@ class IngestionService:
         satu dokumen membuat semua dokumen lain ikut kehilangan indeksnya tanpa
         ada jejak di UI.
 
-        Cache query juga ikut dibersihkan (FR-4.2). Cache disimpan per kunci
+        Cache query juga ikut dibersihkan. Cache disimpan per kunci
         pertanyaan, jadi tidak ada cara murah untuk tahu cache mana yang
         menyinggung dokumen ini tanpa menyimpan indeks terbalik. Untuk skala
         portofolio, menghapus seluruh cache query lebih murah dan lebih jujur

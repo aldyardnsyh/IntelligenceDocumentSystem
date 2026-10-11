@@ -24,7 +24,7 @@ import type {
 
 const STORAGE_KEY = "ida.mock.v1";
 
-/** Batas dan default PRD FR-1.1 / FR-1.2. */
+/** Batas dan default unggah, disamakan dengan backend. */
 export const MAX_FILE_BYTES = 10 * 1024 * 1024;
 export const ACCEPTED_EXTENSIONS = [".pdf", ".txt", ".md", ".markdown"] as const;
 export const CHUNK_SIZE = 500;
@@ -192,7 +192,7 @@ function buildChunks(documentId: string, text: string): Chunk[] {
     id: `${documentId}_c${index + 1}`,
     document_id: documentId,
     chunk_index: index,
-    // Teks/TXT tidak punya nomor halaman; UI Falls back ke nomor chunk (FR-2.2).
+    // Teks/TXT tidak punya nomor halaman; UI Falls back ke nomor chunk.
     page_number: null,
     content,
     token_count: Math.round(content.length / 4),

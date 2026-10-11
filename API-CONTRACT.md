@@ -8,8 +8,8 @@ Status tiap endpoint:
 
 | Kolom | Arti |
 | --- | --- |
-| `Ada di PRD 6.8` | Sudah tercantum di PRD/SRS Section 6.8 |
-| `Tambahan` | Dibutuhkan frontend tapi belum tercantum di PRD 6.8 |
+| `UI` | Dipakai halaman atau komponen frontend |
+| `Tersedia` | Ada di backend, belum dipakai UI |
 | `Hanya lokal` | Dikerjakan Next.js, tidak perlu ada di FastAPI |
 
 ---
@@ -18,55 +18,52 @@ Status tiap endpoint:
 
 | Method | Path | Status | Dipakai di |
 | --- | --- | --- | --- |
-| POST | `/api/v1/auth/verify` | Ada di PRD 6.8 | `login/actions.ts` (hanya saat backend terhubung) |
-| GET | `/api/v1/documents` | **Tambahan** | sidebar chat, `/documents` |
-| POST | `/api/v1/documents/upload` | Ada di PRD 6.8 | `/documents`, `/chat` |
-| GET | `/api/v1/documents/{id}` | **Tambahan** | `/documents/[id]` (metadata saja) |
-| GET | `/api/v1/documents/{id}/status` | Ada di PRD 6.8 | polling status ingestion |
-| GET | `/api/v1/documents/{id}/chunks` | Ada di PRD 6.8 | `/documents/[id]` (daftar chunk, terpaginasi) |
-| DELETE | `/api/v1/documents/{id}` | Ada di PRD 6.8 | `/documents`, `/documents/[id]` |
-| POST | `/api/v1/chat/query` | Ada di PRD 6.8 | `/chat` (SSE) |
-| GET | `/api/v1/chat/sessions` | **Tambahan** | sidebar chat |
-| DELETE | `/api/v1/chat/sessions` | **Tambahan** | `/settings` zona berbahaya |
-| PATCH | `/api/v1/chat/sessions/{session_id}` | **Tambahan** | ubah nama satu percakapan |
-| DELETE | `/api/v1/chat/sessions/{session_id}` | **Tambahan** | hapus satu percakapan |
-| GET | `/api/v1/chat/{session_id}/history` | Ada di PRD 6.8 | `/chat/[sessionId]` |
-| DELETE | `/api/v1/chat/{session_id}` | Ada di PRD 6.8 | tersedia, tidak dipakai UI |
-| GET | `/api/v1/settings` | Ada di PRD 6.8 | `/settings` |
-| PUT | `/api/v1/settings` | Ada di PRD 6.8 | `/settings` (debounce 800 ms) |
-| GET | `/api/v1/analytics/summary` | Ada di PRD 6.8 | `/analytics` |
-| GET | `/api/v1/analytics/logs` | Ada di PRD 6.8 | `/analytics` |
-| GET | `/api/v1/health` | Ada di PRD 6.8 | belum dipakai UI |
-| POST | `/api/logout` | **Hanya lokal** | header, route handler Next.js |
+| POST | `/api/v1/auth/verify` | UI | `login/actions.ts` (hanya saat backend terhubung) |
+| GET | `/api/v1/documents` | UI | sidebar chat, `/documents` |
+| POST | `/api/v1/documents/upload` | UI | `/documents`, `/chat` |
+| GET | `/api/v1/documents/{id}` | UI | `/documents/[id]` (metadata saja) |
+| GET | `/api/v1/documents/{id}/status` | UI | polling status ingestion |
+| GET | `/api/v1/documents/{id}/chunks` | UI | `/documents/[id]` (daftar chunk, terpaginasi) |
+| DELETE | `/api/v1/documents/{id}` | UI | `/documents`, `/documents/[id]` |
+| POST | `/api/v1/chat/query` | UI | `/chat` (SSE) |
+| GET | `/api/v1/chat/sessions` | UI | sidebar chat |
+| DELETE | `/api/v1/chat/sessions` | UI | `/settings` zona berbahaya |
+| PATCH | `/api/v1/chat/sessions/{session_id}` | UI | ubah nama satu percakapan |
+| DELETE | `/api/v1/chat/sessions/{session_id}` | UI | hapus satu percakapan |
+| GET | `/api/v1/chat/{session_id}/history` | UI | `/chat/[sessionId]` |
+| DELETE | `/api/v1/chat/{session_id}` | Tersedia | tidak dipakai UI |
+| GET | `/api/v1/settings` | UI | `/settings` |
+| PUT | `/api/v1/settings` | UI | `/settings` (debounce 800 ms) |
+| GET | `/api/v1/analytics/summary` | UI | `/analytics` |
+| GET | `/api/v1/analytics/logs` | UI | `/analytics` |
+| GET | `/api/v1/health` | Tersedia | belum dipakai UI |
+| POST | `/api/logout` | Hanya lokal | header, route handler Next.js |
 
-### Kenapa tiga endpoint `Tambahan` dibutuhkan
+### Alasan beberapa endpoint ada di luar alur utama
 
-PRD 6.8 belum memuatnya, tapi UI yang sudah ada tidak bisa jalan tanpanya:
+Endpoint berikut tidak muncul di halaman utama, tapi UI yang sudah ada tidak
+bisa jalan tanpanya:
 
 - **`GET /api/v1/documents`**. `/documents` dan sidebar `/chat` harus
   menampilkan daftar dokumen beserta statusnya. Tanpa endpoint ini, polling
-  status (FR-1.4) tidak punya sumber.
+  status tidak punya sumber.
 - **`GET /api/v1/documents/{id}`**. `/documents/[id]` butuh metadata dokumen
   dan parameter ingestion sekaligus, supaya angka yang ditampilkan di
   halaman itu bukan konstanta tebakan. Daftar chunk diambil terpisah lewat
-  `GET /documents/{id}/chunks` yang sudah ada di PRD, supaya dokumen besar
-  tidak mengirim seluruh isinya sekaligus.
+  `GET /documents/{id}/chunks`, supaya dokumen besar tidak mengirim seluruh
+  isinya sekaligus.
 - **`GET /api/v1/chat/sessions`**. Sidebar menampilkan "Riwayat Sesi" dengan
   judul otomatis dari pertanyaan pertama. `GET /chat/{id}/history` hanya bisa
-  dibaca kalau `id` sudah diketahui, sedangkan daftar id itu belum ada di PRD.
-- **`DELETE /api/v1/chat/sessions`**. PRD 6.8 punya reset per sesi
-  (`DELETE /chat/{session_id}`), tapi FR-6.3 meminta reset **seluruh** sesi.
-  Tidak ada endpoint itu.
+  dibaca kalau `id` sudah diketahui, sedangkan daftar id tidak tersedia.
+- **`DELETE /api/v1/chat/sessions`**. Menghapus **seluruh** sesi sekaligus,
+  berbeda dari `DELETE /chat/{session_id}` yang hanya mereset satu sesi.
 - **`PATCH /api/v1/chat/sessions/{session_id}`** dan
   **`DELETE /api/v1/chat/sessions/{session_id}`**. Mengubah nama dan menghapus
   satu percakapan dari sidebar. Perhatikan bahwa `DELETE /chat/{session_id}`
-  di PRD 6.8 punya bentuk yang mirip, jadi perbedaan path-nya penting:
+  punya bentuk yang mirip, jadi perbedaan path-nya penting:
   `/chat/sessions/{id}` mengubah judul dan menghapus isi percakapan,
-  sedangkan `/chat/{session_id}` hanya mereset memori percakapan itu. Kalau
-  keduanya diimplementasikan, router harus tidak menganggap
-  `/chat/sessions/...` sebagai `session_id`.
-
-Kalau nanti PRD 6.8 diperbarui, tabel di atas harus ikut diperbarui.
+  sedangkan `/chat/{session_id}` hanya mereset memori percakapan itu. Router
+  harus tidak menganggap `/chat/sessions/...` sebagai `session_id`.
 
 ---
 
@@ -85,7 +82,7 @@ apa adanya sebagai pesan di UI.
 | --- | --- | --- |
 | 400 | `invalid_request` | Masukan tidak valid |
 | 401 | `session_expired` | Sesi akses sudah berakhir |
-| 413 | `file_too_large` | Berkas melewati 10 MB (FR-1.1) |
+| 413 | `file_too_large` | Berkas melewati 10 MB |
 | 422 | `unprocessable` | Validasi field gagal |
 | 429 | `rate_limited` | Rate limit kena. Wajib mengirim header `Retry-After` |
 | 5xx | `internal` | Gangguan server, layak dicoba ulang |
@@ -110,9 +107,8 @@ jaringan. 404 atau 422 tidak akan membaik dengan dicoba ulang.
 - Gagal: `401` dengan `detail` generik. Jangan bedakan "passcode salah" dari
   "passcode tidak ada", itu membocorkan informasi.
 - Terlalu banyak percobaan: `429` + header `Retry-After` dalam detik
-  (FR-0.3, TC-09: percobaan ke-6 ditolak).
-- Cookie sesi: HTTP-only, `SameSite=Lax`, `Secure` di produksi, `Max-Age=86400`
-  (FR-0.2).
+  (percobaan ke-6 ditolak).
+- Cookie sesi: HTTP-only, `SameSite=Lax`, `Secure` di produksi, `Max-Age=86400`.
 
 **Catatan arsitektur.** Frontend juga memasang cookie gerbang sendiri
 (`ida_gate`) lewat server action, hanya untuk menentukan boleh/tidaknya
@@ -148,7 +144,7 @@ actionable (misal: "Berkas PDF terenkripsi tidak bisa dibaca").
 ### `POST /api/v1/documents/upload`
 
 `multipart/form-data` dengan satu field bernama `file`.
-Toleransi: PDF, TXT, MD. Maks 10 MB (FR-1.1).
+Toleransi: PDF, TXT, MD. Maks 10 MB.
 
 ```json
 // 202
@@ -223,9 +219,8 @@ Aturan tambahan:
 ### `DELETE /api/v1/documents/{id}`
 
 `204 No Content`. Menghapus dokumen, seluruh chunk, dan seluruh entri vector
-store-nya (FR-1.5). Cache query yang mereferensikan dokumen ikut di-invalidate
-(FR-4.2). Jika ada sesi aktif yang menunjuk dokumen itu, hapus juga sitasinya
-dari riwayat.
+store-nya. Cache query yang mereferensikan dokumen ikut di-invalidate. Jika ada
+sesi aktif yang menunjuk dokumen itu, hapus juga sitasinya dari riwayat.
 
 ---
 
@@ -279,8 +274,8 @@ data: {"type":"done","response_time_ms":1420}
 
 Aturan yang tidak boleh dilanggar:
 
-- `not_found` dikirim **setelah** retrieval dan **sebelum** panggilan LLM
-  (FR-2.3). Kalau `token` sudah sempat terkirim lalu ternyata `not_found`,
+- `not_found` dikirim **setelah** retrieval dan **sebelum** panggilan LLM.
+  Kalau `token` sudah sempat terkirim lalu ternyata `not_found`,
   jawabannya terlambat dihentikan.
 - `ungrounded` dikirim **sebelum** token pertama. Label yang datang setelah
   jawaban sudah terbaca terlambat untuk mencegah salah paham.
@@ -312,7 +307,7 @@ dokumen. Sesi lama yang dibuat sebelum fitur ini ada dibaca sebagai `null`,
 bukan error.
 
 Urut `last_active_at` menurun. Hanya sesi yang masih hidup di memory store
-(FR-3.1, TTL default 1 jam) yang dikembalikan; sesi yang sudah kedaluwarsa
+(TTL default 1 jam) yang dikembalikan; sesi yang sudah kedaluwarsa
 tidak dikembalikan dan frontend menampilkannya sebagai daftar kosong, bukan
 error.
 
@@ -330,8 +325,8 @@ error.
 ```
 
 `ungrounded: true` berarti jawaban itu datang dari pengetahuan umum model.
-Frontend **wajib** menampilkan labelnya, termasuk saat riwayat dibuka ulang --
-label yang hanya ada saat streaming dan hilang setelah reload membuat jawaban
+Frontend **wajib** menampilkan labelnya, termasuk saat riwayat dibuka ulang.
+Label yang hanya ada saat streaming dan hilang setelah reload membuat jawaban
 lama terlihat bersumber.
 
 Sesi tidak ada atau sudah kedaluwarsa: `404`. Frontend menampilkan
@@ -339,7 +334,7 @@ Sesi tidak ada atau sudah kedaluwarsa: `404`. Frontend menampilkan
 
 ### `DELETE /api/v1/chat/sessions`
 
-`204 No Content`. Menghapus seluruh sesi milik pengguna aktif (FR-6.3).
+`204 No Content`. Menghapus seluruh sesi milik pengguna aktif.
 Ini endpoint berbeda dari `DELETE /chat/{session_id}` yang hanya satu sesi.
 
 ### `PATCH /api/v1/chat/sessions/{session_id}`
@@ -370,7 +365,7 @@ Mengubah judul satu percakapan. Aturan yang harus dipegang backend:
 
 `204 No Content`. Menghapus satu percakapan beserta seluruh pesanannya.
 
-- Hapus juga cache query yang involves `session_id` di Redis (FR-4.2).
+- Hapus juga cache query yang memakai `session_id` di Redis.
 - Hapus entri `sessions` di PostgreSQL.
 - Sesi tidak ada: `404`. `404` di sini penting karena frontend memakai
   `404` untuk membedakan "sudah dihapus" dari "server gagal".
@@ -393,12 +388,12 @@ sah.
 
 Rentang yang dipatuhi UI:
 
-| Parameter | Min | Maks | Default | PRD |
-| --- | --- | --- | --- | --- |
-| `top_k` | 3 | 10 | 5 | FR-2.1 |
-| `similarity_threshold` | 0.50 | 0.90 | 0.50 | FR-2.3 |
+| Parameter | Min | Maks | Default |
+| --- | --- | --- | --- |
+| `top_k` | 3 | 10 | 5 |
+| `similarity_threshold` | 0.50 | 0.90 | 0.50 |
 
-Perubahan harus berlaku pada query berikutnya tanpa restart (FR-6.2), jadi
+Perubahan harus berlaku pada query berikutnya tanpa restart, jadi
 backend tidak boleh menyimpan parameter ini di memori proses yang sudah
 di-cache.
 
@@ -421,8 +416,8 @@ di-cache.
 ```
 
 `latest_eval` **boleh `null`** kalau belum ada run evaluasi. Frontend
-menampilkan empty state, bukan angka nol dan bukan angka contoh (TC-12).
-Satu-s-satunya sumber angka RAGAS adalah tabel `eval_runs`; jangan
+menampilkan empty state, bukan angka nol dan bukan angka contoh.
+Satu-satunya sumber angka RAGAS adalah tabel `eval_runs`; jangan
 mengarang dari sisi frontend.
 
 `date` berformat `YYYY-MM-DD` dan berada di zona waktu yang sama dengan zona
@@ -446,18 +441,18 @@ Langfuse, bukan estimasi panjang string.
 `sources_count: 0` berarti retrieval tidak menemukan apa pun. Frontend
 menandainya dengan teks "tidak ditemukan", bukan `0` polos.
 
-**`trace_id`** adalah id trace Langfuse untuk panggilan LLM pada query itu
-(PRD Section 12.1). Aturannya:
+**`trace_id`** adalah id trace Langfuse untuk panggilan LLM pada query itu.
+Aturannya:
 
-- `null` kalau tidak ada panggilan LLM: query dijawab dari cache (FR-4.1),
+- `null` kalau tidak ada panggilan LLM: query dijawab dari cache,
   atau retrieval tidak menemukan apa pun sehingga LLM tidak dipanggil.
 - String kosong **tidak boleh** dipakai sebagai pengganti `null`.
 - Frontend tidak pernah membuat nilai ini di sisi klien. Kalau kolomnya masih
   kosong setelah RAGAS dan Langfuse terhubung, berarti tracing belum
   dikonfigurasi di backend.
 
-Kolom ini perlu ada di tabel `query_logs` (PRD Section 8.5) sebagai
-`trace_id text null`, dengan indeks bila tabel besar. gunanya supaya tabel log
+Kolom ini perlu ada di tabel `query_logs` sebagai
+`trace_id text null`, dengan indeks bila tabel besar. Gunanya supaya tabel log
 di `/analytics` bisa ditautkan langsung ke tracing, yang selama ini jadi
 kesenjangan antara dua dashboard.
 
@@ -514,7 +509,7 @@ formatter di frontend.
 
 ---
 
-## 10. Yang belum decided
+## 10. Yang belum diputuskan
 
 1. **`trace_id` di backend.** Bentuknya sudah ditetapkan di Section 7, tapi
    backend belum tentu mengisinya. Kalau RAGAS dan Langfuse belum terhubung,
@@ -522,10 +517,10 @@ formatter di frontend.
 2. **Cache hit di UI.** `from_cache` sudah ada di kontrak tapi belum
    ditampilkan. Kalau nanti ditampilkan, harus jelas bedanya dari query biasa,
    karena "dari cache" memengaruhi perhitungan latency yang dilihat pengguna.
-3. **Identitas pengguna.** PRD 6.0 hanya satu passcode, jadi endpoint
+3. **Identitas pengguna.** Saat ini hanya satu passcode, jadi endpoint
    `chat/sessions` tidak punya parameter user. Kalau nanti ada multi-user,
    semua endpoint ini butuh scoping per user.
 
 ---
 
-*Dokumen ini adalah living document, sama seperti PRD/SRS.*
+*Dokumen ini adalah living document, ikut berubah bersama kode.*

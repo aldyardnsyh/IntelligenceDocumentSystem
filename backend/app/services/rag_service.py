@@ -68,7 +68,7 @@ EventType = Literal["session", "token", "citations", "not_found", "ungrounded", 
 
 @dataclass(slots=True)
 class StreamEvent:
-    """Satu event SSE (FR-2.4)."""
+    """Satu event SSE."""
 
     type: EventType
     value: object = None
@@ -234,7 +234,7 @@ class RagService:
             else TraceContext()
         )
 
-        # 1. Cache (FR-4.1)
+        # 1. Cache
         #
         # `document_id` (scope chat privat) HARUS ikut di kunci. Tanpa itu,
         # pertanyaan yang sama di sesi ber-scope dokumen A bisa menyajikan
@@ -681,7 +681,7 @@ class RagService:
         yield StreamEvent(type="done", response_time_ms=elapsed)
 
     async def _load_history(self, session_id: str) -> list[tuple[str, str]]:
-        """Ambil N pesan terakhir (FR-3.2)."""
+        """Ambil N pesan terakhir."""
         stored = await self._memory.load_session(session_id)
         if not stored:
             return []
@@ -804,12 +804,12 @@ class RagService:
         return bool(await self._memory.ping())
 
     async def delete_session(self, session_id: str) -> bool:
-        """Hapus satu sesi: memori, metadata, dan cache-nya (FR-4.2)."""
+        """Hapus satu sesi: memori, metadata, dan cache-nya."""
         await self._memory.delete_session(session_id)
         return await asyncio.to_thread(self._repository.delete_session, session_id)
 
     async def delete_all_sessions(self) -> int:
-        """Hapus seluruh sesi (FR-6.3)."""
+        """Hapus seluruh sesi."""
         await self._memory.delete_by_prefix("chat:")
         # Cache jawaban ikut dibersihkan: jawaban yang tersimpan bisa merujuk
         # dokumen yang sudah dihapus, dan mengembalikannya setelah semua sesi

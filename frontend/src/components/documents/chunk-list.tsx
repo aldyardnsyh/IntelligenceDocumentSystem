@@ -13,7 +13,7 @@ import type { Chunk } from "@/types/api";
 interface ChunkListProps {
   documentId: string;
   chunks: Chunk[];
-  /** Chunk yang berasal dari klik sitasi di /chat (design.md 6). */
+  /** Chunk yang berasal dari klik sitasi di /chat. */
   highlightChunkIndex?: number | null;
 }
 

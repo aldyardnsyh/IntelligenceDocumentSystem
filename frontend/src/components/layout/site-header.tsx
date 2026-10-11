@@ -11,7 +11,7 @@ import { isMockMode } from "@/lib/api/config";
 
 /**
  * Navigasi utama sengaja hanya berisi rute yang benar-benar ada
- * (R-24). Halaman analitik dan pengaturan juga dijangkau lewat footer
+ *. Halaman analitik dan pengaturan juga dijangkau lewat footer
  * sidebar /chat, bukan lewat navbar, supaya navbar tetap pendek.
  */
 const NAV = [

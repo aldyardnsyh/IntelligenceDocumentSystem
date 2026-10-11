@@ -105,7 +105,7 @@ class DocumentStatusResponse(BaseModel):
 
 
 class DocumentPreviewResponse(BaseModel):
-    """Isi dokumen yang tersimpan, untuk cross-check jawaban chat (FR-5.2).
+    """Isi dokumen yang tersimpan, untuk cross-check jawaban chat.
 
     ``content`` adalah teks hasil parsing, bukan berkas aslinya. ``truncated``
     menandai kalau isinya dipotong, supaya pengguna tidak mengira sudah

@@ -1,6 +1,6 @@
 """Repository metadata.
 
-PRD 8.5 menetapkan PostgreSQL sebagai tempat metadata. Tapi Supabase free-tier
+Rancangan awal memakai PostgreSQL sebagai tempat metadata. Tapi Supabase free-tier
 bisa di-pause setelah 1 minggu idle, dan portofolio harus tetap bisa jalan
 tanpa akun cloud apa pun. Karena itu ada dua implementasi:
 

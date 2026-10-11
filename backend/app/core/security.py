@@ -2,7 +2,7 @@
 
 Passcode tidak pernah dibandingkan sebagai plaintext. Yang disimpan di
 environment variable adalah SHA-256-nya, sehingga bocornya isi environment tidak
-langsung berarti bypass (PRD FR-0.1).
+langsung berarti bypass.
 """
 
 from __future__ import annotations
@@ -177,7 +177,7 @@ def owner_of_token(token: str) -> str:
 
 @dataclass
 class SlidingWindowLimiter:
-    """Rate limit sliding window in-process (FR-0.3).
+    """Rate limit sliding window in-process.
 
     Cukup untuk satu instance. Untuk banyak instance, limiter ini harus
     pindah ke Redis; lihat ``app.services.memory.rate_limit`` untuk versi

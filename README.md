@@ -15,7 +15,7 @@
 
 <!-- Status kualitas. Angkanya berasal dari perintah di bagian verifikasi,
      bukan klaim. -->
-[![pytest](https://img.shields.io/badge/pytest-420_passed-0A9EDC?logo=pytest&logoColor=white)](#verifikasi-dan-pengujian)
+[![pytest](https://img.shields.io/badge/pytest-403_passed-0A9EDC?logo=pytest&logoColor=white)](#verifikasi-dan-pengujian)
 [![Playwright](https://img.shields.io/badge/Playwright-39_specs-2EAD33?logo=playwright&logoColor=white)](#verifikasi-dan-pengujian)
 [![coverage](https://img.shields.io/badge/coverage-83%25-4C1)](#verifikasi-dan-pengujian)
 [![Lisensi](https://img.shields.io/badge/lisensi-PSHT-blue)](LICENSE.md)
@@ -246,7 +246,7 @@ Evaluasi ini tidak memerlukan API key tambahan. Untuk skor RAGAS lengkap
 
 ```powershell
 cd backend
-python -m pytest                 # 420 test, coverage gate 70%
+python -m pytest                 # 403 test, coverage gate 70%
 python -m ruff check app tests scripts
 ```
 
@@ -333,7 +333,7 @@ Angka di badge atas bukan klaim, tapi hasil perintah berikut:
 
 | Pemeriksaan | Perintah | Hasil |
 |---|---|---|
-| Test backend | `python -m pytest` | 420 test, coverage 83% |
+| Test backend | `python -m pytest` | 403 test, coverage 83% |
 | Lint backend | `python -m ruff check app tests scripts` | Bersih |
 | Tipe dan lint frontend | `npx tsc --noEmit; npm run lint` | Bersih |
 | Build frontend | `npm run build` | Sukses |

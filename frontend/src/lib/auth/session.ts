@@ -2,7 +2,7 @@
  * Access gate.
  *
  * Passcode dibandingkan di server terhadap hash yang disimpan di environment
- * variable (PRD FR-0.1). Nilai hash-nya dihitung dari env var biasa, jadi
+ * variable. Nilai hash-nya dihitung dari env var biasa, jadi
  * repo tidak pernah memuat passcode plaintext.
  *
  * Frontend tidak pernah menyimpan passcode: form mengirim ke server action
@@ -21,7 +21,7 @@
  */
 
 export const SESSION_COOKIE = "ida_gate";
-/** FR-0.2: default 24 jam. */
+/** default 24 jam. */
 export const SESSION_TTL_SECONDS = 60 * 60 * 24;
 
 /**
@@ -35,7 +35,7 @@ export const SESSION_TTL_SECONDS = 60 * 60 * 24;
  */
 export const MOCK_MODE_PASSCODE = "demo-rag-2025";
 
-/** FR-0.3: 5 percobaan per 5 menit per IP. */
+/** 5 percobaan per 5 menit per IP. */
 const MAX_ATTEMPTS = 5;
 const ATTEMPT_WINDOW_MS = 5 * 60 * 1000;
 

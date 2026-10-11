@@ -108,7 +108,7 @@ LimiterDep = Annotated[RateLimiter, Depends(get_rate_limiter)]
 
 
 async def require_session(request: Request, config: SettingsDep) -> None:
-    """Pastikan request bawa cookie sesi yang sah (FR-0.2).
+    """Pastikan request bawa cookie sesi yang sah.
 
     Diberikan sebagai dependency router-wide, bukan ditulis ulang di setiap
     handler. Menulisnya manual di setiap endpoint berarti ada satu endpoint yang
@@ -182,7 +182,7 @@ async def verify_passcode_endpoint(
     payload: PasscodeRequest,
     config: SettingsDep,
 ) -> PasscodeResponse:
-    """Verifikasi passcode lalu set cookie sesi (FR-0.1, FR-0.2).
+    """Verifikasi passcode lalu set cookie sesi.
 
     Pesan kegagalan sengaja tidak membedakan "passcode salah" dari
     "passcode tidak terdaftar", supaya tidak ada yang bisa menebak.
@@ -267,11 +267,11 @@ async def upload_document(
     ingestion: IngestionDep,
     config: SettingsDep,
 ) -> DocumentSummary:
-    """Terima berkas lalu mulai ingestion (FR-1.1).
+    """Terima berkas lalu mulai ingestion.
 
     ``202`` karena ingestion berjalan di background. Endpoint ini sengaja tidak
     menunggu sampai ``ready``: embedding satu dokumen bisa memakan puluhan
-    detik, dan frontend sudah punya polling status (FR-1.4).
+    detik, dan frontend sudah punya polling status.
 
     Yang tetap dilakukan sebelum ``202``: sanitasi nama, cek ukuran saat
     dibaca (bukan sesudahnya), dan cek format. Semua itu murah, dan
@@ -408,7 +408,7 @@ async def get_document_chunks(
     page_size: Annotated[int, Query(ge=1, le=100)] = 10,
     q: Annotated[str | None, Query(max_length=200)] = None,
 ) -> ChunkPage:
-    """Satu halaman chunk dengan pencarian isi (FR-5.1).
+    """Satu halaman chunk dengan pencarian isi.
 
     ``total`` dihitung **setelah** filter, karena frontend memakainya untuk
     menghitung jumlah halaman.
@@ -432,7 +432,7 @@ async def get_document_preview(
     document_id: str,
     repository: RepositoryDep,
 ) -> DocumentPreviewResponse:
-    """Isi dokumen yang benar-benar tersimpan, untuk cross-check (FR-5.2).
+    """Isi dokumen yang benar-benar tersimpan, untuk cross-check.
 
     Halaman dokumen sebelumnya hanya menampilkan daftar chunk. Untuk menilai
     apakah jawaban chat benar, pengguna perlu melihat teks aslinya berurutan.
@@ -483,7 +483,7 @@ async def get_document_file(
     ingestion: IngestionDep,
     repository: RepositoryDep,
 ) -> Response:
-    """Berkas asli dokumen, untuk pratinjau PDF di browser (FR-5.2).
+    """Berkas asli dokumen, untuk pratinjau PDF di browser.
 
     Yang dikirim adalah berkas yang benar-benar diunggah pengguna, bukan
     render ulang dari teks. Halaman dokumen memakainya untuk menampilkan PDF
@@ -534,7 +534,7 @@ async def get_document_file(
 async def delete_document(
     document_id: str, ingestion: IngestionDep, repository: RepositoryDep
 ) -> Response:
-    """Hapus dokumen, chunk-nya, dan indeksnya (FR-1.5)."""
+    """Hapus dokumen, chunk-nya, dan indeksnya."""
     if repository.get_document(document_id) is None:
         raise HTTPException(status_code=404, detail="Dokumen tidak ditemukan.")
     await ingestion.delete(document_id)
@@ -552,7 +552,7 @@ async def chat_query(
     limiter: LimiterDep,
     repository: RepositoryDep,
 ) -> StreamingResponse:
-    """Tanya pertanyaan, jawaban di-stream sebagai SSE (FR-2.4).
+    """Tanya pertanyaan, jawaban di-stream sebagai SSE.
 
     Rate limit melindungi kuota free tier. Kunci bucket diambil dari identitas
     akses yang sudah diverifikasi, bukan dari ``session_id`` di body: kalau
@@ -684,7 +684,7 @@ async def list_sessions(repository: RepositoryDep, rag: RagDep) -> list[dict[str
     status_code=status.HTTP_204_NO_CONTENT,
 )
 async def delete_all_sessions(request: Request, rag: RagDep) -> Response:
-    """Hapus seluruh sesi (FR-6.3).
+    """Hapus seluruh sesi.
 
     Klaim kepemilikan ikut dilepas: sisa klaim membuat id sesi lama tidak
     bisa diklaim ulang, dan pengguna yang baru mulai dari sesi kosong akan
@@ -778,9 +778,9 @@ async def delete_session_by_path(
 ) -> Response:
     """Hapus satu percakapan lewat ``/chat/{id}``.
 
-    Alias dari ``DELETE /chat/sessions/{id}``. PRD menyebut bentuk kedua,
-    sementara sidebar memakai bentuk pertama; keduanya disediakan supaya
-    kontrak lama dan baru sama-sama bekerja.
+    Alias dari ``DELETE /chat/sessions/{id}``. Sidebar memakai bentuk
+    ``/chat/{id}``, sementara bentuk ``/chat/sessions/{id}`` dipertahankan
+    supaya kontrak lama dan baru sama-sama bekerja.
     """
     if repository.get_session(session_id) is None:
         raise HTTPException(status_code=404, detail="Sesi tidak ditemukan.")
@@ -795,7 +795,7 @@ async def delete_session_by_path(
 
 @router.get("/settings", response_model=SettingsResponse)
 async def get_retrieval_settings(repository: RepositoryDep) -> SettingsResponse:
-    """Parameter retrieval yang sedang aktif (FR-6.1)."""
+    """Parameter retrieval yang sedang aktif."""
     current = await asyncio.to_thread(repository.get_settings)
     return SettingsResponse(
         top_k=current.top_k, similarity_threshold=current.similarity_threshold
@@ -806,7 +806,7 @@ async def get_retrieval_settings(repository: RepositoryDep) -> SettingsResponse:
 async def update_retrieval_settings(
     payload: SettingsUpdate, repository: RepositoryDep, config: SettingsDep
 ) -> SettingsResponse:
-    """Ubah parameter retrieval (FR-6.2).
+    """Ubah parameter retrieval.
 
     Nilai diklem ke rentang yang diizinkan. Response mengembalikan nilai final
     yang aktif, jadi frontend tidak perlu menebak apa yang terjadi kalau clamping
@@ -832,7 +832,7 @@ async def update_retrieval_settings(
 
 @router.get("/analytics/summary", response_model=AnalyticsSummaryResponse)
 async def get_analytics_summary(repository: RepositoryDep) -> AnalyticsSummaryResponse:
-    """Skor RAGAS terbaru, tren latensi, dan konsumsi token (FR-7.3).
+    """Skor RAGAS terbaru, tren latensi, dan konsumsi token.
 
     ``latest_eval`` bernilai ``None`` kalau belum ada run evaluasi, dan frontend
     menampilkan empty state. Tidak ada angka placeholder di sini.
@@ -865,7 +865,7 @@ async def run_retrieval_evaluation(
     config: SettingsDep,
     payload: EvalRequest | None = None,
 ) -> EvalRunResponse:
-    """Jalankan evaluasi retrieval tanpa LLM dan tanpa API key (FR-7.3).
+    """Jalankan evaluasi retrieval tanpa LLM dan tanpa API key.
 
     Halaman /analytics sebelumnya hanya bisa diisi oleh skrip RAGAS, yang
     butuh LLM penilai dan kredensial tambahan. Tanpa itu, pengguna melihat
@@ -1042,7 +1042,7 @@ async def get_analytics_logs(
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 10,
 ) -> AnalyticsLogsResponse:
-    """Log query terakhir, terpaginasi (FR-7.2)."""
+    """Log query terakhir, terpaginasi."""
     logs, total = await asyncio.to_thread(repository.list_logs, page, page_size)
     return AnalyticsLogsResponse(
         items=[log_to_response(log) for log in logs],

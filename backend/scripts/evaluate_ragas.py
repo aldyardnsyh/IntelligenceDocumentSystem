@@ -1,4 +1,4 @@
-"""Evaluasi kualitas retrieval dengan RAGAS (FR-7.3).
+"""Evaluasi kualitas retrieval dengan RAGAS.
 
 Skrip ini menjawab satu pertanyaan: **apakah perubahan retrieval benar-benar
 membantu, atau cuma terasa lebih bagus?** Tanpa pengukuran, claims seperti

@@ -1,4 +1,4 @@
-"""Tracing observabilitas dengan Langfuse (FR-7.4).
+"""Tracing observabilitas dengan Langfuse.
 
 Modul ini menjawab: "setelah jawaban keluar, bisakah kita melihat kembali
 langkah apa yang diambil sistem untuk sampai ke sana?" Tanpa tracing, debugging

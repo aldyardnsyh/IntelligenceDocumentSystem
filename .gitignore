@@ -107,3 +107,9 @@ desktop.ini
 /models/
 .cache/
 /huggingface/
+
+# Berkas konfigurasi AI coding agent. Bukan dokumentasi produk, dan Next.js
+# menulis ulang AGENTS.md setiap kali `next dev` dijalankan.
+frontend/AGENTS.md
+frontend/CLAUDE.md
+

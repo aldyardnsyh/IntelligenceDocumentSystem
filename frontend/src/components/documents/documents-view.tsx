@@ -214,7 +214,7 @@ export function DocumentsView() {
       {/*
         Drop zone besar hanya tampil saat korpus masih kosong. Setelah ada
         dokumen, aksi unggah pindah ke tombol header supaya tidak memakan
-        ruang grid (design.md 5).
+        ruang grid.
       */}
       {isEmptyCorpus ? (
         <UploadDropzone onSelect={(file) => uploadMutation.mutate(file)} />

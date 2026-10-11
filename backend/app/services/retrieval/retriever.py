@@ -329,7 +329,7 @@ class HybridRetriever:
     def remove_document(self, document_id: str) -> int:
         """Buang semua chunk milik satu dokumen dari indeks kata.
 
-        Dipakai saat dokumen dihapus (FR-1.5). Kalau tidak, BM25 masih akan
+        Dipakai saat dokumen dihapus. Kalau tidak, BM25 masih akan
         mengembalikan chunk dari dokumen yang sudah dihapus, dan dokumen lain
         ikut terpengaruh.
 

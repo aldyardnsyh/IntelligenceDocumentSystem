@@ -54,7 +54,7 @@ Aturan tanda baca:
 13. Jangan memakai tanda hubung untuk menyambung klausa. Tanda hubung hanya
     untuk kata ulang dan kata majemuk seperti "dua hari kerja"."""
 
-#: Dikirim kalau retrieval tidak menemukan yang cukup (FR-2.3). Perigten ini
+#: Dikirim kalau retrieval tidak menemukan yang cukup. Perigten ini
 #: dikirim SEBELUM memanggil LLM, jadi tidak ada panggilan model yang bisa
 #: mengarang jawaban dari konteks kosong.
 NOT_FOUND_RESPONSE = (
@@ -143,7 +143,7 @@ def build_context_prompt(
         question: Pertanyaan pengguna.
         retrieved: Chunk yang lolos retrieval, dari yang paling relevan.
         history: Pasangan ``(peran, isi)`` dari riwayat percakapan.
-        max_history: Berapa pesan terakhir yang dipakai (FR-3.2).
+        max_history: Berapa pesan terakhir yang dipakai.
         allow_history_only: Izinkan menjawab dari riwayat saja saat tidak ada
             chunk yang lolos. Dipakai untuk pertanyaan lanjutan ("berapa
             lama?" setelah "berapa hari SLA?") yang jawabannya sudah ada di
@@ -210,7 +210,7 @@ def build_context_prompt(
 
 
 def build_citations(retrieved: Sequence[RetrievedChunk]) -> list[Citation]:
-    """Bentuk sitasi untuk dikirim ke frontend (FR-2.2).
+    """Bentuk sitasi untuk dikirim ke frontend.
 
     Cuplikan sengaja dipotong pendek: antarmuka sudah menyediakan tautan ke
     chunk penuh, jadi mengirim paragraf utuh hanya menambah payload tanpa

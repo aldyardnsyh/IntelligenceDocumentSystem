@@ -14,7 +14,7 @@ import { getAnalyticsSummary, runRetrievalEvaluation } from "@/lib/api";
 import { ApiError } from "@/lib/api/error";
 import { queryKeys, useDocuments } from "@/lib/queries";
 
-/** Ambang target dari PRD Section 1.3. */
+/** Ambang target mutu retrieval yang dipakai di halaman ini. */
 const TARGETS = {
   precision: 0.75,
   answer_relevance: 0.8,
@@ -101,7 +101,7 @@ export function AnalyticsView() {
       {/*
         Area kartu statistik memakai RAGAS. Kalau belum ada run evaluasi,
         kartu diganti empty state yang menjelaskan cara mengisinya, bukan
-        diisi angka placeholder (TC-12).
+        diisi angka placeholder.
       */}
       {evalRun ? (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">

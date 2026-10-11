@@ -88,7 +88,7 @@ export function SettingsView() {
   });
 
   // Penyimpanan otomatis dengan debounce 800ms: mengubah slider terasa langsung
-  // tanpa mengetik ulang (design.md 7), tapi tidak menembak API tiap gerakan.
+  // tanpa mengetik ulang, tapi tidak menembak API tiap gerakan.
 // Patch yang belum dikirim digabung, bukan ditimpa. Kalau tidak, mengubah
   // top-k lalu threshold dalam jendela 800 ms membuat perubahan top-k hilang
   // tanpa jejak: timer berikutnya hanya membawa satu kunci.

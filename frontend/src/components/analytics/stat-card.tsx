@@ -33,7 +33,7 @@ interface StatCardProps {
 /**
  * Kartu statistik hanya dipakai kalau angkanya berasal dari pengukuran nyata.
  * Kalau belum ada run evaluasi, halaman menampilkan empty state, bukan angka
- * contoh (R-17, R-38).
+ * contoh.
  */
 export function StatCard({
   label,

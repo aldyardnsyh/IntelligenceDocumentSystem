@@ -6,13 +6,12 @@
 
 /* ---------------------------------------------------------------------------
    Design tokens.
-   Source: design.md Section 0 + Design/*.png slicing.
    One theme only: light. Dark mode sengaja tidak ada, jadi tidak ada
    kombinasi warna gelap yang setengah jadi atau tidak pernah diuji.
    Reason for the palette: this is a document-QA tool, so chrome stays neutral
    (white / near-white / grey) and colour is reserved for meaning only:
    navy = identity + primary action, blue = interactive accent, and the three
-   status hues never appear as decoration. Max 2 core + 1 accent (R-29).
+   status hues never appear as decoration. Max 2 core + 1 accent.
 --------------------------------------------------------------------------- */
 @theme inline {
   --color-background: var(--background);
@@ -57,7 +56,7 @@
   --font-mono: var(--font-jetbrains);
   --font-heading: var(--font-inter);
 
-  /* Radius scale from design.md: 8px card/button, 12px chat bubble.
+  /* Radius scale: 8px card/button, 12px chat bubble.
      Buttons and cards share 8px on purpose so they read as one family. */
   --radius-sm: 4px;
   --radius-md: 6px;
@@ -141,7 +140,7 @@
     line-height: 1.25;
   }
 
-  /* Visible keyboard focus everywhere (R-32). Never remove, only replace. */
+  /* Visible keyboard focus everywhere. Never remove, only replace. */
   :focus-visible {
     @apply outline-2 outline-offset-2 outline-ring;
   }

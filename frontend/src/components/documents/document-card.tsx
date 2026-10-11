@@ -22,8 +22,8 @@ import type { DocumentStatus, DocumentSummary } from "@/types/api";
 
 /**
  * Satu komponen ini memegang pemetaan status untuk semua keadaan dokumen,
- * jadi warna badge tidak pernah berarti dua hal berbeda di halaman berbeda
- * (R-09: badge hanya dipakai kalau fungsinya nyata, yaitu status).
+ * jadi warna badge tidak pernah berarti dua hal berbeda di halaman berbeda.
+ * Badge hanya dipakai kalau fungsinya nyata, yaitu status.
  */
 const STATUS_META: Record<
   DocumentStatus,
@@ -87,7 +87,7 @@ export function DocumentCard({ document }: DocumentCardProps) {
 
   // berkas asli sudah tidak ada di browser, jadi "coba lagi" berarti
   // meminta pengguna memilih ulang berkasnya. Tidak ada tombol yang berpura-pura
-  // mengunggah ulang sesuatu yang tidak ada (R-26).
+  // mengunggah ulang sesuatu yang tidak ada.
   const retryInputRef = useRef<HTMLInputElement>(null);
   const retryMutation = useMutation({
     mutationFn: (file: File) => uploadDocument(file),

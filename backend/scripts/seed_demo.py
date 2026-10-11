@@ -1,4 +1,4 @@
-"""Isi database dengan dokumen contoh (FR-8.1).
+"""Isi database dengan dokumen contoh.
 
 Portofolio yang dibuka pertama kali dalam keadaan kosong terlihat rusak,
 padahal sistemnya sehat. Skrip ini mengunggah satu SOP contoh supaya pengunjung

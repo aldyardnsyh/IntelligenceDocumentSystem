@@ -14,7 +14,7 @@ from typing import Any
 
 
 class DocumentStatus(StrEnum):
-    """Status ingestion dokumen (FR-1.3).
+    """Status ingestion dokumen.
 
     ``StrEnum`` (bukan ``str, Enum``) karena proyek mensyaratkan Python 3.11.
     Bedanya bukan cuma gula sintaks: dengan ``StrEnum``,
@@ -50,7 +50,7 @@ class Document:
 
 @dataclass(slots=True)
 class Chunk:
-    """Potongan teks beserta posisinya di dokumen (PRD 8.3).
+    """Potongan teks beserta posisinya di dokumen.
 
     ``document_name`` diisi ketika chunk dibaca kembali dari penyimpanan.
     Saat chunk baru dibuat dari parsing, kolom ini masih ``None`` karena nama
@@ -89,7 +89,7 @@ class RetrievedChunk:
 
 @dataclass(slots=True)
 class Citation:
-    """Satu sumber yang bisa ditelusuri (FR-2.2).
+    """Satu sumber yang bisa ditelusuri.
 
     ``score`` di sini adalah skor gabungan hybrid retrieval (RRF yang sudah
     dinormalisasi ke 0..1), **bukan** cosine similarity. Dua angka itu tidak
@@ -142,7 +142,7 @@ class ChatSession:
 
 @dataclass(slots=True)
 class RetrievalSettings:
-    """Parameter retrieval yang bisa diubah user (FR-6.1)."""
+    """Parameter retrieval yang bisa diubah user."""
 
     top_k: int
     similarity_threshold: float
@@ -150,7 +150,7 @@ class RetrievalSettings:
 
 @dataclass(slots=True)
 class QueryLog:
-    """Satu baris log query untuk dashboard analitik (FR-7.2)."""
+    """Satu baris log query untuk dashboard analitik."""
 
     id: str
     session_id: str | None

@@ -71,7 +71,7 @@ const missingEnvNames = MISSING_LINKS.filter((item) => item.href === null).map((
 /**
  * Tautan keluar selalu punya dua tampilan: tautan nyata kalau env-nya diisi,
  * dan tombol nonaktif berlabel kalau belum. Tidak pernah menautkan ke halaman
- * yang tidak ada (R-24, R-26).
+ * yang tidak ada.
  */
 function ExternalLinkButton({
   href,

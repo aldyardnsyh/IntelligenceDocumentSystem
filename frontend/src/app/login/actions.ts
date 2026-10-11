@@ -23,7 +23,7 @@ export interface LoginState {
  * Verifikasi passcode punya tepat satu sumber kebenaran.
  *
  * - Backend terhubung  : POST /api/v1/auth/verify yang memutuskan. Rate limit
- *   dan session token juga milik backend (FR-0.2, FR-0.3).
+ *   dan session token juga milik backend.
  * - Mode lokal         : passcode dicocokkan dengan hash dari env var
  *   DEMO_PASSCODE, supaya UI tetap bisa dicoba tanpa backend.
  */

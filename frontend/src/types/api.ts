@@ -1,10 +1,10 @@
 /**
  * Kontrak API frontend <-> backend FastAPI.
- * Cerminan langsung tabel endpoint di PRD/SRS Section 6.8.
+ * Cerminan kontrak API backend FastAPI (lihat API-CONTRACT.md).
  * Kalau backend berubah, ubah file ini dulu, lalu komponennya.
  */
 
-/** Status ingestion dokumen (FR-1.3). */
+/** Status ingestion dokumen. */
 export type DocumentStatus =
   | "uploading"
   | "processing"
@@ -79,7 +79,7 @@ export interface Citation {
   document_name: string;
   page_number: number | null;
   chunk_index: number;
-  /** cuplikan pendek, bukan kutipan penuh (design.md 4.4) */
+  /** cuplikan pendek, bukan kutipan penuh */
   excerpt: string;
   score: number;
 }
@@ -90,7 +90,7 @@ export interface ChatMessage {
   content: string;
   created_at: string;
   citations: Citation[];
-  /** true bila retrieval tidak melewati similarity threshold (FR-2.3) */
+  /** true bila retrieval tidak melewati similarity threshold */
   not_found?: boolean;
   /**
    * true bila jawaban datang dari pengetahuan umum model, bukan dari
@@ -172,7 +172,7 @@ export interface QueryLog {
 }
 
 export interface AnalyticsSummary {
-  /** null = belum ada run evaluasi (TC-12) */
+  /** null = belum ada run evaluasi */
   latest_eval: EvalRun | null;
   latency: LatencyPoint[];
   tokens: TokenPoint[];

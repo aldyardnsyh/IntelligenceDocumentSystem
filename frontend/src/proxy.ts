@@ -6,7 +6,7 @@ const SESSION_COOKIE = "ida_gate";
 const PUBLIC_PATHS = ["/login"];
 
 /**
- * Access gate di sisi server (PRD FR-0.1, TC-13). Redirect terjadi sebelum
+ * Access gate di sisi server. Redirect terjadi sebelum
  * render, jadi isi /chat tidak pernah sampai ke browser tanpa sesi.
  *
  * Catatan: proxy hanya memeriksa keberadaan cookie. Penegakan sesungguhnya

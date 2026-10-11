@@ -2,7 +2,8 @@
 
 Ada dua backend:
 
-- **Redis** (atau Upstash REST) untuk deployment multi-instance, sesuai PRD 7.
+- **Redis** (atau Upstash REST) untuk deployment multi-instance, supaya sesi
+  dan cache tetap konsisten saat aplikasi jalan di lebih dari satu proses.
 - **Dict in-process** untuk pengembangan lokal dan test.
 
 Pemilihan otomatis berdasarkan env. Kalau Redis tidak ada, sistem tetap jalan
@@ -348,7 +349,7 @@ def cache_key(
     similarity_threshold: float | None = None,
     document_id: str | None = None,
 ) -> str:
-    """Kunci cache query (FR-4.1).
+    """Kunci cache query.
 
     Hash dari query, set dokumen, dan parameter retrieval. Semua yang bisa
     mengubah jawaban harus ikut: ``top_k`` menentukan berapa sumber yang

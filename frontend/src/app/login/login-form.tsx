@@ -82,7 +82,7 @@ export function LoginForm({ devHint, nextPath }: LoginFormProps) {
         </div>
       </div>
 
-      {/* Error inline, bukan Alert besar: satu field, satu pesan (design.md 2). */}
+      {/* Error inline, bukan Alert besar: satu field, satu pesan. */}
       <p
         id="passcode-feedback"
         role={state.status === "idle" ? undefined : "alert"}

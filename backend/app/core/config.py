@@ -1,8 +1,8 @@
 """Konfigurasi aplikasi.
 
 Semua nilai sensitif dibaca dari environment variable. Tidak ada API key,
-password, atau passcode yang tertulis di source (PRD Success Metric: zero
-hardcoded secrets).
+password, atau passcode yang tertulis di source, jadi tidak ada rahasia yang
+ikut ter-commit.
 """
 
 from __future__ import annotations
@@ -45,16 +45,16 @@ class Settings(BaseSettings):
     )
 
     # ------------------------------------------------------------- security
-    """Hash passcode access gate (FR-0.1).
+    """Hash passcode access gate.
 
     Bandingkan dengan hash, bukan plaintext, supaya bocornya isi environment
     tidak langsung berarti bypass. Verifikasi happened di
     ``app.core.security``.
     """
     access_passcode_sha256: str | None = None
-    """Sesi access gate berlaku berapa detik (FR-0.2). Default 24 jam."""
+    """Sesi access gate berlaku berapa detik. Default 24 jam."""
     session_ttl_seconds: int = 60 * 60 * 24
-    """Rate limit verifikasi passcode: jumlah percobaan per jendela waktu (FR-0.3)."""
+    """Rate limit verifikasi passcode: jumlah percobaan per jendela waktu."""
     auth_max_attempts: int = 5
     auth_window_seconds: int = 5 * 60
     """Percayai ``X-Forwarded-For`` untuk key rate limit.
@@ -125,9 +125,9 @@ class Settings(BaseSettings):
     default_similarity_threshold: float = 0.82
     min_similarity_threshold: float = 0.75
     max_similarity_threshold: float = 0.92
-    """Berapa pesan terakhir yang ikut sebagai konteks (FR-3.2)."""
+    """Berapa pesan terakhir yang ikut sebagai konteks."""
     history_message_count: int = 6
-    """Cache query: TTL dan key (FR-4.1)."""
+    """Cache query: TTL dan key."""
     cache_ttl_seconds: int = 30 * 60
     """Rate limit query per sesi, untuk melindungi kuota free tier."""
     query_max_per_session: int = 20

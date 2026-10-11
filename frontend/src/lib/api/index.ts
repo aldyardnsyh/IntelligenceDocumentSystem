@@ -114,8 +114,8 @@ export async function deleteDocument(id: string) {
 
 export function listSessions(signal?: AbortSignal): Promise<ChatSession[]> {
   if (isMockMode) return mockApi.listSessions();
-  // Catatan: endpoint ini belum ada di tabel PRD 6.8, tetapi sidebar
-  // membutuhkannya. Sudah dicatat sebagai kebutuhan backend.
+  // Catatan: endpoint ini dipakai sidebar, jadi harus tetap ada
+  // walau tidak muncul di tabel kontrak API.
   return request<ChatSession[]>("/api/v1/chat/sessions", { signal });
 }
 

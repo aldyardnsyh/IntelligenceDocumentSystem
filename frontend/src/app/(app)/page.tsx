@@ -93,7 +93,7 @@ export default function LandingPage() {
       <section className="border-t border-border py-14">
         {/*
           Empty state yang jujur: tanpa dokumen, chat memang tidak bisa
-          dipakai, dan alasannya ditulis eksplisit (R-27).
+          dipakai, dan alasannya ditulis eksplisit.
         */}
         <EmptyState
           Icon={FileUp}

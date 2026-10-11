@@ -13,8 +13,7 @@ interface ErrorStateProps {
 
 /**
  * Error dimunculkan per komponen, bukan menjatuhkan seluruh halaman ke /error.
- * Satu endpoint yang gagal tidak boleh membuat dashboard tidak bisa dipakai
- * (design.md 12).
+ * Satu endpoint yang gagal tidak boleh membuat dashboard tidak bisa dipakai.
  */
 export function ErrorState({ error, onRetry, title = "Gagal memuat data", className }: ErrorStateProps) {
   const message = error instanceof ApiError

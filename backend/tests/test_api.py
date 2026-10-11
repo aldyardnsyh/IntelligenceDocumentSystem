@@ -337,7 +337,7 @@ class TestAuth:
         assert response.status_code == 422
 
     async def test_rate_limit_percobaan_gagal(self, anon_client: AsyncClient) -> None:
-        # Enam percobaan salah; percobaan ke-6 harus ditolak (TC-09).
+        # Enam percobaan salah; percobaan ke-6 harus ditolak.
         statuses = []
         for _ in range(6):
             response = await anon_client.post(
@@ -389,7 +389,7 @@ class TestDocuments:
             "/api/v1/documents/upload",
             files={"file": ("panduan.md", SAMPLE_DOCUMENT.encode("utf-8"), "text/markdown")},
         )
-        # 202 karena ingestion berjalan di background (FR-1.1).
+        # 202 karena ingestion berjalan di background.
         assert response.status_code == 202
         body = response.json()
         assert body["filename"] == "panduan.md"
@@ -1366,7 +1366,7 @@ class TestErrorShape:
         assert body["code"] == "validation_error"
 
     async def test_openapi_tersedia(self, client: AsyncClient) -> None:
-        # PRD 5.3 menyebut auto-dokumentasi; itu gratis dari FastAPI.
+        # Skema OpenAPI tersedia otomatis dari FastAPI.
         response = await client.get("/openapi.json")
         assert response.status_code == 200
         assert "/api/v1/chat/query" in response.json()["paths"]

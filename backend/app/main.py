@@ -7,8 +7,8 @@ Titik masuk backend. Yang penting di sini:
   halaman selalu punya pesan yang bisa ditampilkan, bukan traceback.
 - **CORS terbatas.** Hanya origin yang terdaftar, bukan ``*``, karena API ini
   memegang dokumen pengguna.
-- **Swagger otomatis.** PRD 5.3 menyebut auto-dokumentasi; itu gratis dari
-  FastAPI.
+- **Swagger otomatis.** Skema OpenAPI dan halaman ``/docs`` didapat gratis dari
+  FastAPI, jadi kontrak API selalu ikut versi kode.
 """
 
 from __future__ import annotations

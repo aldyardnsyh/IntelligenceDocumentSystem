@@ -74,7 +74,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   try {
     response = await fetch(buildUrl(path, query), {
       method,
-      // Cookie sesi access gate (FR-0.2) ikut terkirim.
+      // Cookie sesi access gate ikut terkirim.
       credentials: "include",
       headers: isFormData || body === undefined ? undefined : { "content-type": "application/json" },
       body: body === undefined ? undefined : isFormData ? body : JSON.stringify(body),
