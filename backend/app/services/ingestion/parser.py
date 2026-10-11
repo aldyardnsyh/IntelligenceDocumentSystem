@@ -16,7 +16,8 @@ from __future__ import annotations
 
 import io
 import logging
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
 
 from app.core.config import Settings
 
@@ -25,6 +26,12 @@ logger = logging.getLogger(__name__)
 #: Batas karakter per halaman sebelum dianggap mencurigakan (biasanya hasil
 #: OCR yang gagal, atau PDF yang hanya berisi gambar).
 MIN_CHARS_PER_PAGE = 40
+#: Karakter markup yang dibuang dari nama berkas. Nama berkas ikut masuk ke
+#: konteks prompt LLM, jadi membiarkannya berarti membuka jalur prompt
+#: injection, bukan hanya masalah tampilan.
+_MARKUP_RE = re.compile(r"[<>{}\[\]|`^$]")
+
+
 class ParseError(RuntimeError):
     """Berkas tidak bisa dibaca. Pesannya ditulis untuk ditampilkan."""
 
@@ -47,6 +54,10 @@ class ParsedDocument:
     #: untuk PDF, halaman kosong berarti hasil pindai; untuk TXT/MD, isi
     #: pendek itu valid.
     is_pdf: bool = False
+    #: Nomor halaman yang tidak menghasilkan teks sama sekali. PDF hasil
+    #: pindai atau sebagian korup punya pola ini; pengguna perlu tahu kalau
+    #: sebagian isi dokumennya tidak ikut terindeks.
+    empty_pages: list[int] = field(default_factory=list)
 
     @property
     def full_text(self) -> str:
@@ -81,6 +92,41 @@ class ParsedDocument:
             )
             return filled == 0
         return False
+
+
+def sanitize_filename(raw: str) -> str:
+    r"""Bersihkan nama berkas dari metadata klien sebelum disimpan.
+
+    Nama berkas berasal penuh dari klien dan dipakai sebagai metadata Chroma,
+    isi citation card, dan konteks prompt. Tanpa sanitasi:
+    - separator path (``../``, ``C:\\``) ikut tersimpan dan menyesatkan di UI
+      walau saat ini tidak pernah dipakai untuk menulis berkas;
+    - karakter kontrol/newline merusak tampilan daftar dokumen;
+    - markup dalam nama bisa jadi XSS tersimpan di frontend atau menyuntik
+      instruksi ke prompt LLM.
+    """
+    name = raw.replace("\\", "/").rsplit("/", 1)[-1]
+    name = "".join(char for char in name if char.isprintable()).strip()
+    # Tanda markup dibuang di server, bukan hanya saat dirender: nama berkas
+    # ikut masuk ke konteks prompt LLM, jadi markup di dalamnya adalah jalur
+    # prompt injection yang tidak perluSentuh sama sekali kerentanan XSS.
+    name = _MARKUP_RE.sub("", name)
+    name = re.sub(r"\s+", " ", name).strip(" .")
+
+    if not name:
+        raise ParseError("Nama berkas tidak terbaca.")
+
+    stem, dot, ext = name.rpartition(".")
+    if dot and len(ext) <= 10:
+        stem, ext = stem, ext
+    else:
+        stem, ext = name, ""
+
+    # Batas aman untuk filesystem dan kolom database. Ekstensi dipertahankan
+    # supaya validasi format tetap bekerja.
+    stem = stem[:180]
+    ext = ext[:10]
+    return f"{stem}.{ext}" if ext else stem
 
 
 def validate_extension(filename: str, settings: Settings) -> str:
@@ -128,18 +174,24 @@ def _parse_pdf(data: bytes) -> ParsedDocument:
             raise ParseError("PDF ini diproteksi password. Hapus passwordnya lalu unggah ulang.")
 
     pages: list[ParsedPage] = []
+    empty_pages: list[int] = []
     for index, page in enumerate(reader.pages, start=1):
         try:
             text = page.extract_text() or ""
         except Exception as exc:  # noqa: BLE001
             logger.warning("Gagal ekstrak halaman %d: %s", index, exc)
             text = ""
-        pages.append(ParsedPage(text=text.strip(), page_number=index))
+        stripped = text.strip()
+        if not stripped:
+            empty_pages.append(index)
+        pages.append(ParsedPage(text=stripped, page_number=index))
 
     if not pages:
         raise ParseError("PDF tidak berisi halaman yang bisa dibaca.")
 
-    return ParsedDocument(pages=pages, page_count=len(pages), is_pdf=True)
+    parsed = ParsedDocument(pages=pages, page_count=len(pages), is_pdf=True)
+    parsed.empty_pages = empty_pages
+    return parsed
 
 
 def _parse_text(raw: bytes, filename: str) -> ParsedDocument:
@@ -148,7 +200,9 @@ def _parse_text(raw: bytes, filename: str) -> ParsedDocument:
     Deteksi encoding dengan urutan tebakan yang umum dipakai. Berkas
     Indonesia sering bukan UTF-8 murni.
     """
-    for encoding in ("utf-8", "utf-8-sig", "latin-1"):
+    # ``utf-8-sig`` dicoba lebih dulu: file ber-BOM berhasil di-decode sebagai
+    # ``utf-8`` biasa, hanya dengan karakter ``﻿`` menempel di awal teks.
+    for encoding in ("utf-8-sig", "utf-8", "latin-1"):
         try:
             text = raw.decode(encoding)
             break

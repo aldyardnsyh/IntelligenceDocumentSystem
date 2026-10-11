@@ -101,47 +101,62 @@ def _split_long_paragraph(
         return
 
     sentences = _SENTENCE_END_RE.split(paragraph)
-    buffer = ""
+
+    # Buffer dipantau sebagai rentang karakter di paragraf asli, bukan sebagai
+    # string yang dirakit ulang. Menyambung kalimat dengan spasi mengarang
+    # teks yang tidak ada di dokumen (baris baru diganti spasi), dan offset
+    # hasil hitungan manual ikut meleset, Citation Card lalu menyorot potongan
+    # yang salah. Dengan rentang, 	ext[char_start:char_end] selalu sama
+    # dengan content.
+    cursor = 0
     buffer_start = start
+    buffer_end = start
+
+    def _span() -> TextSpan:
+        return TextSpan(
+            content=paragraph[buffer_start - start : buffer_end - start],
+            char_start=buffer_start,
+            char_end=buffer_end,
+        )
 
     for sentence in sentences:
         if not sentence:
             continue
-        candidate = f"{buffer} {sentence}".strip() if buffer else sentence
-        if len(candidate) <= size:
-            buffer = candidate
+        sentence_start = start + cursor
+        cursor += len(sentence)
+        sentence_end = sentence_start + len(sentence)
+
+        if sentence_end - buffer_start <= size:
+            buffer_end = sentence_end
             continue
 
-        if buffer:
-            yield TextSpan(
-                content=buffer,
-                char_start=buffer_start,
-                char_end=buffer_start + len(buffer),
-            )
-            # Carry ekor kalimat sebelumnya supaya kalimat yang melintasi batas
+        if buffer_end > buffer_start:
+            yield _span()
+            # Carry ekor chunk sebelumnya supaya kalimat yang melintasi batas
             # tidak hilang utuh di chunk berikutnya.
-            carry = buffer[-overlap:] if overlap > 0 else ""
-            buffer = f"{carry} {sentence}".strip()
-            buffer_start = start + len(paragraph) - len(buffer)
-        else:
-            # Satu kalimat lebih panjang dari size: harus dipotong karakter.
-            for index in range(0, len(sentence), size - overlap):
-                piece = sentence[index : index + size]
-                if not piece.strip():
-                    continue
-                piece_start = start + index
-                yield TextSpan(
-                    content=piece.strip(),
-                    char_start=piece_start,
-                    char_end=piece_start + len(piece.strip()),
-                )
+            buffer_start = max(buffer_end - overlap, buffer_start)
+            buffer_end = sentence_end
 
-    if buffer.strip():
-        yield TextSpan(
-            content=buffer.strip(),
-            char_start=buffer_start,
-            char_end=buffer_start + len(buffer.strip()),
-        )
+        # Kalimat ini sendiri bisa lebih panjang dari `size`, bahkan setelah
+        # buffer dikuras. Kalau tidak dipotong karakter, satu chunk bisa jauh
+        # melampaui batas, dan batas itulah yang membuat token context
+        # terukur.
+        while sentence_end - buffer_start > size:
+            piece_end = min(sentence_end, buffer_start + size)
+            yield TextSpan(
+                content=paragraph[buffer_start - start : piece_end - start],
+                char_start=buffer_start,
+                char_end=piece_end,
+            )
+            if overlap > 0:
+                buffer_start = max(piece_end - overlap, buffer_start)
+                if buffer_start >= piece_end:
+                    buffer_start = piece_end
+            else:
+                buffer_start = piece_end
+
+    if buffer_end > buffer_start:
+        yield _span()
 
 
 def chunk_text(
@@ -160,6 +175,13 @@ def chunk_text(
 
     Returns:
         Daftar TextSpan terurut sesuai kemunculan di dokumen.
+
+    Catatan desain: overlap berlaku **di dalam** satu paragraf, tidak antar
+    paragraf. Menempelkan ekor paragraf sebelumnya ke paragraf berikutnya
+    memang terlihat lebih mudah, tapi membuat `content` bukan lagi potongan
+    bersambung dari dokumen, sehingga `char_start`/`char_end` tidak lagi bisa
+    dipakai menyorot kutipan. Kebenarannya sitasi lebih berharga daripada
+    beberapa kalimat konteks tambahan di batas paragraf.
     """
     if size <= 0:
         raise ValueError("size harus lebih besar dari 0")

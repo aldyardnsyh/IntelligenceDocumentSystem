@@ -9,6 +9,7 @@ polling status (FR-1.4).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 
 from app.core.config import Settings
@@ -17,9 +18,10 @@ from app.providers.embedding import EmbeddingProvider, build_embedding_provider
 from app.repositories.sqlite_repo import MetadataRepository, new_id, utc_now
 from app.services.ingestion.chunker import TextSpan, chunk_text
 from app.services.ingestion.parser import ParsedDocument, ParseError, parse_document
-from app.services.memory.store import CACHE_PREFIX, MemoryStore
+from app.services.memory.store import ANSWER_CACHE_PREFIX, CACHE_PREFIX, MemoryStore
 from app.services.retrieval.retriever import COLLECTION, HybridRetriever, IndexEntry
 from app.services.retrieval.vector_store import VectorRecord, VectorStore, build_vector_store
+from app.services.storage import OriginalFileStore
 
 logger = logging.getLogger(__name__)
 
@@ -44,9 +46,17 @@ class IngestionService:
         # Memory store dipakai untuk membersihkan cache saat dokumen dihapus.
         # Opsional supaya test bisa membangun service tanpa memory store.
         self._memory = memory
+        # Berkas asli disimpan untuk pratinjau PDF. Dibuat di sini supaya
+        # test bisa mengarahkannya ke direktori sementara.
+        self._original_files = OriginalFileStore(settings.uploads_dir)
         # Referensi kuat ke task background. Tanpa ini, task bisa di-collect
         # garbage collector sebelum selesai dan dibatalkan di tengah jalan.
         self._tasks: set[asyncio.Task[None]] = set()
+        # Task dikelompokkan per dokumen supaya ``delete`` bisa membatalkan dan
+        # menunggu ingestion yang sedang jalan. Tanpa itu, pengguna menghapus
+        # dokumen yang masih diproses, task lamunya tetap selesai menulis chunk
+        # jadi metadata hilang, chunk yatim yang tidak ada lagi di metadata.
+        self._tasks_by_document: dict[str, asyncio.Task[None]] = {}
 
     # Atribut dibaca-tulis dari luar (test, health check), jadi
     # diekspos sebagai properti, bukan accessed lewat ``_``.
@@ -65,6 +75,10 @@ class IngestionService:
     @property
     def retriever(self) -> HybridRetriever:
         return self._retriever
+
+    @property
+    def original_files(self) -> OriginalFileStore:
+        return self._original_files
 
     @property
     def embedding(self) -> EmbeddingProvider:
@@ -115,14 +129,45 @@ class IngestionService:
             page_count=parsed.page_count,
             chunk_count=0,
         )
+
+        # Halaman kosong dilaporkan, bukan diterima diam-diam. PDF hasil pindai
+        # atau sebagian korup akan terlihat "siap" padahal separuh isinya
+        # tidak pernah terindeks, dan itu penyebab jawaban "tidak ditemukan"
+        # yang sangat sulit ditebak.
+        if parsed.empty_pages:
+            shown = ", ".join(str(page) for page in parsed.empty_pages[:10])
+            more = "" if len(parsed.empty_pages) <= 10 else ", ..."
+            logger.warning(
+                "Dokumen %s: %d halaman tidak menghasilkan teks (halaman %s%s). "
+                "Isi halaman itu tidak bisa dicari.",
+                document_id,
+                len(parsed.empty_pages),
+                shown,
+                more,
+            )
+
         await asyncio.to_thread(self._repository.add_document, document)
+
+        # Berkas asli disimpan untuk pratinjau. Kegagalannya tidak
+        # menggagalkan ingestion: isi dokumen sudah tersimpan sebagai chunk,
+        # jadi dokumen tetap bisa ditanyai; yang hilang hanya pratinjau.
+        await asyncio.to_thread(
+            self._original_files.save, document_id, filename, data
+        )
 
         # Selesaikan di background supaya request upload tidak tertahan.
         # Referensi disimpan, kalau tidak event loop bisa mengumpulkan task
         # yang belum selesai dan membatalkannya di tengah jalan.
         task = asyncio.create_task(self._process(document, parsed))
         self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
+        self._tasks_by_document[document.id] = task
+
+        def _discard(finished: asyncio.Task[None]) -> None:
+            self._tasks.discard(finished)
+            if self._tasks_by_document.get(document.id) is finished:
+                self._tasks_by_document.pop(document.id, None)
+
+        task.add_done_callback(_discard)
         return document
 
     async def wait_pending(self) -> None:
@@ -137,11 +182,12 @@ class IngestionService:
     async def _process(self, document: Document, parsed: ParsedDocument) -> None:
         """Chunking, embedding, lalu tulis ke vector store dan metadata."""
         try:
-            spans = self.build_spans(parsed)
+            spans = await asyncio.to_thread(self.build_spans, parsed)
             chunks = self.to_chunks(document.id, spans)
 
             if not chunks:
-                self._repository.update_document(
+                await asyncio.to_thread(
+                    self._repository.update_document,
                     document.id,
                     status=DocumentStatus.FAILED,
                     error_message="Pemecahan teks tidak menghasilkan chunk yang bisa diindeks.",
@@ -172,30 +218,47 @@ class IngestionService:
             await asyncio.to_thread(
                 self._repository.add_chunks, chunks, document.id
             )
-            self._retriever.index(
-                IndexEntry(
-                    chunk_id=chunk.id,
-                    document_id=document.id,
-                    document_name=document.filename,
-                    content=chunk.content,
-                    chunk_index=chunk.chunk_index,
-                    page_number=chunk.page_number,
-                )
-                for chunk in chunks
+            # BM25 index dibangun di memori dan ini pekerjaan CPU+I/O.
+            # Menjalankannya langsung memblokir event loop sepanjang durasi
+            # dokumen besar.
+            await asyncio.to_thread(
+                self._retriever.index,
+                [
+                    IndexEntry(
+                        chunk_id=chunk.id,
+                        document_id=document.id,
+                        document_name=document.filename,
+                        content=chunk.content,
+                        chunk_index=chunk.chunk_index,
+                        page_number=chunk.page_number,
+                    )
+                    for chunk in chunks
+                ],
             )
 
-            self._repository.update_document(
+            await asyncio.to_thread(
+                self._repository.update_document,
                 document.id,
                 status=DocumentStatus.READY,
                 chunk_count=len(chunks),
                 page_count=document.page_count,
             )
+
+            # Cache jawaban yang dibuat sebelum dokumen ini ada bisa jadi
+            # sudah dijawab "tidak ditemukan". Setelah dokumen masuk, jawaban
+            # itu basi, dan pengguna akan menyimpulkan sistemnya tidak
+            # membaca dokumen barunya.
+            if self._memory is not None:
+                await self._memory.delete_by_prefix(
+                    f"{CACHE_PREFIX}{ANSWER_CACHE_PREFIX}"
+                )
             logger.info(
                 "Dokumen %s siap: %d chunk dari %s", document.id, len(chunks), document.filename
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception("Ingestion %s gagal", document.id)
-            self._repository.update_document(
+            await asyncio.to_thread(
+                self._repository.update_document,
                 document.id,
                 status=DocumentStatus.FAILED,
                 error_message=f"Pemrosesan gagal: {exc}",
@@ -255,15 +318,39 @@ class IngestionService:
         if document is None:
             return
 
+        # Ingestion yang masih jalan dibatalkan lebih dulu. Kalau tidak, task
+        # bisa selesai menulis chunk dan indeks setelah metadata dihapus, dan
+        # dokumen itu datang kembali sebagai chunk yang tidak ada pemiliknya.
+        task = self._tasks_by_document.get(document_id)
+        if task is not None and not task.done():
+            task.cancel()
+            # CancellationError ikut tertangkap agar delete tetap lanjut ke
+            # penghapusan metadata; error lain juga diabaikan karena yang
+            # penting di sini hanya memastikan task tidak lagi menulis.
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
+
         await asyncio.to_thread(self._repository.delete_document, document_id)
         await asyncio.to_thread(
             self._store.delete_document, document_id, COLLECTION
         )
         removed = self._retriever.remove_document(document_id)
 
+        # Berkas aslinya ikut dibuang. Kalau tidak, disk terisi berkas yang
+        # tidak lagi bisa diakses siapa pun.
+        if document is not None:
+            await asyncio.to_thread(
+                self._original_files.delete, document_id, document.filename
+            )
+
         purged = 0
         if self._memory is not None:
-            purged = await self._memory.delete_by_prefix(CACHE_PREFIX)
+            # Hanya cache jawaban yang dibersihkan. Namespace `cache:` juga
+            # dipakai counter rate limit, jadi menghapusnya seluruhnya akan
+            # mereset kuota pengguna setiap kali satu dokumen dihapus.
+            purged = await self._memory.delete_by_prefix(
+                f"{CACHE_PREFIX}{ANSWER_CACHE_PREFIX}"
+            )
 
         logger.info(
             "Dokumen %s dihapus: %d chunk dari indeks, %d entri cache",
