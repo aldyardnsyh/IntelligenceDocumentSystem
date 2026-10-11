@@ -255,6 +255,10 @@ class TestHybridRetriever:
         base = "penyelesaian dua hari kerja"
         records = []
         index_entries = []
+        # Delapan chunk dari satu dokumen. Retriever membatasi kontribusi satu
+        # dokumen supaya satu berkas tidak memenuhi seluruh jatah `top_k`;
+        # kalau hasilnya lebih kecil dari `top_k`, itu perilaku yang
+        # diinginkan, bukan bug.
         for index in range(8):
             text = f"{base} varian nomor {index}"
             identifier = f"c{index}"
@@ -276,7 +280,63 @@ class TestHybridRetriever:
         store.upsert(records, "chunks")
         retriever.index(index_entries)
         results = retriever.retrieve(base, embedding.embed_query(base), 3, 0.0)
-        assert len(results) == 3
+        assert 0 < len(results) <= 3
+
+    def test_satu_dokumen_tidak_memenuhi_semua_jatah(
+        self, store: InMemoryVectorStore, embedding, retriever: HybridRetriever
+    ) -> None:
+        """Kontribusi satu dokumen dibatasi agar sumber lain ikut terlihat.
+
+        Tanpa batas ini, dokumen dengan banyak chunk mengisi seluruh `top_k`
+        dan jawaban hanya melihat satu berkas, pengguna melihat banyak
+        sumber padahal semuanya dari dokumen yang sama.
+        """
+        records = []
+        index_entries = []
+        for index in range(6):
+            text = f"prosedur layanan nomor {index}"
+            identifier = f"d1_c{index}"
+            records.append(
+                VectorRecord(
+                    id=identifier,
+                    embedding=embedding.embed_query(text),
+                    metadata={
+                        "document_id": "d1",
+                        "document_name": "besar.md",
+                        "chunk_index": index,
+                        "page_number": None,
+                        "content": text,
+                        "token_count": 10,
+                    },
+                )
+            )
+            index_entries.append(_entry(identifier, "d1", text, None))
+        other = "prosedur layanan versi kedua"
+        records.append(
+            VectorRecord(
+                id="d2_c0",
+                embedding=embedding.embed_query(other),
+                metadata={
+                    "document_id": "d2",
+                    "document_name": "lain.md",
+                    "chunk_index": 0,
+                    "page_number": None,
+                    "content": other,
+                    "token_count": 10,
+                },
+            )
+        )
+        index_entries.append(_entry("d2_c0", "d2", other, None))
+        store.upsert(records, "chunks")
+        retriever.index(index_entries)
+
+        results = retriever.retrieve(
+            "prosedur layanan", embedding.embed_query("prosedur layanan"), 6, 0.0
+        )
+        counts: dict[str, int] = {}
+        for item in results:
+            counts[item.chunk.document_id] = counts.get(item.chunk.document_id, 0) + 1
+        assert counts.get("d1", 0) < 6, "satu dokumen tidak boleh mengisi semua jatah"
 
     def test_clear_mengosongkan_indeks_kata(self, store: InMemoryVectorStore) -> None:
         retriever = HybridRetriever(store)
@@ -368,8 +428,8 @@ class TestRebuildSetelahRestart:
 
     Indeks BM25 dan peta metadata dulu hanya terisi oleh dokumen yang
     diunggah selama proses berjalan. Setelah container di-restart, dokumennya
-    masih ada di vector store dan database, tapi retriever tidak tahu apa pun
-    -- sehingga setiap pertanyaan dijawab "tidak ditemukan" tanpa error.
+    masih ada di vector store dan database, tapi retriever tidak tahu apa pun,
+ sehingga setiap pertanyaan dijawab "tidak ditemukan" tanpa error.
 
     Bug ini mustahil terlihat di localhost, karena di sana dokumen baru saja
     di-upload. Ia baru muncul ketika proses dimulai ulang.

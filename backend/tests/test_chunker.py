@@ -61,6 +61,32 @@ class TestChunkText:
             # Offset harus menunjuk ke substring yang benar-benar cocok.
             assert text[chunk.char_start : chunk.char_start + 10] == chunk.content[:10]
 
+    def test_offset_samad_panjang_soal_kutipan(self) -> None:
+        """``text[char_start:char_end]`` harus persis sama dengan content.
+
+        Offset meleset di sini tidak merusak retrieval, tapi merusak sitasi:
+        Citation Card menyorot potongan yang berbeda dari jawaban yang
+        diberikan model, jadi sumbernya tidak bisa diverifikasi.
+
+        Offset merujuk teks yang sudah dinormalisasi, itu teks yang benar-benar
+        dipecah, jadi perbandingannya juga harus memakai teks itu.
+        """
+        raw = (
+            "Kalimat pertama yang panjang sekali untuk dipotong.\n" * 6
+            + "\n\nParagraf kedua dengan isi berbeda. " * 6
+        )
+        text = normalize_text(raw)
+        for chunk in chunk_text(raw, 200, 30):
+            assert text[chunk.char_start : chunk.char_end] == chunk.content
+
+    def test_tidak_mengarang_spasi_antar_kalimat(self) -> None:
+        # Baris baru di dalam paragraf harus tetap baris baru di chunk, bukan
+        # diganti spasi saat kalimat dirakit ulang.
+        raw = "Kalimat pertama.\nKalimat kedua.\n\nParagraf berikutnya. " * 8
+        text = normalize_text(raw)
+        for chunk in chunk_text(raw, 120, 20):
+            assert chunk.content in text
+
     def test_estimasi_token_positif(self) -> None:
         chunks = chunk_text("Teks pendek.", 500, 50)
         assert chunks[0].token_estimate() >= 1
@@ -85,3 +111,17 @@ class TestChunkText:
         # Semua potongan harus berisi kata dari kalimat asli.
         for chunk in chunks:
             assert all(word == "kata" for word in chunk.content.split())
+
+    def test_batas_ukuran_dihormati_setelah_kalimat_pendek(self) -> None:
+        # Jalur ini pernah dilewati: kalimat pendek mengisi buffer, lalu
+        # kalimat raksasa dianggap "tidak muat" tapi tidak pernah dipotong
+        # karakter karena buffer dianggap sudah dikuras.
+        text = "Kalimat pendek. " + ("kata tanpa titik " * 200)
+        for chunk in chunk_text(text, 500, 50):
+            assert len(chunk.content) <= 500
+
+    def test_semua_chunk_dalam_batas(self) -> None:
+        text = ("Kalimat normal. " * 50) + ("tanpa titik " * 300)
+        for size, overlap in ((500, 50), (200, 20), (120, 0)):
+            for chunk in chunk_text(text, size, overlap):
+                assert len(chunk.content) <= size

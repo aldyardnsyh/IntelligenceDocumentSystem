@@ -85,13 +85,25 @@ def settings() -> Settings:
     get_settings.cache_clear()
     config = Settings()
     config.access_passcode_sha256 = hash_passcode(TEST_PASSCODE)
+    # Rentang ambang untuk test harus longgar: test berjalan dengan embedding
+    # stub hashing yang nilainya tidak kompatibel dengan ambang produksi
+    # (mulitilingual-e5-small). Mengunci min/max ke nilai produksi membuat
+    # semua pertanyaan under-threshold dan test chat dibaca "tidak ditemukan".
+    config.min_similarity_threshold = 0.0
+    config.max_similarity_threshold = 1.0
+    config.default_similarity_threshold = 0.5
     return config
 
 
 @pytest.fixture
-def repository(tmp_path) -> Iterator[SqliteRepository]:  # noqa: ANN001
-    """Repository SQLite di direktori sementara per test."""
-    yield SqliteRepository(str(tmp_path / "test.db"))
+def repository(tmp_path, settings: Settings) -> Iterator[SqliteRepository]:  # noqa: ANN001
+    """Repository SQLite di direktori sementara per test.
+
+    `defaults` diteruskan supaya nilai default ambang mengikuti Settings test
+    ini, bukan env global, kalau tidak, test memakai ambang produksi dan
+    pertanyaan dengan embedding stub selalu jatuh di bawah ambang.
+    """
+    yield SqliteRepository(str(tmp_path / "test.db"), defaults=settings)
 
 
 @pytest.fixture

@@ -10,8 +10,16 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncIterator
 
+import pytest
+
 from app.providers.base import ProviderError
-from app.services.rag_service import RagService, StreamEvent
+from app.services.rag_service import (
+    RagService,
+    StreamEvent,
+    _clean_answer,
+    _history_has_grounded_answer,
+    _is_refusal,
+)
 
 
 async def collect(stream: AsyncIterator[StreamEvent]) -> list[StreamEvent]:
@@ -234,6 +242,148 @@ class TestProviderFailure:
         errors = [event for event in events if event.type == "error"]
         assert errors
         assert "tidak tersedia" in str(errors[0].value).lower()
+
+class TestBersihkanMarkup:
+    """Markup mentah dari chunk tidak boleh sampai ke pengguna.
+
+    Prompt sudah meminta model menulis ulang, tapi instruksi saja tidak
+    cukup andal pada model kecil. Lapisan ini menjamin pengguna tidak pernah
+    melihat `**tebal**`, `# judul`, atau garis `====` di jawaban.
+    """
+
+    def test_tebal_dibuang(self) -> None:
+        assert _clean_answer("Masuk ke menu **Layanan** lalu klik **Kirim**.") == (
+            "Masuk ke menu Layanan lalu klik Kirim."
+        )
+
+    def test_heading_dibuang(self) -> None:
+        assert _clean_answer("## Prosedur\n\nIsi prosedur.") == "Prosedur\n\nIsi prosedur."
+
+    def test_garis_pemisah_dibuang(self) -> None:
+        assert _clean_answer("Judul\n====\n\nIsi.") == "Judul\n\nIsi."
+
+    def test_isi_tidak_diubah(self) -> None:
+        # Pembersihan hanya membuang penanda, bukan mengubah kata.
+        asli = "SLA penyelesaian adalah dua hari kerja sejak permintaan dicatat."
+        assert _clean_answer(asli) == asli
+
+    def test_kode_inline_dibiarkan(self) -> None:
+        # Backtick satu baris dipakai untuk istilah teknis; isinya tetap.
+        assert "config.py" in _clean_answer("Lihat `config.py` untuk detail.")
+
+    def test_em_dash_diganti_koma(self) -> None:
+        # Em dash adalah penanda gaya tulisan mesin. Jawaban yang memakainya
+        # terbaca seperti template, bukan seperti asisten yang menjelaskan.
+        assert _clean_answer("Dua hari kerja \u2014 sejak dicatat") == (
+            "Dua hari kerja, sejak dicatat"
+        )
+
+    def test_en_dash_diganti_koma(self) -> None:
+        assert _clean_answer("Pagi \u2013 sore") == "Pagi, sore"
+
+    def test_dash_ganda_diganti_koma(self) -> None:
+        assert _clean_answer("Ini -- penjelasan") == "Ini, penjelasan"
+
+    def test_tanda_hubung_kata_majemuk_dibiarkan(self) -> None:
+        # Tanda hubung dalam kata majemuk bukan tanda pisah.
+        assert _clean_answer("dua hari kerja, tanpa terkecuali") == (
+            "dua hari kerja, tanpa terkecuali"
+        )
+
+    def test_koma_ganda_dirapikan(self) -> None:
+        # Penggantian bisa menghasilkan koma beruntun; itu tidak boleh lolos.
+        result = _clean_answer("Satu \u2014, dua")
+        assert ",," not in result.replace(" ", "")
+
+
+class TestRiwayatBersitasi:
+    """Percakapan lanjutan tidak boleh dilabeli "bukan dari dokumen".
+
+    Kalau pertanyaan sebelumnya sudah dijawab dari dokumen, pertanyaan
+    lanjutan tentang hal yang sama tetap bersumber dokumen, retrieval
+    putaran ini bisa kosong karena kalimatnya berbeda, tapi labelnya tidak
+    boleh berubah.
+    """
+
+    def test_riwayat_dengan_jawaban_panjang_dianggap_bersitasi(self) -> None:
+        history = [
+            ("user", "berapa hari SLA penyelesaian?"),
+            (
+                "assistant",
+                "SLA penyelesaian adalah batas waktu maksimal penyelesaian "
+                "permintaan, yaitu dua hari kerja sejak permintaan dicatat.",
+            ),
+        ]
+        assert _history_has_grounded_answer(history) is True
+
+    def test_jawaban_singkat_yang_bersumber_tetap_dikenali(self) -> None:
+        # Jawaban benar bisa singkat. Ambang yang terlalu tinggi membuat
+        # pertanyaan lanjutan ditolak padahal jawabannya ada di riwayat.
+        history = [
+            ("user", "berapa hari SLA?"),
+            ("assistant", "Dua hari kerja sejak permintaan dicatat. [SUMBER 1]"),
+        ]
+        assert _history_has_grounded_answer(history) is True
+
+    def test_riwayat_hanya_penolakan_tidak_dianggap_bersitasi(self) -> None:
+        history = [
+            ("user", "berapa harga tiket bioskop?"),
+            ("assistant", "Informasi ini tidak ditemukan dalam dokumen yang diunggah."),
+        ]
+        assert _history_has_grounded_answer(history) is False
+
+    def test_riwayat_kosong(self) -> None:
+        assert _history_has_grounded_answer([]) is False
+
+    def test_jawaban_pendek_tidak_dianggap_bersitasi(self) -> None:
+        # Jawaban terlalu pendek untuk bisa disebut bersumber dokumen; lebih
+        # aman dianggap belum ada jawaban daripada salah melabeli.
+        history = [("assistant", "Ya.")]
+        assert _history_has_grounded_answer(history) is False
+
+
+class TestRefusalTanpaSitasi:
+    """Sitasi tidak boleh dikirim untuk jawaban yang menolak.
+
+    Model bisa menyimpulkan "tidak ada di konteks" meski retrieval meloloskan
+    chunk (topik menyerempet, jawabannya tidak ada). Menampilkan sumber di
+    bawah jawaban seperti itu membuat pengguna mengira informasinya ada di
+    dokumen.
+    """
+
+    @pytest.mark.parametrize(
+        "answer",
+        [
+            "Tidak ditemukan.",
+            "Informasi ini tidak ditemukan dalam dokumen.",
+            "Jawabannya tidak disebutkan dalam konteks.",
+            "Not found in the provided context.",
+        ],
+    )
+    def test_penolakan_dikenali(self, answer: str) -> None:
+        assert _is_refusal(answer) is True
+
+    @pytest.mark.parametrize(
+        "answer",
+        [
+            "SLA penyelesaian adalah dua hari kerja.",
+            "",
+        ],
+    )
+    def test_jawaban_biasa_tidak_dianggap_penolakan(self, answer: str) -> None:
+        assert _is_refusal(answer) is False
+
+    def test_jawaban_panjang_tidak_dianggap_penolakan(self) -> None:
+        # Jawaban panjang yang kebetulan memuat frasa itu biasanya tetap
+        # menjawab; hanya penolakan pendek yang menahan sitasi.
+        long_answer = (
+            "SLA penyelesaian adalah dua hari kerja sejak permintaan dicatat. "
+            "Kalau berkas tidak lengkap, pemohon diberi tahu dalam tempo dua "
+            "hari kerja. " * 4
+            + "Denda tidak disebutkan dalam dokumen."
+        )
+        assert _is_refusal(long_answer) is False
+
 
 class TestProviderNames:
     def test_provider_names_terbaca(self, rag: RagService) -> None:

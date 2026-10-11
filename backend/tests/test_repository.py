@@ -211,7 +211,7 @@ class TestAllChunks:
     """``all_chunks`` menopang rebuild indeks retrieval saat startup.
 
     Kalau ini salah, restart kontainer membuat seluruh dokumen lama tidak bisa
-    dicari -- dan gejalanya (jawaban "tidak ditemukan") sama sekali tidak
+    dicari, dan gejalanya (jawaban "tidak ditemukan") sama sekali tidak
     terlihat sebagai kegagalan.
     """
 

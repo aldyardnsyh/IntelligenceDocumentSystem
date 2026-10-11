@@ -22,7 +22,11 @@ from app.providers.openai_compatible import (
     _extract_full_text,
     _extract_token,
 )
-from app.services.generation.generator import LLMChain
+from app.services.generation.generator import LLMChain, StreamChunk
+
+
+def _chunks_text(chunks: list[StreamChunk]) -> str:
+    return "".join(chunk.token for chunk in chunks)
 
 
 class StubProvider:
@@ -59,6 +63,20 @@ class StubProvider:
         return self._result
 
 
+class FlakyProvider(StubProvider):
+    """Provider yang gagal ``failures`` kali sebelum berhasil."""
+
+    def __init__(self, name: str, *, failures: int, result: str = "jawaban") -> None:
+        super().__init__(name, result=result)
+        self._failures = failures
+
+    async def complete(self, prompt: str, system: str | None = None) -> str:
+        self.calls += 1
+        if self.calls <= self._failures:
+            raise ProviderError("sementara", retryable=True, status_code=429)
+        return self._result
+
+
 class TestChainComplete:
     async def test_provider_pertama_berhasil(self) -> None:
         first = StubProvider("a", result="dari a")
@@ -69,15 +87,35 @@ class TestChainComplete:
         assert result.degraded is False
 
     async def test_fallback_saat_retryable(self) -> None:
+        # `max_retries=0`: yang diuji di sini adalah perpindahan ke provider
+        # berikutnya, bukan perilaku percobaan ulang.
         first = StubProvider(
             "a", error=ProviderError("kuota habis", retryable=True, status_code=429)
         )
         second = StubProvider("b", result="dari b")
-        result = await LLMChain([first, second]).complete("prompt")
+        result = await LLMChain([first, second], max_retries=0).complete("prompt")
         assert result.provider_name == "b"
         assert result.degraded is True
         assert first.calls == 1
         assert second.calls == 1
+
+    async def test_retry_terjadi_sebelum_pindah_provider(self) -> None:
+        """Kegagalan sementara dicoba ulang dulu, baru pindah ke provider lain."""
+        flaky = FlakyProvider("a", failures=2, result="dari a")
+        chain = LLMChain([flaky, StubProvider("b", result="dari b")], max_retries=3)
+        chain_backoff = chain
+        chain_backoff._backoff = 0  # type: ignore[attr-defined]
+        result = await chain_backoff.complete("prompt")
+        assert result.provider_name == "a"
+        assert flaky.calls == 3
+
+    async def test_retry_dihentikan_saat_gagal_tidak_retryable(self) -> None:
+        first = StubProvider("a", error=ProviderError("key ditolak", retryable=False))
+        chain = LLMChain([first, StubProvider("b", result="dari b")], max_retries=3)
+        chain._backoff = 0  # type: ignore[attr-defined]
+        with pytest.raises(ProviderError, match="Semua provider gagal"):
+            await chain.complete("prompt")
+        assert first.calls == 1
 
     async def test_berhenti_saat_bukan_retryable(self) -> None:
         # API key salah tidak akan diperbaiki oleh provider berikutnya, jadi
@@ -102,7 +140,8 @@ class TestChainComplete:
             [
                 StubProvider("a", error=ProviderError("x", retryable=True)),
                 StubProvider("b", error=ProviderError("y", retryable=True)),
-            ]
+            ],
+            max_retries=0,
         )
         with pytest.raises(ProviderError) as info:
             await chain.complete("prompt")
@@ -123,8 +162,10 @@ class TestChainComplete:
         first = StubProvider(
             "a", error=ProviderError("gagal", retryable=True)
         )
-        result = await LLMChain([first, StubProvider("b", result="ok")]).complete("p")
-        # Provider yang gagal harus dicoba tepat satu kali, lalu cadeia pindah.
+        result = await LLMChain(
+            [first, StubProvider("b", result="ok")], max_retries=0
+        ).complete("p")
+        # Provider yang gagal harus dicoba tepat satu kali, lalu rantai pindah.
         assert first.calls == 1
         # Rincian kegagalan ikut terbawa supaya mudah didiagnosis.
         assert result.attempts
@@ -134,16 +175,17 @@ class TestChainComplete:
 class TestChainStream:
     async def test_stream_menghasilkan_token(self) -> None:
         chain = LLMChain([StubProvider("a", result="halo dunia")])
-        tokens = [token async for token in chain.stream("prompt")]
-        assert "".join(tokens) == "halo dunia"
+        chunks = [chunk async for chunk in chain.stream("prompt")]
+        assert _chunks_text(chunks) == "halo dunia"
+        assert all(chunk.degraded is False for chunk in chunks)
 
     async def test_fallback_saat_provider_gagal_sebelum_token(self) -> None:
         first = StubProvider(
             "a", error=ProviderError("gagal", retryable=True, status_code=429)
         )
-        chain = LLMChain([first, StubProvider("b", result="dari b")])
-        tokens = [token async for token in chain.stream("prompt")]
-        assert "".join(tokens) == "dari b"
+        chain = LLMChain([first, StubProvider("b", result="dari b")], max_retries=0)
+        chunks = [chunk async for chunk in chain.stream("prompt")]
+        assert _chunks_text(chunks) == "dari b"
 
     async def test_tidak_fallback_setelah_token_sudah_keluar(self) -> None:
         """Kalau sudah ada teks terkirim, mengganti provider akan menggandakan
@@ -159,13 +201,19 @@ class TestChainStream:
                 yield "sudah keluar"
                 raise ProviderError("putus di tengah", retryable=True)
 
-        chain = LLMChain([PartialFailure(), StubProvider("b", result="tidak boleh muncul")])
-        tokens = [token async for token in chain.stream("prompt")]
-        joined = "".join(tokens)
+        chain = LLMChain(
+            [PartialFailure(), StubProvider("b", result="tidak boleh muncul")],
+            max_retries=0,
+        )
+        chunks = [chunk async for chunk in chain.stream("prompt")]
+        joined = _chunks_text(chunks)
         assert "sudah keluar" in joined
         assert "tidak boleh muncul" not in joined
-        # Penanda terpotong harus ada, supaya pengguna tahu jawabannya tidak utuh.
-        assert "terpotong" in joined
+        # Penanda terpotong datang sebagai event terpisah, bukan teks jawaban:
+        # kalau ikut jadi token, string peringatan ini akan tersimpan di cache
+        # dan di histori sebagai bagian jawaban.
+        assert chunks[-1].degraded is True
+        assert "terpotong" not in joined
 
     async def test_berhenti_saat_bukan_retryable(self) -> None:
         first = StubProvider(
@@ -174,7 +222,7 @@ class TestChainStream:
         second = StubProvider("b", result="tidak dipanggil")
         chain = LLMChain([first, second])
         with pytest.raises(ProviderError):
-            [token async for token in chain.stream("prompt")]
+            [chunk async for chunk in chain.stream("prompt")]
         assert second.calls == 0
 
 
@@ -236,6 +284,51 @@ class TestSseParsing:
     def test_payload_bukan_dict_aman(self) -> None:
         assert _extract_full_text("bukan dict") == ""
         assert _extract_full_text({"choices": []}) == ""
+
+
+class TestKlienShared:
+    """Klien HTTP dipakai bersama harus tetap bisa dipakai setelah streaming.
+
+    Klien yang dipakai sebagai async context manager akan tertutup saat keluar
+    dari `async with`, dan pemakaian berikutnya melempar RuntimeError
+    "Cannot reopen a client instance". Gejalanya: pertanyaan pertama berhasil,
+    semua pertanyaan berikutnya gagal.
+    """
+
+    async def test_stream_berulang_tetap_berfungsi(self) -> None:
+        import httpx
+
+        settings = Settings(ollama_base_url="http://provider.test/v1", llm_model="m")
+        provider = OllamaProvider(settings)
+
+        body = b'data: {"choices":[{"delta":{"content":"halo"}}]}\n\ndata: [DONE]\n\n'
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, content=body)
+
+        original = provider._client_async
+
+        async def with_mock_client(timeout: float) -> httpx.AsyncClient:
+            client = await original(timeout)
+            if not getattr(provider, "_mocked", False):
+                provider._mocked = True
+                client._transport = httpx.MockTransport(handler)  # type: ignore[attr-defined]
+            return client
+
+        provider._client_async = with_mock_client  # type: ignore[method-assign]
+        try:
+            for _ in range(3):
+                tokens = [token async for token in provider.stream("prompt")]
+                assert tokens == ["halo"]
+        finally:
+            await provider.aclose()
+
+    async def test_aclose_menutup_klien(self) -> None:
+        settings = Settings(ollama_base_url="http://provider.test/v1", llm_model="m")
+        provider = OllamaProvider(settings)
+        client = await provider._client_async(5.0)
+        await provider.aclose()
+        assert client.is_closed is True
 
 
 class TestProviderKonfigurasi:

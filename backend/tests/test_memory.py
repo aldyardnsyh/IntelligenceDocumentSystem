@@ -14,6 +14,7 @@ from app.core.security import SlidingWindowLimiter, hash_passcode, verify_passco
 from app.models.domain import ChatMessage, MessageRole
 from app.services.memory.rate_limit import RateLimiter
 from app.services.memory.store import (
+    ANSWER_CACHE_PREFIX,
     InMemoryStore,
     cache_key,
     dict_to_message,
@@ -175,8 +176,39 @@ class TestCacheKey:
         # juga berbeda.
         assert cache_key("sama", None, 3) != cache_key("sama", None, 10)
 
+    def test_threshold_berbeda_memberi_kunci_berbeda(self) -> None:
+        # Menaikkan ambang mengubah apakah retrieval lolos gate sama sekali,
+        # jadi jawaban dari ambang lama tidak boleh lagi dipakai.
+        assert cache_key("sama", None, 5, 0.5) != cache_key("sama", None, 5, 0.9)
+
+    def test_scope_dokumen_memberi_kunci_berbeda(self) -> None:
+        # Bug nyata: tanpa scope di kunci, sesi privat dokumen A menyajikan
+        # jawaban yang dibuat dari dokumen B, kebocoran scope yang tidak
+        # terlihat di UI karena jawabannya tetap membawa sitasi.
+        assert cache_key("sama", None, 5, 0.82, "doc_a") != cache_key(
+            "sama", None, 5, 0.82, "doc_b"
+        )
+        assert cache_key("sama", None, 5, 0.82, "doc_a") != cache_key(
+            "sama", None, 5, 0.82, None
+        )
+
+    def test_scope_sama_memberi_kunci_sama(self) -> None:
+        assert cache_key("sama", None, 5, 0.82, "doc_a") == cache_key(
+            "sama", None, 5, 0.82, "doc_a"
+        )
+
+    def test_ambang_tidak_berubah_memberi_kunci_sama(self) -> None:
+        assert cache_key("sama", None, 5, 0.5) == cache_key("sama", None, 5, 0.5)
+
+    def test_kunci_berawalan_namespace_jawaban(self) -> None:
+        # Prefix ini yang membuat cache jawaban bisa dihapus tanpa ikut
+        # menghapus counter rate limit.
+        assert cache_key("x", None, 5).startswith(ANSWER_CACHE_PREFIX)
+
     def test_kunci_panjang_terbatas(self) -> None:
-        assert len(cache_key("x" * 10_000, None, 5)) == 64
+        # Hash 64 hex + prefix namespace; bukan teks pertanyaan mentah.
+        key = cache_key("x" * 10_000, None, 5)
+        assert len(key) == len(ANSWER_CACHE_PREFIX) + 64
 
 
 class TestMessageSerialization:
@@ -190,6 +222,35 @@ class TestMessageSerialization:
         payload = message_to_dict(message)
         assert payload["role"] == "user"
         assert payload["content"] == "apa isi dokumen?"
+
+    def test_flag_ungrounded_ikut_tersimpan(self) -> None:
+        """Label "bukan dari dokumen" harus bertahan di storage.
+
+        Kalau flag ini hilang saat dibaca ulang, jawaban lama yang dibuat dari
+        pengetahuan umum akan terlihat bersumber pada dokumen begitu riwayat
+        dibuka lagi, dan pengguna tidak punya cara mengetahuinya.
+        """
+        message = ChatMessage(
+            id="msg_2",
+            role=MessageRole.ASSISTANT,
+            content="presiden pertama Indonesia adalah Soekarno",
+            created_at="2026-01-01T00:00:00+00:00",
+            ungrounded=True,
+        )
+        payload = message_to_dict(message)
+        assert payload["ungrounded"] is True
+        restored = dict_to_message(payload)
+        assert restored.ungrounded is True
+
+    def test_pesan_biasa_tidak_bertanda_ungrounded(self) -> None:
+        message = ChatMessage(
+            id="msg_3",
+            role=MessageRole.ASSISTANT,
+            content="dua hari kerja",
+            created_at="2026-01-01T00:00:00+00:00",
+        )
+        restored = dict_to_message(message_to_dict(message))
+        assert restored.ungrounded is False
 
     def test_pesan_dengan_sitasi_bulat_trip(self) -> None:
         from app.models.domain import Citation  # noqa: PLC0415
@@ -262,6 +323,23 @@ class TestRateLimiter:
         # Sesi lain tidak boleh terpengaruh.
         allowed, _ = await limiter.check("ses_2")
         assert allowed is True
+
+    async def test_permintaan_paralel_tidak_melewati_kuota(self) -> None:
+        """Read-modify-write harus atomik.
+
+        Tanpa lock, request yang datang bersamaan sama-sama membaca counter
+        lama lalu sama-sama menulis, sehingga kuota terlewati tepat saat trafik
+        paling tinggi, kondisi yang justru paling butuh rate limit.
+        """
+        import asyncio
+
+        limiter = RateLimiter(
+            InMemoryStore(),
+            Settings(query_max_per_session=5, query_window_seconds=60),
+        )
+        results = await asyncio.gather(*[limiter.check("sama") for _ in range(20)])
+        allowed = sum(1 for item, _ in results if item)
+        assert allowed == 5
 
     async def test_reset_membuka_akses(self, limiter: RateLimiter) -> None:
         for _ in range(3):

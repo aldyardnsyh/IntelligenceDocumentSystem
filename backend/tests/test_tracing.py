@@ -2,7 +2,7 @@
 
 Yang paling penting di sini: tracing yang mati atau gagal **tidak boleh**
 mematikan jawaban. Setiap test di bawah memverifikasi satu sisi dari kontrak
-itu: SDK tidak ada, kredensial tidak ada, server Langfuse down -- semuanya
+itu: SDK tidak ada, kredensial tidak ada, server Langfuse down, semuanya
 harus berakhir dengan jawaban yang tetap keluar dan trace_id None, bukan
 exception.
 """
@@ -190,7 +190,7 @@ class TestTraceIdMengalirKeLog:
         """trace_id dari tracer harus sampai ke QueryLog.
 
         Tanpa ini, kolom Trace di /analytics selalu kosong meski tracing
-        aktif -- UI yang menunjuk ke ketiadaan.
+        aktif, UI yang menunjuk ke ketiadaan.
         """
         from app.services.tracing import Tracer as RealTracer
 
@@ -212,7 +212,7 @@ class TestTraceIdMengalirKeLog:
         await collect(rag_with_tracer.answer("penyelesaian", None, None))
         logs, total = rag.repository.list_logs(1, 10)
         assert total >= 1
-        # Tanpa kredensial, trace_id None -- dan itu benar, bukan bug.
+        # Tanpa kredensial, trace_id None, dan itu benar, bukan bug.
         assert logs[0].trace_id is None
 
     async def test_tanpa_tracer_log_tetap_jalan(
