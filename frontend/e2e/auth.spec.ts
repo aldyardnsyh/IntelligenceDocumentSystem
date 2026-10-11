@@ -1,0 +1,48 @@
+import { expect, test } from "@playwright/test";
+import { login, PASSCODE } from "./fixtures";
+
+/**
+ * Gerbang akses: apa yang boleh dan tidak boleh dilihat tanpa passcode.
+ *
+ * Ini test yang dulu gagal diam-diam: halaman `/chat` terbuka (karena ada
+ * penanda cookie), tapi setiap panggilan API kena 401 dan pengguna melihat
+ * "sesi berakhir" di mana-mana.
+ */
+test.describe("gerbang akses", () => {
+  test("halaman tanpa sesi dialihkan ke login", async ({ page }) => {
+    await page.goto("/chat");
+    await expect(page).toHaveURL(/\/login/);
+  });
+
+  test("login salah ditolak tanpa merusak halaman", async ({ page }) => {
+    await page.goto("/login");
+    await page.getByLabel("Passcode akses").fill("passcode-yang-salah");
+    await page.getByRole("button", { name: "Masuk" }).click();
+    await expect(page.getByRole("alert")).toContainText(/salah/i);
+    await expect(page).toHaveURL(/\/login/);
+  });
+
+  test("login benar memberi akses penuh", async ({ page }) => {
+    await login(page);
+    await expect(page.getByPlaceholder(/apa yang ingin ditanyakan|tulis pertanyaan/i))
+      .toBeVisible();
+  });
+
+  test("tujuan dari login dipulihkan setelah masuk", async ({ page }) => {
+    await page.goto("/documents");
+    await expect(page).toHaveURL(/\/login\?next=%2Fdocuments/);
+    await page.getByLabel("Passcode akses").fill(PASSCODE);
+    await page.getByRole("button", { name: "Masuk" }).click();
+    // `next` dipakai supaya pengguna kembali ke halaman yang tadi dibuka,
+    // bukan selalu ke /chat.
+    await expect(page).toHaveURL(/\/documents/);
+  });
+
+  test("logout mengembalikan ke login dan mengunci lagi", async ({ page }) => {
+    await login(page);
+    await page.getByRole("button", { name: /keluar dari demo/i }).click();
+    await expect(page).toHaveURL(/\/login/);
+    await page.goto("/analytics");
+    await expect(page).toHaveURL(/\/login/);
+  });
+});

@@ -1,0 +1,9 @@
+Folder ini sengaja dipertahankan meski kosong.
+
+Next.js menyajikan berkas statis dari `public/`, dan Dockerfile menyalinnya ke
+image (`COPY /app/public ./public`). Tanpa berkas apa pun, git tidak
+menyimpan folder kosong, jadi `git clone` menghasilkan repo tanpa `public/`
+dan langkah COPY itu gagal saat build image.
+
+Ikon aplikasi TIDAK ditaruh di sini: Next.js membacanya dari
+`src/app/favicon.ico`, yang dibuat ulang lewat `scripts/make_favicon.py`.

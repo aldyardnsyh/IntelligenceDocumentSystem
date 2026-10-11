@@ -23,7 +23,7 @@ const nextConfig: NextConfig = {
    *
    * Tanpa ini, image frontend ikut membawa seluruh dependency Next.js
    * (~400 MB). Dengan `standalone`, Next cuma menyalin modul yang benar-benar
-   * dipakai -- biasanya image turun ke ~150 MB.
+   * dipakai, biasanya image turun ke ~150 MB.
    */
   output: "standalone",
 
@@ -34,7 +34,7 @@ const nextConfig: NextConfig = {
    * Endpoint login mengembalikan `Set-Cookie: ida_session`. Kalau browser
    * memanggil backend dari origin berbeda, cookie itu milik origin backend,
    * sedangkan server action Next berjalan di origin frontend dan tidak punya
-   * cookie jar -- sehingga `Set-Cookie` dari backend dibuang dan tidak pernah
+   * cookie jar, sehingga `Set-Cookie` dari backend dibuang dan tidak pernah
    * sampai ke browser.
    *
    * Dengan rewrite, browser hanya mengenal satu origin. Login, API, dan
