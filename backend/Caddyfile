@@ -7,17 +7,30 @@
 # yang berjalan tanpa disentuh seperti ini, satu proses yang mengurus
 # sendiri adalah pilihan yang tepat.
 #
-# Ganti domain di bawah dengan domain Anda. Untuk uji coba lokal, lihat bagian
-# `localhost` di README.
+# Ganti domain di bawah dengan domain Anda. Domain placeholder membuat
+# penerbitan TLS selalu gagal: `example.com` milik IANA, tidak akan pernah
+# mendapat sertifikat, dan Caddy keluar dengan error ACME.
+#
+# Sebelum `docker compose up`:
+#   docker compose run --rm caddy sed -i 's/example\.com/domain-anda/g' /etc/caddy/Caddyfile
+#
+# Uji coba lokal tanpa TLS: `caddy run --config Caddyfile --adapter caddyfile`
+# dengan baris `localhost` di bawah diganti `http://localhost`.
 
 {
 	# Email ini hanya dipakai untuk pemberitahuan kedaluwarsa sertifikat.
 	# Kosongkan kalau tidak ingin memberi tahu siapa pun.
 	email admin@example.com
 
-	# Prioritas OCSP: menentukan seberapa sering sertifikat diperiksa
-	# ke penerbit. `native` lebih hemat koneksi untuk server kecil.
-	ocsp_stapling on
+	# OCSP stapling dibiarkan pada setelan bawaan Caddy (aktif).
+	#
+	# Opsi global `ocsp_stapling` hanya menerima `off`. Nilai seperti `on`
+	# ditolak parser saat Caddy mengadopsi konfigurasi ini, dan karena
+	# adaptasi happens sebelum server listen, container langsung keluar dengan
+	# crash-loop -- satu baris salah mematikan seluruh ingress.
+	#
+	# Verifikasi sebelum deploy: `docker compose run --rm caddy caddy validate
+	# --config /etc/caddy/Caddyfile`
 }
 
 # Frontend dan API dilayani dari satu domain agar cookie sesi bekerja tanpa

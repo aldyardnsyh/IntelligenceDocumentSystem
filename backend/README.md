@@ -1,4 +1,4 @@
-# Backend — Intelligent Document Assistant
+# Backend, Intelligent Document Assistant
 
 FastAPI untuk ingestion dokumen, retrieval hybrid, dan generasi jawaban
 berantai sitasi. Dijalankan sendiri, atau di dalam Docker.
@@ -23,7 +23,7 @@ Upload ──► parse (PDF/TXT/MD) ──► chunk (paragraf-kalimat) ──►
 Dua hal yang menentukan apakah sistem ini bisa dipercaya:
 
 1. **LLM tidak pernah dipanggil tanpa konteks.** Kalau tidak ada chunk yang
-   lolos ambang, jawabannya "tidak ditemukan" — bukan karangan.
+   lolos ambang, jawabannya "tidak ditemukan", bukan karangan.
 2. **Ambang dinilai pada bukti mentah**, bukan pada skor RRF. Skor RRF
    dinormalisasi terhadap kandidat terbaik sehingga selalu bernilai 1.0 di
    puncak; ambang yang dipasang di sana tidak akan pernah menolak apa pun.
@@ -50,6 +50,7 @@ satu variabel env tanpa menyentuh kode.
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
+pip install sentence-transformers      # untuk embedding semantik (USE_LOCAL_EMBEDDING=1)
 
 Copy-Item .env.example .env
 python -m scripts.make_passcode          # menghasilkan ACCESS_PASSCODE_SHA256
@@ -65,8 +66,22 @@ Saat start pertama, `intfloat/multilingual-e5-small` (~470 MB) diunduh dari
 Hugging Face dan disimpan di cache. Setelah itu jalan offline.
 
 Kalau tidak ingin mengunduhnya, set `USE_LOCAL_EMBEDDING=0`. Sistem tetap
-jalan dengan embedding berbasis hashing — **dan `/api/v1/health` akan
+jalan dengan embedding berbasis hashing, **dan `/api/v1/health` akan
 melaporkan itu**, karena retrieval hanya cocok untuk kata yang identik.
+
+### Ganti model embedding = indeks harus dibangun ulang
+
+Vektor yang tersimpan dibuat oleh model tertentu. Kalau `USE_LOCAL_EMBEDDING`
+atau `EMBEDDING_MODEL` berubah, vektor lama **tidak sebanding** dengan vektor
+baru walau dimensinya sama. Gejalanya menipu: dokumen berstatus `ready`,
+pertanyaan wajar, tapi jawabannya ngawur atau selalu "tidak ditemukan".
+
+```powershell
+python -m scripts.reindex --dry-run   # lihat berapa chunk yang akan diproses
+python -m scripts.reindex             # bangun ulang vektor dari isi chunk
+```
+
+Dokumen tidak perlu diunggah ulang: isi chunk dibaca dari database metadata.
 
 ## Menjalankan dengan Docker
 
@@ -91,7 +106,7 @@ Di konsol AWS → EC2 → Launch instance:
 |---|---|
 | Name | `ida-rag` |
 | AMI | Ubuntu 24.04 LTS (x86_64) |
-| Instance type | **t3.small** (2 vCPU, 2 GB) — atau `t3.micro` (1 GB) kalau ketat |
+| Instance type | **t3.small** (2 vCPU, 2 GB), atau `t3.micro` (1 GB) kalau ketat |
 | Key pair | Buat baru, atau pilih yang sudah ada |
 | Storage | **gp3, 20 GB** |
 
@@ -101,7 +116,7 @@ Di konsol AWS → EC2 → Launch instance:
 ### 2. Security group
 
 Inbound: **Hanya HTTP (80) dan HTTPS (443)**, source `0.0.0.0/0`.
-Port 8000 **jangan** dibuka — API hanya dijangkau lewat Caddy.
+Port 8000 **jangan** dibuka, API hanya dijangkau lewat Caddy.
 
 ### 3. Arahkan domain
 
@@ -134,9 +149,27 @@ GROQ_API_KEY=<key-anda>
 # LLM_PROVIDER=ollama
 CORS_ORIGINS=https://domain-anda
 DEBUG=false
+# Percayai X-Forwarded-For. WAJIB di compose: tanpa ini semua klien terlihat
+# sebagai IP Caddy, jadi rate limit login jadi satu bucket global.
+TRUST_PROXY_HEADERS=1
 ```
 
-### 5. Jalankan
+> `LLM_PROVIDER=mock` ditolak saat `DEBUG=false`. Provider mock menyalin
+> cuplikan dokumen; dari luar ia terlihat seperti sistem yang utuh, dan
+> perbedaan kualitasnya baru terasa saat mengukur.
+
+### 5. Ganti domain di Caddyfile
+
+```bash
+sed -i 's/example\.com/domain-anda/g' Caddyfile
+sed -i 's/admin@example.com/email-anda@example.com/' Caddyfile
+docker compose run --rm caddy caddy validate --config /etc/caddy/Caddyfile
+```
+
+Lewati langkah ini dan Caddy tidak akan pernah menerbitkan sertifikat:
+`example.com` milik IANA, dan ACME pasti gagal untuk domain itu.
+
+### 6. Jalankan
 
 ```bash
 docker compose up -d --build
@@ -153,7 +186,7 @@ curl https://domain-anda/api/v1/health
 ```
 
 `"status": "ok"` berarti semua komponen hidup. Field `fallback` memberi tahu
-storage mana yang aktif — kalau `vector_store_persistent` false, indeks akan
+storage mana yang aktif, kalau `vector_store_persistent` false, indeks akan
  hilang saat restart.
 
 ### 7. Deploy ulang
@@ -209,7 +242,7 @@ python -m scripts.evaluate_ragas --dataset evaluation/dataset.json
 ```
 
 Dataset berisi 11 pertanyaan: 8 yang harus terjawab benar, dan 3 yang
-**harus** dijawab "tidak ditemukan". Tiga yang terakhir itu yang paling berguna — di situ yang diukur apakah sistem mengarang saat tidak tahu.
+**harus** dijawab "tidak ditemukan". Tiga yang terakhir itu yang paling berguna, di situ yang diukur apakah sistem mengarang saat tidak tahu.
 
 Untuk melihat jawaban dan konteks tanpa menghitung skor:
 

@@ -31,6 +31,11 @@ services:
       # filesystem miliknya sendiri dan semua hilang saat di-restart.
       CHROMA_PERSIST_DIR: /data/chroma
       SQLITE_FALLBACK_PATH: /data/metadata.db
+      # API hanya ada di network internal compose dan selalu didahului Caddy,
+      # jadi `X-Forwarded-For` boleh dipercaya untuk key rate limit. Tanpa ini
+      # semua klien terlihat sebagai IP Caddy dan 5 percobaan login gagal
+      # mengunci semua pengguna.
+      TRUST_PROXY_HEADERS: "1"
     volumes:
       # Volume bernama, bukan bind mount ke path host. Alasannya: saat image
       # ditulis ulang (deploy versi baru), bind mount bisa tertimpa kalau
@@ -49,7 +54,11 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 90s
+      # Lifespan mengunduh model embedding (~470 MB) sebelum server listen.
+      # Jendela 90s sering tidak cukup di t3.micro, dan karena healthcheck
+      # tidak memicu restart, compose berhenti dengan "dependency failed to
+      # start" -- frontend dan Caddy tidak pernah dijalankan.
+      start_period: 600s
     logging:
       driver: json-file
       options:
@@ -87,9 +96,9 @@ services:
     image: ida-frontend:latest
     restart: unless-stopped
     environment:
-      # Route /api/healthz butuh var ini. Kosong berarti route itu tidak
-      # dievaluasi sama sekali, jadi health check akan selalu gagal walau
-      # Next-nya sehat.
+      # Next.js standalone membaca PORT sendiri dari image; menyetelnya di sini
+      # tidak dibutuhkan, tapi HOSTNAME tetap wajib agar server bind ke
+      # 0.0.0.0 dan bisa dijangkau dari network compose.
       PORT: "3000"
       HOSTNAME: "0.0.0.0"
     depends_on:

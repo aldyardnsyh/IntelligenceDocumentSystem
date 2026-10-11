@@ -64,7 +64,10 @@ COPY app/__init__.py app/__init__.py
 # Source lengkap, lalu satu-satunya `pip install .`. Versi dependency hidup di
 # pyproject; tidak ada daftar kedua yang bisa berubah sendiri.
 COPY app/ ./app/
-RUN pip install --no-cache-dir .
+# Extra `[observability]` ikut dipasang: tanpa itu, `TRACING_ENABLED=1` di env
+# tidak pernah efektif di image karena langfuse tidak terpasang. Kegagalannya
+# hanya muncul sebagai warning di log saat tracing dimatikan diam-diam.
+RUN pip install --no-cache-dir ".[observability]"
 
 # --------------------------------------------------------------- runtime
 FROM python:3.11-slim-bookworm AS runtime
@@ -75,7 +78,16 @@ ENV PYTHONUNBUFFERED=1 \
     # Data harus berada di path yang di-mount sebagai volume. Kalau data ditulis
     # ke /tmp atau direktori image, semuanya hilang saat container dibuang.
     CHROMA_PERSIST_DIR=/data/chroma \
-    SQLITE_FALLBACK_PATH=/data/metadata.db
+    SQLITE_FALLBACK_PATH=/data/metadata.db \
+    # Cache model embedding diletakkan di volume yang sama dengan metadata.
+    # Defaultnya ada di home user, yang merupakan writable layer container:
+    # setiap `up --build` mengunduh ulang model ~470 MB.
+    HF_HOME=/data/huggingface \
+    # Caddy ada di depan API, jadi header proxy boleh dipercaya: API hanya
+    # terekspos di network internal compose, tidak pernah langsung dari
+    # internet. Tanpa ini, semua klien terlihat sebagai IP Caddy dan rate limit
+    # login jadi satu bucket global.
+    TRUST_PROXY_HEADERS=1
 
 # `curl` hanya untuk health check; `tini` untuk reaps proses zombie dan
 # meneruskan sinyal SIGTERM dengan benar.
@@ -106,13 +118,23 @@ EXPOSE 8000
 # sekadar "/". `/api/v1/health` menyentuh repository, memory store, dan vector
 # store, jadi container yang dilaporkan "up" tapi dependensinya mati akan
 # terdeteksi.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
+#
+# `start-period` longkar karena lifespans mengunduh model embedding (~470 MB)
+# sebelum server listen. Versi 90s sering habis di t3.micro dengan disk lambat,
+# dan karena healthcheck tidak memicu restart, `docker compose up` berhenti
+# dengan "dependency failed to start".
+HEALTHCHECK --interval=30s --timeout=5s --start-period=600s --retries=3 \
     CMD curl -fsS http://127.0.0.1:8000/api/v1/health || exit 1
 
 # `tini` sebagai PID 1: tanpa itu, SIGTERM tidak sampai ke uvicorn dan
 # `lifespan` tidak pernah menjalankan shutdown, sehingga ingestion yang sedang
 # berjalan menggantung.
+#
+# `--proxy-headers --forwarded-allow-ips=*` aman di sini karena container ini
+# hanya terjangkau dari network compose (lihat docker-compose.yml: Caddy
+# satu-satunya yang mempublikasikan port).
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["python", "-m", "uvicorn", "app.main:app", \
      "--host", "0.0.0.0", "--port", "8000", \
-     "--no-server-header", "--timeout-keep-alive", "65"]
+     "--no-server-header", "--timeout-keep-alive", "65", \
+     "--proxy-headers", "--forwarded-allow-ips=*"]
