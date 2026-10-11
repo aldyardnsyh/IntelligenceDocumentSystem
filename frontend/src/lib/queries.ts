@@ -11,6 +11,7 @@ export const queryKeys = {
   sessions: ["sessions"] as const,
   documents: ["documents"] as const,
   document: (id: string) => ["documents", id] as const,
+  documentPreview: (id: string) => ["documents", id, "preview"] as const,
   documentChunks: (id: string, page: number, search: string) =>
     ["documents", id, "chunks", page, search] as const,
   settings: ["settings"] as const,

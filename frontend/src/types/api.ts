@@ -49,6 +49,23 @@ export interface DocumentDetail extends DocumentSummary {
   };
 }
 
+/**
+ * Isi dokumen yang tersimpan, untuk cross-check jawaban chat.
+ *
+ * `content` adalah teks hasil parsing, bukan berkas aslinya. `truncated`
+ * menandai kalau isinya dipotong.
+ */
+export interface DocumentPreview {
+  id: string;
+  filename: string;
+  status: DocumentSummary["status"];
+  content: string;
+  chunk_count: number;
+  truncated: boolean;
+  preview_chars: number;
+  total_chars: number;
+}
+
 /** Satu halaman hasil dari GET /documents/{id}/chunks. */
 export interface ChunkPage {
   items: Chunk[];
@@ -75,6 +92,12 @@ export interface ChatMessage {
   citations: Citation[];
   /** true bila retrieval tidak melewati similarity threshold (FR-2.3) */
   not_found?: boolean;
+  /**
+   * true bila jawaban datang dari pengetahuan umum model, bukan dari
+   * dokumen. UI wajib menampilkan labelnya, termasuk saat riwayat dibuka
+   * ulang.
+   */
+  ungrounded?: boolean;
 }
 
 export interface ChatSession {
@@ -83,6 +106,11 @@ export interface ChatSession {
   created_at: string;
   last_active_at: string;
   message_count: number;
+  /**
+   * Dokumen yang mengikat sesi ini, atau `null` untuk sesi lintas dokumen.
+   * Sesi ber-scope hanya mencari di dokumen itu.
+   */
+  document_id?: string | null;
 }
 
 export interface RetrievalSettings {
@@ -96,6 +124,7 @@ export type ChatStreamEvent =
   | { type: "token"; value: string }
   | { type: "citations"; value: Citation[] }
   | { type: "not_found" }
+  | { type: "ungrounded" }
   | { type: "done"; response_time_ms: number }
   | { type: "error"; message: string; retry_after_seconds?: number };
 
@@ -119,6 +148,11 @@ export interface TokenPoint {
   date: string;
   input_tokens: number;
   output_tokens: number;
+  /**
+   * Backend tidak menerima jumlah token dari provider, jadi angkanya
+   * estimasi. UI wajib menyebutinya sebagai estimasi, bukan pengukuran.
+   */
+  estimated?: boolean;
 }
 
 export interface QueryLog {
@@ -157,6 +191,27 @@ export interface HealthStatus {
   vector_store: "ok" | "unreachable";
   memory: "ok" | "unreachable";
   version: string;
+  /**
+   * Mode fallback yang sedang aktif di backend (API-CONTRACT.md Section 8).
+   * `mode: "reduced"` berarti salah satu komponen berjalan non-persisten.
+   */
+  fallback?: {
+    repository?: string;
+    memory?: string;
+    vector_store?: string;
+    vector_store_persistent?: boolean;
+    tracing?: boolean;
+    mode?: "full" | "reduced" | string;
+    /**
+     * Penanda proses backend. Berubah setiap kali backend dijalankan ulang,
+     * dan dipakai frontend untuk membuang state browser yang tersisa dari
+     * proses sebelumnya (sesi memori tidak bertahan melewati restart).
+     */
+    boot_id?: string;
+    embedding?: string;
+    embedding_model?: string;
+    llm?: string;
+  } | null;
 }
 
 export interface ApiErrorBody {

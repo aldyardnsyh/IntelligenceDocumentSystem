@@ -6,6 +6,8 @@ interface StreamQuery {
   session_id?: string | null;
   question: string;
   document_ids?: string[];
+  document_id?: string | null;
+  allow_ungrounded?: boolean;
 }
 
 export type StreamHandlers = {
@@ -15,11 +17,11 @@ export type StreamHandlers = {
 
 /**
  * Membaca POST /api/v1/chat/query sebagai SSE.
- * fetch + ReadableStream dipakai (bukan EventSource) karenakjadian/request
- * body, dan EventSource hanya mendukung GET.
+ * fetch + ReadableStream dipakai (bukan EventSource) karena butuh
+ * body/request POST, dan EventSource hanya mendukung GET.
  */
 export async function streamChatQuery(
-  { session_id, question, document_ids }: StreamQuery,
+  { session_id, question, document_ids, document_id, allow_ungrounded }: StreamQuery,
   { onEvent, signal }: StreamHandlers,
 ): Promise<void> {
   let response: Response;
@@ -35,6 +37,8 @@ export async function streamChatQuery(
         session_id: session_id ?? null,
         question,
         document_ids: document_ids ?? null,
+        document_id: document_id ?? null,
+        allow_ungrounded: allow_ungrounded ?? false,
       }),
       signal,
     });
@@ -69,18 +73,25 @@ export async function streamChatQuery(
   try {
     for (;;) {
       const { done, value } = await reader.read();
-      if (done) break;
+      if (done) {
+        // Flush decoder tanpa `{stream:true}`: byte terakhir multi-byte bisa
+        // masih tertahan di decoder kalau tidak dipaksa keluar.
+        buffer += decoder.decode();
+        drainSseBuffer(buffer, onEvent);
+        break;
+      }
 
       buffer += decoder.decode(value, { stream: true });
 
-      // SSE memisahkan event dengan baris kosong ganda.
-      let boundary = buffer.indexOf("\n\n");
-      while (boundary !== -1) {
-        const rawEvent = buffer.slice(0, boundary);
-        buffer = buffer.slice(boundary + 2);
-        const parsed = parseSseEvent(rawEvent);
+      // SSE memisahkan event dengan baris kosong ganda. Pemisahnya bisa
+      // `\n\n` atau `\r\n\r\n`; beberapa proxy dan stack Windows memulihkan
+      // CRLF, dan satu hop yang begitu membuat seluruh parsing macet.
+      for (;;) {
+        const match = /\r?\n\r?\n/.exec(buffer);
+        if (!match) break;
+        const parsed = parseSseEvent(buffer.slice(0, match.index));
+        buffer = buffer.slice(match.index + match[0].length);
         if (parsed) onEvent(parsed);
-        boundary = buffer.indexOf("\n\n");
       }
     }
   } finally {
@@ -88,17 +99,32 @@ export async function streamChatQuery(
   }
 }
 
+/**
+ * Sisa buffer setelah stream ditutup diproses sebagai satu event terakhir.
+ * Tanpa ini, event terakhir hilang kalau server menutup koneksi tanpa
+ * baris kosong penutup.
+ */
+function drainSseBuffer(buffer: string, onEvent: (event: ChatStreamEvent) => void) {
+  const trimmed = buffer.trim();
+  if (trimmed.length === 0) return;
+  const parsed = parseSseEvent(trimmed);
+  if (parsed) onEvent(parsed);
+}
+
 function parseSseEvent(raw: string): ChatStreamEvent | null {
   const dataLines: string[] = [];
 
-  for (const line of raw.split("\n")) {
+  for (const line of raw.split(/\r?\n/)) {
     if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
   }
 
   if (dataLines.length === 0) return null;
 
   const payload = dataLines.join("\n");
-  if (payload === "[DONE]") return { type: "done", response_time_ms: 0 };
+  // `[DONE]` adalah penanda akhir dari protokol OpenAI. Backend sudah
+  // mengirim event `done` JSON sebelum itu, jadi penanda ini diabaikan:
+  // mengubahnya jadi event `done` menimpa `response_time_ms` yang asli.
+  if (payload === "[DONE]") return null;
 
   try {
     const parsed = JSON.parse(payload) as ChatStreamEvent;

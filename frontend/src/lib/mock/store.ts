@@ -3,6 +3,7 @@ import type {
   ChunkPage,
   Citation,
   DocumentDetail,
+  DocumentPreview,
   DocumentStatus,
   DocumentSummary,
   RetrievalSettings,
@@ -52,7 +53,11 @@ export const SESSION_TITLE_MAX_LENGTH = 80;
  */
 export const DEFAULT_SETTINGS: RetrievalSettings = {
   top_k: 5,
-  similarity_threshold: 0.35,
+  // Sama dengan default backend dan rentang slider di /settings (0.75-0.92).
+  // Nilai di luar rentang control membuat thumb nempel di ujung dan tidak
+  // bisa dikembalikan. Angkanya sendiri hasil ukur untuk model
+  // `multilingual-e5-small`: relevan 0.84-0.91, tidak relevan 0.72-0.81.
+  similarity_threshold: 0.82,
 };
 
 interface StoredMessage {
@@ -70,6 +75,8 @@ interface StoredSession {
   created_at: string;
   last_active_at: string;
   messages: StoredMessage[];
+  /** Scope dokumen; `null` berarti sesi lintas dokumen. */
+  document_id?: string | null;
 }
 
 interface StoredDocument {
@@ -368,10 +375,13 @@ export const mockApi = {
       .sort((a, b) => b.uploaded_at.localeCompare(a.uploaded_at));
   },
 
-  async getDocument(id: string): Promise<DocumentDetail | null> {
+  async getDocument(id: string): Promise<DocumentDetail> {
     await sleep(200);
     const doc = read().documents.find((item) => item.id === id);
-    if (!doc) return null;
+    // Backend membalas 404, jadi mock harus berperilaku sama.
+    // Mengembalikan `null` membuat halaman detail merender layar kosong
+    // alih-alih "dokumen tidak ditemukan" saat tautannya rusak.
+    if (!doc) throw Object.assign(new Error("Dokumen tidak ditemukan."), { status: 404 });
     // Sengaja tanpa `chunks`: daftar chunk diambil terpisah supaya dokumen
     // besar tidak mengirim seluruh isinya sekaligus.
     return {
@@ -406,6 +416,46 @@ export const mockApi = {
       total: matched.length,
       page,
       page_size: pageSize,
+    };
+  },
+
+  /**
+   * Pratinjau isi dokumen untuk fixture.
+   *
+   * Bentuknya sengaja sama dengan backend: teks hasil parsing, disusun
+   * berurutan, dengan penanda `truncated`. Mode demo dan mode backend harus
+   * berperilaku sama, termasuk pada halaman ini.
+   */
+  async getDocumentPreview(id: string): Promise<DocumentPreview> {
+    await sleep(200);
+    const doc = read().documents.find((item) => item.id === id);
+    if (!doc) {
+      throw Object.assign(new Error("Dokumen tidak ditemukan."), { status: 404 });
+    }
+
+    const ordered = [...doc.chunks].sort(
+      (left, right) => left.chunk_index - right.chunk_index,
+    );
+    const content = ordered.map((chunk) => chunk.content).join("\n\n");
+    if (ordered.length === 0) {
+      throw Object.assign(
+        new Error(
+          "Dokumen ini belum punya isi yang bisa ditampilkan. "
+          + "Tunggu sampai ingestion selesai, atau periksa statusnya.",
+        ),
+        { status: 409 },
+      );
+    }
+
+    return {
+      id: doc.id,
+      filename: doc.filename,
+      status: doc.status,
+      content,
+      chunk_count: doc.chunk_count,
+      truncated: false,
+      preview_chars: content.length,
+      total_chars: content.length,
     };
   },
 
@@ -494,6 +544,7 @@ export const mockApi = {
         created_at: session.created_at,
         last_active_at: session.last_active_at,
         message_count: session.messages.length,
+        document_id: session.document_id ?? null,
       }))
       .sort((a, b) => b.last_active_at.localeCompare(a.last_active_at));
   },
@@ -509,6 +560,7 @@ export const mockApi = {
         created_at: session.created_at,
         last_active_at: session.last_active_at,
         message_count: session.messages.length,
+        document_id: session.document_id ?? null,
       },
       messages: session.messages,
     };
@@ -523,7 +575,11 @@ export const mockApi = {
     return trimmed.length > 60 ? `${trimmed.slice(0, 60)}...` : trimmed;
   },
 
-  appendMessage(sessionId: string, message: Omit<StoredMessage, "id" | "created_at">) {
+  appendMessage(
+    sessionId: string,
+    message: Omit<StoredMessage, "id" | "created_at">,
+    documentId?: string | null,
+  ) {
     const state = read();
     let session = state.sessions.find((item) => item.id === sessionId);
     if (!session) {
@@ -533,6 +589,7 @@ export const mockApi = {
         created_at: nowIso(),
         last_active_at: nowIso(),
         messages: [],
+        document_id: documentId ?? null,
       };
       state.sessions.push(session);
     }
@@ -599,10 +656,14 @@ export const mockApi = {
     commit();
   },
   /** Jawaban yang akan di-stream, plus sitasi yang menyertainya. */
-  compose(question: string) {
+  compose(question: string, documentId?: string | null) {
     const state = read();
     const settings = state.settings;
-    const ready = state.documents.filter((doc) => doc.status === "ready");
+    // Scope dokumen: chat privat hanya mencari di dokumen itu, sama seperti
+    // filter `document_ids` di backend.
+    const ready = state.documents.filter(
+      (doc) => doc.status === "ready" && (!documentId || doc.id === documentId),
+    );
 
     const ranked = ready
       .flatMap((doc) =>

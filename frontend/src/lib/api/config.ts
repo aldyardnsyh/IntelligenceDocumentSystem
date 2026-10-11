@@ -17,7 +17,7 @@
  * `NEXT_PUBLIC_API_BASE_URL` hanya override untuk kasus khusus, dan sengaja
  * kosong di konfigurasi normal supaya request memakai path relatif
  * `/api/v1/...` yang diproxy oleh rewrite di `next.config.ts`. Bagi browser
- * semua request — termasuk `Set-Cookie` dari endpoint login — lalu berada di
+ * semua request, termasuk `Set-Cookie` dari endpoint login, lalu berada di
  * satu origin, dan cookie ikut naik-turun bersama setiap permintaan.
  *
  * Mengisi URL absolut membuat browser bicara langsung ke backend. Di localhost

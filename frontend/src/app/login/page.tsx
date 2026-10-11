@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Logo } from "@/components/brand/logo";
 import { devPasscodeHint } from "@/lib/auth/session";
+import { safeNextPath } from "@/lib/api/origin";
 import { LoginForm } from "./login-form";
 
 export const metadata: Metadata = {
@@ -8,7 +9,15 @@ export const metadata: Metadata = {
   description: "Masukkan passcode untuk membuka workspace dokumen.",
 };
 
-export default function LoginPage() {
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  // `next` berasal dari URL, jadi divalidasi di server (open redirect).
+  const params = await searchParams;
+  const rawNext = Array.isArray(params.next) ? params.next[0] : params.next;
+
   return (
     <main className="flex min-h-dvh items-center justify-center bg-background px-4 py-12">
       <div className="w-full max-w-[400px]">
@@ -25,7 +34,7 @@ export default function LoginPage() {
               </p>
             </div>
 
-            <LoginForm devHint={devPasscodeHint()} />
+            <LoginForm devHint={devPasscodeHint()} nextPath={safeNextPath(rawNext)} />
           </div>
         </div>
 

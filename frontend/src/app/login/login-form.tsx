@@ -12,9 +12,11 @@ const INITIAL: LoginState = { status: "idle" };
 
 interface LoginFormProps {
   devHint: string | null;
+  /** Halaman tujuan setelah login, dari `?next=` yang dipasang proxy. */
+  nextPath?: string;
 }
 
-export function LoginForm({ devHint }: LoginFormProps) {
+export function LoginForm({ devHint, nextPath }: LoginFormProps) {
   // Deadline cooldown disimpan sebagai waktu absolut, bukan hitungan detik
   // yang dikurangi: hitungan bisa meleset kalau tab tidak aktif.
   const [cooldownUntil, setCooldownUntil] = useState(0);
@@ -49,6 +51,7 @@ export function LoginForm({ devHint }: LoginFormProps) {
 
   return (
     <form action={formAction} className="flex flex-col gap-5" noValidate>
+      {nextPath ? <input type="hidden" name="next" value={nextPath} /> : null}
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="passcode" className="text-[13px] font-medium">
           Passcode akses

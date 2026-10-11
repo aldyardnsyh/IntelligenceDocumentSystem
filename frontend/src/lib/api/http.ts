@@ -17,6 +17,23 @@ function buildUrl(path: string, query?: Record<string, QueryValue>) {
   return qs ? `${url}?${qs}` : url;
 }
 
+/**
+ * Endpoint auth tidak boleh memicu redirect 401 di atas: login yang gagal
+ * akan memantul balik ke /login dan seterusnya.
+ */
+function isAuthEndpoint(path: string) {
+  return path.includes("/auth/verify") || path.includes("/auth/logout");
+}
+
+/**
+ * Cookie `ida_gate` hanya penanda melewati gerbang. Cookie ini HTTP-only
+ * dan tidak bisa dihapus dari JavaScript, jadi kedaluwarsanya dikembalikan
+ * lewat route server yang stubborn response-nya tidak dihiraukan.
+ */
+function expireGateCookie() {
+  void fetch("/api/logout", { method: "POST", keepalive: true }).catch(() => {});
+}
+
 async function readError(response: Response): Promise<ApiError> {
   let body: unknown = null;
   try {
@@ -68,7 +85,28 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     throw new ApiError("Tidak dapat terhubung ke layanan. Periksa koneksi Anda.", 0);
   }
 
-  if (!response.ok) throw await readError(response);
+  if (!response.ok) {
+    const error = await readError(response);
+
+    // 401 di tengah pemakaian: cookie penanda gerbang masih ada (TTL 24 jam)
+    // padahal sesi backend sudah tidak berlaku. Tanpa penanganan di sini,
+    // setiap layar menunjukkan error yang sama dan satu-satunya jalan keluar
+    // adalah tombol logout yang tidak selalu terlihat.
+    //
+    // Request login sendiri dikecualikan supaya gagalnya login tidak memicu
+    // loop redirect.
+    if (error.status === 401 && !isAuthEndpoint(path)) {
+      expireGateCookie();
+      const next = `${window.location.pathname}${window.location.search}`;
+      // Muat ulang penuh, bukan navigasi client-side: cookie gate harus
+      // ikut hilang sebelum halaman login dirender, dan `router.push` tidak
+      // membersihkan cache React Router.
+      // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- intentionally a hard navigation
+      window.location.assign(`/login?next=${encodeURIComponent(next)}`);
+    }
+
+    throw error;
+  }
   if (response.status === 204) return undefined as T;
 
   return (await response.json()) as T;

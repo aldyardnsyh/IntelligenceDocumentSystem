@@ -44,7 +44,9 @@ const FALLBACK: Record<number, string> = {
   401: "Sesi akses sudah berakhir. Masuk lagi untuk melanjutkan.",
   403: "Akses ditolak untuk sumber daya ini.",
   404: "Data yang Anda cari tidak ditemukan.",
+  409: "Permintaan tidak bisa dijalankan sekarang. Periksa pesan di atasnya.",
   413: "Ukuran berkas melebihi batas yang diizinkan.",
+  422: "Permintaan tidak dapat diproses. Periksa kembali isian Anda.",
   429: "Batas permintaan tercapai. Coba lagi sebentar lagi.",
   500: "Layanan sedang mengalami gangguan. Coba lagi sebentar lagi.",
   502: "Layanan upstream tidak merespons. Coba lagi sebentar lagi.",
@@ -67,9 +69,34 @@ export function toApiError(error: unknown): ApiError {
 export function parseErrorBody(body: unknown): ApiErrorBody | null {
   if (typeof body !== "object" || body === null) return null;
   const candidate = body as Record<string, unknown>;
-  if (typeof candidate.detail !== "string") return null;
-  return {
-    detail: candidate.detail,
-    code: typeof candidate.code === "string" ? candidate.code : undefined,
-  };
+
+  if (typeof candidate.detail === "string") {
+    return {
+      detail: candidate.detail,
+      code: typeof candidate.code === "string" ? candidate.code : undefined,
+    };
+  }
+
+  // Validasi Pydantic (422) tidak mengirim string: `detail` berupa array
+  // berisi objek `{loc, msg, type}`. Tanpa penanganan ini, 422 jatuh ke
+  // pesan generik padahal penyebabnya ValidatorError yang spesifik.
+  if (Array.isArray(candidate.detail)) {
+    const messages = candidate.detail
+      .map((item) => {
+        if (typeof item === "string") return item;
+        if (typeof item !== "object" || item === null) return null;
+        const entry = item as Record<string, unknown>;
+        return typeof entry.msg === "string" ? entry.msg : null;
+      })
+      .filter((item): item is string => typeof item === "string");
+
+    if (messages.length > 0) {
+      return {
+        detail: messages.join("; "),
+        code: typeof candidate.code === "string" ? candidate.code : undefined,
+      };
+    }
+  }
+
+  return null;
 }

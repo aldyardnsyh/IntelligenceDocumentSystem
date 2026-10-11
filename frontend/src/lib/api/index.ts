@@ -6,12 +6,14 @@ import type {
   ChunkPage,
   Citation,
   DocumentDetail,
+  DocumentPreview,
   DocumentSummary,
+  EvalRun,
   HealthStatus,
   RetrievalSettings,
 } from "@/types/api";
 import { streamChatQuery } from "./chat-stream";
-import { isMockMode } from "./config";
+import { API_BASE_URL, isMockMode } from "./config";
 import { ApiError } from "./error";
 import { request } from "./http";
 import { mockApi } from "@/lib/mock/store";
@@ -31,6 +33,30 @@ export function listDocuments(signal?: AbortSignal) {
 export function getDocument(id: string, signal?: AbortSignal) {
   if (isMockMode) return mockApi.getDocument(id);
   return request<DocumentDetail>(`/api/v1/documents/${id}`, { signal });
+}
+
+/**
+ * Isi dokumen yang tersimpan, untuk cross-check jawaban chat.
+ *
+ * Halaman dokumen perlu menampilkan teks aslinya berurutan: daftar chunk
+ * terpisah-pisah menyembunyikan konteks di sekitarnya, sehingga pengguna
+ * tidak bisa menilai apakah jawaban chat benar.
+ */
+export function getDocumentPreview(id: string, signal?: AbortSignal) {
+  if (isMockMode) return mockApi.getDocumentPreview(id);
+  return request<DocumentPreview>(`/api/v1/documents/${id}/preview`, { signal });
+}
+
+/**
+ * URL berkas asli dokumen, untuk pratinjau PDF di iframe.
+ *
+ * Dikembalikan sebagai URL (bukan diambil lewat fetch) karena browser yang
+ * harus memuatnya: PDF ditampilkan oleh penampil bawaan browser, dan
+ * mengunduhnya lewat fetch lalu membuat blob hanya menambah satu salinan
+ * besar di memori tanpa manfaat.
+ */
+export function getDocumentFileUrl(id: string): string {
+  return `${API_BASE_URL}/api/v1/documents/${id}/file`;
 }
 
 export interface ChunkQuery {
@@ -58,7 +84,7 @@ export function getDocumentChunks(
   });
 }
 
-export async function uploadDocument(file: File) {
+export async function uploadDocument(file: File, signal?: AbortSignal) {
   if (isMockMode) {
     try {
       return await mockApi.uploadDocument(file);
@@ -70,9 +96,12 @@ export async function uploadDocument(file: File) {
 
   const form = new FormData();
   form.append("file", file);
+  // Signal diteruskan supaya unggahan bisa dibatalkan. Tanpa itu, pengguna
+  // yang pindah halaman masih menunggu request yang tidak lagi relevan.
   return request<DocumentSummary>("/api/v1/documents/upload", {
     method: "POST",
     body: form,
+    signal,
   });
 }
 
@@ -99,6 +128,8 @@ export interface HistoryResponse {
     created_at: string;
     citations: Citation[];
     not_found?: boolean;
+    /** Jawaban dari pengetahuan umum model, bukan dari dokumen. */
+    ungrounded?: boolean;
   }>;
 }
 
@@ -150,6 +181,10 @@ export interface AskHandlers {
 export interface AskArgs {
   sessionId: string | null;
   question: string;
+  /** Scope dokumen untuk sesi ini (chat privat per dokumen). */
+  documentId?: string | null;
+  /** Izinkan jawaban dari pengetahuan umum saat tidak ada konteks dokumen. */
+  allowUngrounded?: boolean;
 }
 
 /**
@@ -157,15 +192,27 @@ export interface AskArgs {
  * indikator streaming, tombol stop, dan state "menjawab" bisa dicoba tanpa
  * backend. Bentuk event-nya sama persis dengan FastAPI.
  */
-export async function askQuestion({ sessionId, question }: AskArgs, handlers: AskHandlers) {
+export async function askQuestion(
+  { sessionId, question, documentId, allowUngrounded }: AskArgs,
+  handlers: AskHandlers,
+) {
   if (!isMockMode) {
+    // `draft_...` hanya penanda "belum ada sesi di server". Kalau id itu
+    // diteruskan apa adanya, backend akan memperlakukannya sebagai sesi
+    // yang sudah ada padahal belum pernah dibuat.
+    const resolved = sessionId && !sessionId.startsWith("draft_") ? sessionId : null;
     return streamChatQuery(
-      { session_id: sessionId, question },
+      {
+        session_id: resolved,
+        question,
+        document_id: documentId ?? null,
+        allow_ungrounded: allowUngrounded ?? false,
+      },
       { onEvent: handlers.onEvent, signal: handlers.signal },
     );
   }
 
-  const session = sessionId ?? mockApi.createSessionId();
+  const session = sessionId && !sessionId.startsWith("draft_") ? sessionId : mockApi.createSessionId();
   const startedAt = Date.now();
   const emit = (event: ChatStreamEvent) => handlers.onEvent(event);
 
@@ -174,18 +221,46 @@ export async function askQuestion({ sessionId, question }: AskArgs, handlers: As
 
   emit({ type: "session", session_id: session });
 
-  const result = mockApi.compose(question);
+  const result = mockApi.compose(question, documentId ?? null);
 
-  mockApi.appendMessage(session, {
-    role: "user",
-    content: question,
-    citations: [],
-    not_found: false,
-  });
+  mockApi.appendMessage(
+    session,
+    {
+      role: "user",
+      content: question,
+      citations: [],
+      not_found: false,
+    },
+    documentId ?? null,
+  );
 
   if (result.notFound) {
     await delay(300, handlers.signal);
     if (handlers.signal?.aborted) return;
+
+    // Mode "jawab tanpa dokumen" juga berlaku di fixture, supaya perilaku
+    // kedua mode tidak berbeda.
+    if (allowUngrounded) {
+      const answer =
+        "Ini bukan dari dokumen Anda: menurut pengetahuan umum, jawaban "
+        + "untuk pertanyaan itu tidak tersedia di korpus yang diunggah, dan "
+        + "mode demo tidak memiliki model untuk menjawabnya.";
+      emit({ type: "ungrounded" });
+      for (const piece of answer.match(/.{1,24}/g) ?? []) {
+        await delay(40, handlers.signal);
+        if (handlers.signal?.aborted) return;
+        emit({ type: "token", value: piece });
+      }
+      mockApi.appendMessage(session, {
+        role: "assistant",
+        content: answer,
+        citations: [],
+        not_found: false,
+      });
+      const elapsed = Date.now() - startedAt;
+      emit({ type: "done", response_time_ms: elapsed });
+      return;
+    }
 
     const message =
       "Informasi ini tidak ditemukan dalam dokumen yang diunggah. "
@@ -280,6 +355,25 @@ export function getAnalyticsSummary(signal?: AbortSignal): Promise<AnalyticsSumm
   return request<AnalyticsSummary>("/api/v1/analytics/summary", { signal });
 }
 
+/**
+ * Jalankan evaluasi retrieval (tanpa LLM, tanpa API key).
+ *
+ * Halaman /analytics sebelumnya hanya bisa diisi lewat skrip RAGAS yang
+ * butuh kredensial tambahan. Endpoint ini menghitung metrik yang bisa
+ * dijawab tanpa model, sehingga halaman itu punya jalan keluar sendiri.
+ */
+export function runRetrievalEvaluation(documentIds: string[] = []): Promise<EvalRun> {
+  if (isMockMode) {
+    return Promise.reject(
+      new ApiError("Evaluasi hanya tersedia saat backend aktif.", 400),
+    );
+  }
+  return request<EvalRun>("/api/v1/analytics/evaluate", {
+    method: "POST",
+    body: { document_ids: documentIds },
+  });
+}
+
 export function getAnalyticsLogs(
   page: number,
   pageSize: number,
@@ -300,6 +394,14 @@ export function getHealth(signal?: AbortSignal): Promise<HealthStatus> {
       vector_store: "unreachable",
       memory: "unreachable",
       version: "fixture lokal",
+      fallback: {
+        repository: "fixture",
+        memory: "fixture",
+        vector_store: "fixture",
+        vector_store_persistent: false,
+        tracing: false,
+        mode: "reduced",
+      },
     });
   }
   return request<HealthStatus>("/api/v1/health", { signal });
