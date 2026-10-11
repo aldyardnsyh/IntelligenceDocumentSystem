@@ -1,5 +1,5 @@
 # =============================================================================
-# Rahasia — ini baris paling penting di berkas ini.
+# Rahasia. Ini baris paling penting di berkas ini.
 #
 # `ACCESS_PASSCODE_SHA256` dan `GROQ_API_KEY` hanya ada sebagai variabel env
 # di server. Kalau `.env` ikut ter-commit, nilainya tersimpan permanen di
@@ -31,38 +31,57 @@ __pycache__/
 build/
 dist/
 
-# Data runtime. SQLite metadata dan indeks ChromaDB lived di sini; ikut
-# ter-commit berarti data pengguna menyatu di repositori.
+# Data runtime. SQLite metadata, indeks ChromaDB, dan berkas asli yang
+# diunggah untuk pratinjau semuanya hidup di sini. Ikut ter-commit berarti
+# data pengguna menyatu di repositori.
 data/
 *.db
 *.db-journal
 *.sqlite
 *.sqlite3
+# Berkas asli yang diunggah (dipakai pratinjau PDF). Path defaultnya
+# `backend/data/uploads`, jadi sudah tertutup oleh `data/`, tapi ditulis
+# eksplisit supaya tetap aman kalau path-nya diubah lewat env.
+uploads/
+backend/uploads/
 
 # Cache dan hasil test
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
 .coverage
+.coverage.*
 coverage.xml
 htmlcov/
+coverage-html/
+
+# Playwright: hasil uji browser. Berisi screenshot dan trace kegagalan yang
+# bisa puluhan MB, dan isinya spesifik mesin yang menjalankannya.
+playwright-report/
+blob-report/
+test-results/
+playwright/.cache/
 
 # Log
 *.log
 npm-debug.log*
+yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
 
 # Editor dan OS
 .vscode/
 .idea/
 *.swp
+*.swo
 .DS_Store
 Thumbs.db
+desktop.ini
 
 # Metadata Git milik subdirektori.
 #
 # Repositori ini monorepo, jadi `.git` di dalam `frontend/` berarti `frontend/`
-# akan ter-*commit* sebagai embedded repository: yang tersimpan hanya pointer,
+# akan ter-commit sebagai embedded repository: yang tersimpan hanya pointer,
 # bukan kodenya. Hasil `git clone` di tempat lain akan berisi folder `frontend`
 # yang kosong. Aturan ini mencegahnya, dan berlaku untuk subdirektori mana pun.
 */.git
@@ -72,3 +91,14 @@ Thumbs.db
 *.tmp
 *.bak
 *.orig
+*.rej
+*.part
+
+# TypeScript: cache build inkremental, dibuat ulang setiap build.
+*.tsbuildinfo
+
+# Model embedding yang diunduh saat runtime. Ratusan MB, dan diunduh ulang
+# otomatis kalau hilang.
+models/
+.cache/
+huggingface/

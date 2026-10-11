@@ -1,0 +1,55 @@
+# Normalisasi line ending.
+#
+# Repositori ini sebelumnya bercampur: 82 berkas CRLF (dibuat di Windows) dan
+# 87 berkas LF. Akibatnya setiap perubahan kecil bisa muncul sebagai diff
+# seluruh berkas, dan itu menyembunyikan perubahan yang sebenarnya.
+#
+# Aturannya:
+# - Berkas teks disimpan sebagai LF di git (`eol=lf`). Ini standar lintas
+#   platform dan membuat diff stabil.
+# - Berkas Windows (`.ps1`, `.bat`, `.cmd`) tetap CRLF, karena PowerShell dan
+#   cmd membaca CRLF dengan benar sementara LF bisa memecah parsing.
+# - Berkas biner ditandai eksplisit supaya git tidak mencoba mengubahnya.
+#
+# Setelah menarik perubahan ini, jalankan sekali:
+#   git add --renormalize .
+# lalu commit. Tanpa langkah itu, berkas lama tetap CRLF di index.
+
+# Default: deteksi otomatis, lalu pakai LF di working tree.
+* text=auto eol=lf
+
+# Skrip Windows
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Berkas biner: jangan disentuh.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.zip binary
+*.gz binary
+*.bin binary
+*.db binary
+*.sqlite binary
+*.sqlite3 binary
+
+# Berkas kunci (tidak ada di repo ini, tapi mencegah salah tambah nanti).
+*.pem binary
+*.key binary
+
+# Berkas yang sering dipakai tool: LF saja.
+*.md text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.toml text eol=lf
+*.lock text eol=lf
+Dockerfile text eol=lf
+Caddyfile text eol=lf
