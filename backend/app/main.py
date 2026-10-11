@@ -13,8 +13,10 @@ Titik masuk backend. Yang penting di sini:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -28,7 +30,12 @@ from app.api.v1.routes import public_router
 from app.api.v1.routes import router as v1_router
 from app.core.config import get_settings
 from app.core.security import SessionStore, SlidingWindowLimiter
-from app.dependencies import get_ingestion, init_services, shutdown_services
+from app.dependencies import (
+    get_ingestion,
+    get_repository,
+    init_services,
+    shutdown_services,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -51,6 +58,29 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         window_seconds=settings.auth_window_seconds,
     )
     app.state.session_store = SessionStore(ttl_seconds=settings.session_ttl_seconds)
+    # Penanda proses ini, dibaca frontend lewat health. Nilainya berubah tiap
+    # start, dan itu yang dipakai untuk tahu bahwa state browser yang tersisa
+    # berasal dari proses yang sudah mati.
+    app.state.boot_id = uuid.uuid4().hex[:12]
+
+    # Sesi akses dan riwayat percakapan hidup di memori proses. Setelah
+    # restart keduanya kosong, jadi data lama di SQLite hanya akan menjadi
+    # riwayat yatim: sesi yang muncul di sidebar tapi isinya tidak bisa
+    # dibuka, dan pertanyaan lanjutan yang kehilangan konteksnya.
+    #
+    # Karena itu riwayat dibersihkan saat start, dan cookie sesi lama di
+    # browser sengaja tidak berlaku lagi, pengguna diminta masuk ulang.
+    # Ini juga yang membuat "build ulang" berarti build ulang: tidak ada
+    # state lama yang diam-diam ikut terbawa.
+    purged = await asyncio.to_thread(get_repository().delete_all_sessions)
+    if purged:
+        logger.info(
+            "Riwayat sesi lama dibersihkan saat start: %d sesi. "
+            "Sesi memori tidak bertahan melewati restart, jadi menyisakannya "
+            "hanya menghasilkan riwayat yang tidak bisa dibuka.",
+            purged,
+        )
+
     # Disimpan di state supaya shutdown bisa menunggu ingestion yang sedang
     # berjalan, bukan hanya service-nya yang dilepas.
     app.state.ingestion = get_ingestion()

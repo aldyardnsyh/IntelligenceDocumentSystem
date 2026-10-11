@@ -57,6 +57,14 @@ class Settings(BaseSettings):
     """Rate limit verifikasi passcode: jumlah percobaan per jendela waktu (FR-0.3)."""
     auth_max_attempts: int = 5
     auth_window_seconds: int = 5 * 60
+    """Percayai ``X-Forwarded-For`` untuk key rate limit.
+
+    Hanya nyalakan kalau API benar-benar hanya dijangkau lewat reverse proxy
+    tepercaya (Caddy di docker compose). Tanpa proxy, `request.client.host`
+    sudah merupakan IP asli dan mengaktifkan ini membuat klien bisa menyusun
+    ulang bucket rate limit sesuka hatinya lewat header palsu.
+    """
+    trust_proxy_headers: bool = False
 
     # ------------------------------------------------------------------- llm
     """Provider aktif untuk generation. Ganti ke ``ollama`` untuk fully local."""
@@ -67,7 +75,7 @@ class Settings(BaseSettings):
     ``NoDecode`` supaya env dibaca sebagai daftar dipisah koma, bukan JSON.
     """
     llm_fallback_chain: Annotated[list[str], NoDecode] = Field(default_factory=list)
-    llm_model: str = "llama-3.1-8b-instant"
+    llm_model: str = "openai/gpt-oss-20b"
     llm_temperature: float = 0.1
     llm_max_tokens: int = 800
     llm_timeout_seconds: float = 30.0
@@ -93,7 +101,7 @@ class Settings(BaseSettings):
     embedding_model: str = "intfloat/multilingual-e5-small"
     embedding_dimension: int = 384
     embedding_batch_size: int = 16
-    """Diaktifkan hanya kalau env ``LOCAL_EMBEDDING=0``; test memakai stub."""
+    """Diaktifkan hanya kalau env ``USE_LOCAL_EMBEDDING=0``; test memakai stub."""
     use_local_embedding: bool = True
 
     # ------------------------------------------------------------- chunking
@@ -105,13 +113,18 @@ class Settings(BaseSettings):
     min_top_k: int = 3
     max_top_k: int = 10
     # Rentang di sini adalah sumber kebenaran; slider di frontend harus
-    # mengikuti angka yang sama. Default 0.35 pernah bertabrakan dengan slider
-    # yang mulai di 0.5, sehingga nilai aktif tidak bisa diwakili slider sama
-    # sekali: pengguna melihat 0.50 padahal server memakai 0.35, lalu
-    # menggeser slider tanpa hasil yang sesuai.
-    default_similarity_threshold: float = 0.5
-    min_similarity_threshold: float = 0.5
-    max_similarity_threshold: float = 0.9
+    # mengikuti angka yang sama.
+    #
+    # Angka ini diukur, bukan ditebak. Dengan `multilingual-e5-small`, pertanyaan
+    # yang benar-benar relevan skornya 0.84-0.91, sedangkan yang tidak relevan
+    # masih 0.72-0.81, model embedding memang selalu memberi skor cukup tinggi
+    # pada teks bahasa Indonesia. Ambang lama 0.5 dibuat untuk stub hashing dan
+    # berbahaya di sini: pertanyaan tentang sepak bola lolos, lalu LLM menjawab
+    # berdasarkan chunk yang salah (lebih buruk daripada "tidak ditemukan",
+    # karena sekarang jawabannya terlihat bersumber).
+    default_similarity_threshold: float = 0.82
+    min_similarity_threshold: float = 0.75
+    max_similarity_threshold: float = 0.92
     """Berapa pesan terakhir yang ikut sebagai konteks (FR-3.2)."""
     history_message_count: int = 6
     """Cache query: TTL dan key (FR-4.1)."""
@@ -125,6 +138,12 @@ class Settings(BaseSettings):
     accepted_extensions: list[str] = Field(
         default_factory=lambda: [".pdf", ".txt", ".md", ".markdown"]
     )
+    """Berkas golden dataset untuk evaluasi retrieval dari UI.
+
+    Dipakai endpoint ``POST /analytics/evaluate``. Path relatif dihitung dari
+    direktori kerja proses (biasanya ``backend/``).
+    """
+    evaluation_dataset_path: str = "evaluation/dataset.json"
 
     # ----------------------------------------------------------------- redis
     redis_url: str | None = None
@@ -135,6 +154,13 @@ class Settings(BaseSettings):
     # --------------------------------------------------------------- storage
     chroma_persist_dir: str = "./data/chroma"
     sqlite_fallback_path: str = "./data/metadata.db"
+    """Berkas asli yang disimpan untuk pratinjau (PDF).
+
+    Dipisah dari metadata dan vector store karena isinya biner dan besar.
+    Yang disimpan hanya jenis berkas yang tidak bisa ditampilkan dari
+    chunk (lihat ``STORED_SUFFIXES`` di ``app/services/storage.py``).
+    """
+    uploads_dir: str = "./data/uploads"
 
     # -------------------------------------------------------------- supabase
     supabase_url: str | None = None

@@ -7,12 +7,14 @@ wajib terjadi di lifespan, bukan di dalam handler.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 
 from app.core.config import Settings, get_settings
 from app.providers.embedding import build_embedding_provider
 from app.repositories.sqlite_repo import MetadataRepository, SqliteRepository
-from app.services.generation.generator import LLMChain
+from app.services.generation.generator import LLMChain, build_chain
 from app.services.ingestion.service import IngestionService
 from app.services.memory.rate_limit import RateLimiter
 from app.services.memory.store import MemoryStore, build_memory_store
@@ -43,7 +45,7 @@ def init_services(app_settings: Settings | None = None) -> None:
     _settings = app_settings or get_settings()
 
     if _settings.is_sqlite_mode:
-        _repository = SqliteRepository(_settings.sqlite_fallback_path)
+        _repository = SqliteRepository(_settings.sqlite_fallback_path, defaults=_settings)
     else:
         from app.repositories.supabase_repo import SupabaseRepository  # noqa: PLC0415
 
@@ -60,9 +62,10 @@ def init_services(app_settings: Settings | None = None) -> None:
         _settings, _repository, _store, _retriever, embedding, _memory
     )
 
-    from app.providers.base import build_fallback_chain  # noqa: PLC0415
-
-    _chain = LLMChain(build_fallback_chain(_settings))
+    # `build_chain` dipakai (bukan `LLMChain(...)` langsung) supaya
+    # `LLM_MAX_RETRIES` benar-benar dibaca. Dipanggil langsung, nilainya
+    # diabaikan tanpa satu pun tanda bahwa konfigurasi itu tidak berlaku.
+    _chain = build_chain(_settings)
     # Tracer dibuat di sini supaya satu instans dipakai seluruh query.
     # Kalau tracing mati, objeknya tetap ada tapi semua method-nya no-op.
     _tracer = Tracer(_settings)
@@ -76,7 +79,7 @@ def init_services(app_settings: Settings | None = None) -> None:
     # Tanpa langkah ini, indeks BM25 dan peta metadata hanya terisi oleh
     # dokumen yang diunggah selama proses ini berjalan. Setelah container
     # di-restart, dokumennya masih ada di SQLite dan Chroma, tapi retriever
-    # tidak tahu apa pun -- sehingga setiap pertanyaan dijawab "tidak
+    # tidak tahu apa pun, sehingga setiap pertanyaan dijawab "tidak
     # ditemukan" tanpa satu pun error di log.
     #
     # Kegagalan rebuild tidak boleh menggagalkan startup: aplikasi yang bisa
@@ -132,6 +135,18 @@ def shutdown_services() -> None:
             _tracer.flush()
         except Exception:  # noqa: BLE001
             logger.exception("Gagal flush tracer saat shutdown")
+
+    # Tutup koneksi HTTP provider. Kliennya dipakai bersama antar request,
+    # jadi proses yang berhenti tanpanya meninggalkan socket terbuka sampai
+    # OS membersihkannya.
+    if _chain is not None:
+        for provider in _chain.providers:
+            closer = getattr(provider, "aclose", None)
+            if closer is None:
+                continue
+            # Kegagalan menutup koneksi tidak boleh menggagalkan shutdown.
+            with contextlib.suppress(Exception):
+                asyncio.run(closer())
 
     _settings = None
     _repository = None
