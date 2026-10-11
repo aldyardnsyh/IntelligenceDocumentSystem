@@ -146,13 +146,22 @@ class KeywordIndex:
         self.frequencies.pop(index)
         self.lengths.pop(index)
 
-    def search(self, query: str, top_k: int) -> list[tuple[str, float]]:
+    def search(
+        self,
+        query: str,
+        top_k: int,
+        allowed_ids: set[str] | None = None,
+    ) -> list[tuple[str, float]]:
         """BM25 dengan parameter standar k1=1.5, b=0.75.
 
         Args:
             query: Pertanyaan pengguna, sudah di-tokenisasi oleh pemanggil
                 (``tokenize`` dipanggil di sini).
             top_k: Berapa banyak hasil yang dikembalikan.
+            allowed_ids: Batasi hanya id chunk milik dokumen yang diminta. Tanpa
+                filter ini, kandidat yang mengisi ``top_k`` bisa habis oleh
+                dokumen di luar scope, dan chunk yang sebenarnya layak di
+                dokumen yang diminta tidak pernah masuk kandidat sama sekali.
 
         Returns:
             Pasangan ``(chunk_id, skor_bm25)``, urut menurun.
@@ -179,6 +188,8 @@ class KeywordIndex:
                 / (document_frequency + 0.5)
             )
             for index, identifier in enumerate(self.document_ids):
+                if allowed_ids is not None and identifier not in allowed_ids:
+                    continue
                 frequency = self.frequencies[index].get(token, 0)
                 if frequency == 0:
                     continue
@@ -222,14 +233,18 @@ def reciprocal_rank_fusion(
     return {identifier: score / best for identifier, score in fused.items() if best > 0}
 
 
-#: Batas atas skor BM25 setelah penskalaan. BM25 secara teoris tak terbatas,
-#: jadi perlu disiram ke rentang 0..1 agar bisa dibandingkan dengan cosine
-#: similarity. Nilai 12 dipilih dari pengamatan pada dokumen administratif:
-#: kueri yang sangat spesifik bisa berada di 10-15, sementara kecocokan
-#: kebetulan hanya di 1-3. Menghimpit terlalu rendah membuat semua chunk
-#: lolos; terlalu tinggi membuat hanya frasa yang persis sama yang lolos,
-#: yang justru mematikan parafrase.
-BM25_SATURATION = 12.0
+#: Konstanta saturasi penskalaan skor BM25 ke rentang 0..1.
+#:
+#: Nilainya menentukan **seberapa besar bukti leksikal harusnya** agar lolos
+#: ambang. Dengan `s/(s+k)` dan ambang 0.5, bukti harus melebihi `k`. Versi
+#: lama memakai k=12, yang berarti skor BM25 harus di atas 12, nilai yang
+#: jarang terjadi pada dokumen pendek. Akibatnya jalur leksikal praktis mati:
+#: retrieval hybrid claims bisa menaikkan recall untuk nomor klausul (yang
+#: tidak pernah mirip secara vektor), tapi nyatanya tidak pernah dipakai.
+#:
+#: k=4 memberi jalur leksikal ruang bernapas tanpa mengubah urutan peringkat
+#: (fungsi ini monoton, jadi peringkat tetap sama).
+BM25_SATURATION = 4.0
 
 
 def _normalized_keyword(score: float) -> float:
@@ -290,7 +305,7 @@ class HybridRetriever:
         Tanpa itu, indeks kata dan peta metadata kosong setiap kali proses
         dimulai ulang, padahal dokumennya masih ada di SQLite dan Chroma.
         Gejalanya: retrieval mengembalikan daftar kosong, sehingga **setiap
-        pertanyaan dijawab "tidak ditemukan"** -- tidak ada error, tidak ada
+        pertanyaan dijawab "tidak ditemukan"**, tidak ada error, tidak ada
         log, hanya perilaku yang masuk akal tapi salah total.
 
         Di localhost bug ini tidak terlihat karena dokumen baru saja di-upload
@@ -330,6 +345,22 @@ class HybridRetriever:
             self._keyword_index.remove(chunk_id)
             self._entries.pop(chunk_id, None)
         return len(doomed)
+
+    def _chunk_ids_for(self, document_ids: list[str] | None) -> set[str] | None:
+        """Id chunk milik dokumen-dokumen tertentu, atau ``None`` untuk semua.
+
+        Filter ini diterapkan sebelum RRF, bukan sesudahnya. Setelah fusi,
+        kandidat yang luar scope baru dibuang, padahal mereka sudah
+        memenuhi kuota kandidat dan menggeser peringkat chunk yang layak.
+        """
+        if not document_ids:
+            return None
+        wanted = set(document_ids)
+        return {
+            chunk_id
+            for chunk_id, entry in self._entries.items()
+            if entry.document_id in wanted
+        }
 
     def retrieve(
         self,
@@ -377,7 +408,11 @@ class HybridRetriever:
             top_k=candidate_count,
             where=filter_by,
         )
-        keyword_hits = self._keyword_index.search(query, candidate_count)
+        keyword_hits = self._keyword_index.search(
+            query,
+            candidate_count,
+            allowed_ids=self._chunk_ids_for(document_ids),
+        )
 
         vector_ids = [identifier for identifier, _score, _meta in vector_hits]
         vector_scores = {identifier: score for identifier, score, _meta in vector_hits}
@@ -403,6 +438,14 @@ class HybridRetriever:
         }
 
         results: list[RetrievedChunk] = []
+        # Batasi kontribusi satu dokumen. Tanpa batas ini, satu dokumen yang
+        # chunk-nya banyak bisa memenuhi seluruh jatah `top_k`, dan jawaban
+        # hanya melihat satu sumber padahal ada dokumen lain yang relevan,
+        # pengguna melihat "8 sumber" yang sebenarnya dari satu berkas yang
+        # sama.
+        per_document_limit = max(2, top_k // 2)
+        per_document_count: dict[str, int] = {}
+
         for chunk_id, score in sorted(
             fused.items(), key=lambda item: item[1], reverse=True
         ):
@@ -413,6 +456,8 @@ class HybridRetriever:
                 # sumber yang tidak bisa diverifikasi.
                 continue
             if document_ids and entry.document_id not in document_ids:
+                continue
+            if per_document_count.get(entry.document_id, 0) >= per_document_limit:
                 continue
 
             vector_score = vector_scores.get(chunk_id, 0.0)
@@ -436,6 +481,9 @@ class HybridRetriever:
                 continue
 
             metadata = metadata_by_id.get(chunk_id)
+            per_document_count[entry.document_id] = (
+                per_document_count.get(entry.document_id, 0) + 1
+            )
             results.append(
                 RetrievedChunk(
                     chunk=_chunk_for(chunk_id, entry, metadata),

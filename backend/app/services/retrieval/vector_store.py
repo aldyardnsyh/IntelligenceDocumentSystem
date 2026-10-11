@@ -23,10 +23,6 @@ from app.core.config import Settings
 
 logger = logging.getLogger(__name__)
 
-#: Nama koleksi yang dipakai untuk memeriksa koneksi. Berbeda dari koleksi
-#: data supaya health check tidak pernah ikut terlibat saat koleksi dihapus.
-COLLECTION_NAME_FOR_PING = "__ping__"
-
 
 @dataclass(slots=True)
 class VectorRecord:
@@ -277,10 +273,16 @@ class ChromaVectorStore:
                 return 0
 
     def ping(self) -> bool:
-        """Coba sampai ke disk. Collection yang belum ada bukan kegagalan."""
+        """Cek koneksi ke Chroma tanpa membuat koleksi apa pun.
+
+        Versi lama memakai ``get_or_create_collection("__ping__")`` dan itu
+        pecah di Chroma 1.x: binding Rust-nya menolak nama yang diawali atau
+        diakhiri underscore, sehingga health selalu "unreachable" padahal
+        Chroma sehat. ``heartbeat()`` tidak menyentuh koleksi sama sekali.
+        """
         with self._lock:
             try:
-                self._collection(COLLECTION_NAME_FOR_PING)
+                self._client.heartbeat()
                 return True
             except Exception:  # noqa: BLE001
                 logger.exception("Chroma tidak bisa dihubungi")
@@ -323,10 +325,12 @@ def build_vector_store(settings: Settings) -> VectorStore:
             _store = ChromaVectorStore(settings)
             logger.info("Vector store: Chroma (%s)", settings.chroma_persist_dir)
         except Exception as exc:  # noqa: BLE001
-            logger.warning(
+            logger.error(
                 "Chroma tidak bisa dipakai (%s). Memakai store in-memory: "
-                "indeks hilang setiap restart.",
+                "indeks hilang setiap restart dan seluruh koleksi dipindai "
+                "linear per query, jadi ukurannya harus tetap kecil.",
                 exc,
+                exc_info=True,
             )
             _store = InMemoryVectorStore()
         return _store
