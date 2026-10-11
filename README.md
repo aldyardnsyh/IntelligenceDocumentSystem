@@ -338,7 +338,7 @@ Angka di badge atas bukan klaim, tapi hasil perintah berikut:
 | Tipe dan lint frontend | `npx tsc --noEmit; npm run lint` | Bersih |
 | Build frontend | `npm run build` | Sukses |
 | Uji browser | `npx playwright test` | 39 skenario |
-| Uji ujung ke ujung | `python -m scripts.e2e_check` | 20 pemeriksaan |
+| Uji ujung ke ujung | `python -m scripts.e2e_check` | 21 pemeriksaan |
 
 Cara menjalankan semuanya ada di bagian
 [Verifikasi dan pengujian](#verifikasi-dan-pengujian).
