@@ -73,9 +73,11 @@ class Chunk:
 class RetrievedChunk:
     """Hasil retrieval, siap dikirim ke generator.
 
-    ``score`` adalah cosine similarity gabungan dari vector dan BM25, sudah
-    dinormalisasi ke rentang 0..1 supaya bisa dibandingkan dengan
-    ``similarity_threshold``.
+    ``score`` adalah skor gabungan hybrid retrieval: RRF yang sudah dinormalisasi
+    ke rentang 0..1. **Bukan** cosine similarity, dan tidak bisa dibandingkan
+    dengan ``similarity_threshold``, ambang itu dinilai pada bukti mentah
+    (``vector_score`` dan ``keyword_score``), bukan pada skor RRF. Mencampur
+    keduanya adalah penyebab paling umum threshold terlihat rusak padahal tidak.
     """
 
     chunk: Chunk
@@ -87,7 +89,13 @@ class RetrievedChunk:
 
 @dataclass(slots=True)
 class Citation:
-    """Satu sumber yang bisa ditelusuri (FR-2.2)."""
+    """Satu sumber yang bisa ditelusuri (FR-2.2).
+
+    ``score`` di sini adalah skor gabungan hybrid retrieval (RRF yang sudah
+    dinormalisasi ke 0..1), **bukan** cosine similarity. Dua angka itu tidak
+    bisa dibandingkan: skor RRF selalu 1.0 untuk kandidat terbaik, sedangkan
+    cosine tidak pernah sampai 1.0 kecuali teksnya identik.
+    """
 
     document_id: str
     document_name: str
@@ -107,17 +115,29 @@ class ChatMessage:
     created_at: str
     citations: list[Citation] = field(default_factory=list)
     not_found: bool = False
+    #: Jawaban dari pengetahuan umum model, bukan dari dokumen. Disimpan
+    #: supaya label "bukan dari dokumen" tetap ada saat riwayat dibuka lagi,
+    #: label yang hilang setelah reload membuat jawaban lama terlihat
+    #: bersumber, dan itu persis salah paham yang labelnya mencegah.
+    ungrounded: bool = False
 
 
 @dataclass(slots=True)
 class ChatSession:
-    """Sesi percakapan. Isi pesanannya disimpan terpisah di memory store."""
+    """Sesi percakapan. Isi pesanannya disimpan terpisah di memory store.
+
+    ``document_id`` memberi sesi ini ruang lingkup: kalau terisi, retrieval
+    hanya boleh memakai dokumen itu. Sesi global (``None``) boleh memakai
+    semua dokumen. Inilah yang membuat "chat privat" per dokumen mungkin tanpa
+    harus menyalin dokumen atau menyetel filter di setiap request.
+    """
 
     id: str
     title: str
     created_at: str
     last_active_at: str
     message_count: int = 0
+    document_id: str | None = None
 
 
 @dataclass(slots=True)

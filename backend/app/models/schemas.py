@@ -104,6 +104,24 @@ class DocumentStatusResponse(BaseModel):
     error_message: str | None = None
 
 
+class DocumentPreviewResponse(BaseModel):
+    """Isi dokumen yang tersimpan, untuk cross-check jawaban chat (FR-5.2).
+
+    ``content`` adalah teks hasil parsing, bukan berkas aslinya. ``truncated``
+    menandai kalau isinya dipotong, supaya pengguna tidak mengira sudah
+    membaca keseluruhan dokumen.
+    """
+
+    id: str
+    filename: str
+    status: DocumentStatus
+    content: str
+    chunk_count: int
+    truncated: bool
+    preview_chars: int
+    total_chars: int
+
+
 # ------------------------------------------------------------------- chat
 
 
@@ -117,9 +135,19 @@ class CitationResponse(BaseModel):
 
 
 class ChatQueryRequest(BaseModel):
-    session_id: str | None = None
+    # ``session_id`` dipakai sebagai primary key di SQLite, key di memory store,
+    # dan dulu dipakai sebagai bucket rate limit. Tanpa batas panjang dan
+    # format, klien bisa mengirim string raksasa yang membuat setiap baris
+    # indeks membengkak, atau id dengan bentuk aneh yang tidak akan pernah
+    # dibuat server sendiri.
+    session_id: str | None = Field(default=None, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
     question: str = Field(min_length=1, max_length=8000)
-    document_ids: list[str] | None = None
+    document_ids: list[str] | None = Field(default=None, max_length=20)
+    #: Ikat percakapan ini ke satu dokumen saja (chat privat per dokumen).
+    document_id: str | None = Field(default=None, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+    #: Izinkan LLM menjawab dari pengetahuan umum saat tidak ada konteks yang
+    #: lolos ambang. Jawaban dilabeli sebagai bukan dari dokumen.
+    allow_ungrounded: bool = False
 
     @field_validator("question")
     @classmethod
@@ -141,6 +169,8 @@ class ChatSessionResponse(BaseModel):
     created_at: str
     last_active_at: str
     message_count: int
+    #: Dokumen yang mengikat sesi ini, atau ``None`` untuk sesi global.
+    document_id: str | None = None
 
 
 class ChatMessageResponse(BaseModel):
@@ -150,6 +180,8 @@ class ChatMessageResponse(BaseModel):
     created_at: str
     citations: list[CitationResponse] = Field(default_factory=list)
     not_found: bool = False
+    #: Jawaban dari pengetahuan umum, bukan dari dokumen (lihat ChatMessage).
+    ungrounded: bool = False
 
 
 class SessionRenameRequest(BaseModel):
@@ -187,10 +219,29 @@ class SettingsUpdate(BaseModel):
     """
 
     top_k: int | None = None
-    similarity_threshold: float | None = None
+    # `allow_inf_nan=False` menutup celah NaN/Infinity. Python tidak membandingkan
+    # NaN dengan benar, jadi `min(max, NaN)` kebetulan mengembalikan batas atas
+    #, hasil yang benar karena kebetulan. Kalau urutan klem berubah, NaN bisa
+    # tersimpan ke SQLite dan membuat semua perbandingan threshold berikutnya
+    # selalu salah.
+    similarity_threshold: float | None = Field(
+        default=None, allow_inf_nan=False
+    )
 
 
 # -------------------------------------------------------------- analytics
+
+
+class EvalRequest(BaseModel):
+    """Permintaan menjalankan evaluasi dari UI.
+
+    ``document_ids`` kosong berarti memakai dataset apa adanya (mode
+    bawaan). Kalau diisi, pertanyaan dataset dijalankan terhadap dokumen
+    itu saja, sehingga evaluasi bisa dipakai untuk korpus sendiri, bukan
+    hanya dokumen contoh.
+    """
+
+    document_ids: list[str] = Field(default_factory=list, max_length=20)
 
 
 class EvalRunResponse(BaseModel):
@@ -213,6 +264,10 @@ class TokenPoint(BaseModel):
     date: str
     input_tokens: int
     output_tokens: int
+    #: True kalau angkanya estimasi, bukan jumlah token dari penyedia. UI
+    #: wajib menandainya; menampilkan estimasi seolah-olah pengukuran adalah
+    #: cara halus memalsukan metrik.
+    estimated: bool = True
 
 
 class AnalyticsSummaryResponse(BaseModel):
@@ -321,6 +376,7 @@ def message_to_response(message: ChatMessage) -> ChatMessageResponse:
         created_at=message.created_at,
         citations=[citation_to_response(item) for item in message.citations],
         not_found=message.not_found,
+        ungrounded=message.ungrounded,
     )
 
 
@@ -331,6 +387,7 @@ def session_to_response(session: ChatSession) -> ChatSessionResponse:
         created_at=session.created_at,
         last_active_at=session.last_active_at,
         message_count=session.message_count,
+        document_id=session.document_id,
     )
 
 
@@ -358,9 +415,11 @@ __all__ = [
     "ChunkResponse",
     "CitationResponse",
     "DocumentDetail",
+    "DocumentPreviewResponse",
     "DocumentStatusResponse",
     "DocumentSummary",
     "ErrorResponse",
+    "EvalRequest",
     "EvalRunResponse",
     "HealthResponse",
     "IngestionInfo",
