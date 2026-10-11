@@ -42,14 +42,17 @@ ARG NEXT_PUBLIC_API_BASE_URL=
 ARG NEXT_PUBLIC_REPO_URL=
 ARG NEXT_PUBLIC_API_DOCS_URL=
 ARG NEXT_PUBLIC_LANGFUSE_URL=
-ARG NEXT_PUBLIC_DEMO_PASSCODE=
+# Hash passcode mode lokal (FNV-1a 16 hex). SENGaja tanpa prefiks
+# `NEXT_PUBLIC_`: nilai ini hanya dibaca server (`src/lib/auth/session.ts`),
+# dan prefix itu akan meng-inline nilainya ke bundle browser.
+ARG DEMO_PASSCODE=
 ENV NEXT_PUBLIC_USE_BACKEND=$NEXT_PUBLIC_USE_BACKEND \
     BACKEND_ORIGIN=$BACKEND_ORIGIN \
     NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL \
     NEXT_PUBLIC_REPO_URL=$NEXT_PUBLIC_REPO_URL \
     NEXT_PUBLIC_API_DOCS_URL=$NEXT_PUBLIC_API_DOCS_URL \
     NEXT_PUBLIC_LANGFUSE_URL=$NEXT_PUBLIC_LANGFUSE_URL \
-    NEXT_PUBLIC_DEMO_PASSCODE=$NEXT_PUBLIC_DEMO_PASSCODE
+    DEMO_PASSCODE=$DEMO_PASSCODE
 
 # `NEXT_TELEMETRY_DISABLED` mematikan telemetry Next.js. Selain privasi, build
 # jadi lebih cepat dan tidak pernah gagal karena tries menghubungi jaringan.
@@ -69,7 +72,7 @@ ENV NODE_ENV=production \
     PORT=3000 \
     HOSTNAME=0.0.0.0
 
-# # Server standalone berjalan sebagai non-root. Menjalankan Next sebagai root di
+# Server standalone berjalan sebagai non-root. Menjalankan Next sebagai root di
 # dalam container berarti satu RCE di aplikasi langsung memberi akses root ke
 # host.
 RUN addgroup -g 1001 -S nodejs \

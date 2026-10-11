@@ -1,36 +1,66 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Frontend, Intelligent Document Assistant
 
-## Getting Started
+Next.js 16 (App Router) + React 19 + Tailwind v4. Tujuh halaman: `/`,
+`/chat`, `/documents`, `/analytics`, `/settings`, `/about`, `/login`.
 
-First, run the development server:
+## Dua mode, satu sakelar
+
+| Mode | `NEXT_PUBLIC_USE_BACKEND` | Data dari |
+|---|---|---|
+| Demo | kosong/tidak diisi | fixture in-browser (`src/lib/mock`) |
+| Backend | `1` | FastAPI lewat proxy same-origin |
+
+`NEXT_PUBLIC_*` di-inline saat build. Mengganti mode berarti **restart dev
+server atau build ulang**, bukan sekadar restart API.
+
+## Menjalankan
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+cp .env.example .env.local   # set BACKEND_ORIGIN=http://127.0.0.1:8000
+npm run dev                  # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Tanpa `.env.local` sama sekali, aplikasi tetap jalan penuh dengan fixture --
+cukup untuk melihat semua halaman tanpa backend.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Kenapa proxy, bukan CORS
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Rewrite `/api/v1/*` ke FastAPI membuat browser hanya mengenal satu origin.
+Kalau browser menembak backend langsung, `Set-Cookie: ida_session` milik
+origin backend tidak akan sampai ke server action Next, dan login selalu
+gagal tanpa pesan yang jelas. `NEXT_PUBLIC_API_BASE_URL` sengaja dibiarkan
+kosong; mengisinya dengan URL absolut justru merusak cookie sesi.
 
-## Learn More
+## Aturan yang tidak boleh dilanggar
 
-To learn more about Next.js, take a look at the following resources:
+1. **Angka dari API, bukan placeholder.** Chunk count, latency, token,
+   ambang retrieval: semua dari endpoint. Angka tebatan di UI adalah bug,
+   bukan penyederhanaan.
+2. **Kesalahan 401 selalu punya jalan keluar.** `lib/api/http.ts`
+   membersihkan gate dan mengarahkan ke login; `ErrorState` menampilkan
+   tombol "Masuk ulang".
+3. **Tidak ada state yang menebak.** Mode demo dan mode backend harus
+   berperilaku sama, termasuk saat 404.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Verifikasi
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+npx tsc --noEmit
+npm run lint
+npm run build
+npx playwright test          # butuh backend + frontend hidup
+```
 
-## Deploy on Vercel
+`src/proxy.ts` (bukan `middleware.ts`, sudah deprecated di Next 16) menjaga
+halaman. Gate ini memeriksa keberadaan cookie penanda saja;
+penegakan sesungguhnya ada di backend.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Struktur penting
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- `src/app/login/actions.ts`, server action login; meneruskan `Set-Cookie`
+  backend ke browser (tanpa ini sesi tidak pernah terbentuk).
+- `src/lib/api/http.ts`, satu pintu untuk semua request backend.
+- `src/components/chat/use-chat.ts`, seluruh state percakapan; stream
+  dibatalkan hanya saat pengguna benar-benar pergi.
+- `src/proxy.ts`, access gate per halaman.
