@@ -5,7 +5,6 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   askQuestion,
   getHistory,
-  newSessionId,
 } from "@/lib/api";
 import { queryKeys } from "@/lib/queries";
 import { ApiError, toApiError } from "@/lib/api/error";
@@ -19,6 +18,12 @@ export interface UiMessage {
   content: string;
   citations: Citation[];
   notFound: boolean;
+  /**
+   * Jawaban ini datang dari pengetahuan umum model, bukan dari dokumen.
+   * UI wajib menandainya; menyembunyikan fakta ini membuat pengguna mengira
+   * jawabannya bersumber pada dokumennya.
+   */
+  ungrounded?: boolean;
   state: MessageState;
   errorMessage?: string;
 }
@@ -26,6 +31,14 @@ export interface UiMessage {
 export interface ChatController {
   messages: UiMessage[];
   sessionId: string | null;
+  /**
+   * Scope dokumen sesi ini, dibaca dari data sesi yang tersimpan.
+   *
+   * Dipakai sebagai sumber utama saat mengirim pertanyaan lanjutan. Kalau
+   * nilainya bergantung pada daftar sesi yang mungkin belum termuat, scope
+   * bisa jatuh menjadi null dan pertanyaan mencari di seluruh dokumen.
+   */
+  sessionDocumentId: string | null;
   /** Judul sesi, setelah diubah manual kalau sempat diubah. */
   sessionTitle: string;
   isLoadingHistory: boolean;
@@ -51,11 +64,20 @@ export interface ChatController {
 export function useChat(
   initialSessionId?: string,
   initialTitle = "",
+  options: {
+    /** Scope dokumen untuk sesi baru (chat privat per dokumen). */
+    documentId?: string | null;
+    /** Izinkan LLM menjawab dari pengetahuan umum saat konteks kosong. */
+    allowUngrounded?: boolean;
+  } = {},
 ): ChatController {
   const queryClient = useQueryClient();
   const abortRef = useRef<AbortController | null>(null);
 
   const [sessionId, setSessionId] = useState<string | null>(initialSessionId ?? null);
+  // Scope sesi yang sedang dibuka. Diisi dari riwayat sesi (server), bukan
+  // dari daftar sesi yang bisa belum termuat.
+  const [sessionDocumentId, setSessionDocumentId] = useState<string | null>(null);
   const [sessionTitle, setSessionTitle] = useState(initialTitle);
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(Boolean(initialSessionId));
@@ -80,6 +102,10 @@ export function useChat(
           return;
         }
         setSessionTitle(history.session.title);
+        // Scope sesi datang dari data sesi yang tersimpan, jadi pertanyaan
+        // lanjutan memakai dokumen yang sama tanpa bergantung pada daftar
+        // sesi yang mungkin belum termuat.
+        setSessionDocumentId(history.session.document_id ?? null);
         setMessages(
           history.messages.map((message) => ({
             id: message.id,
@@ -87,6 +113,10 @@ export function useChat(
             content: message.content,
             citations: message.citations ?? [],
             notFound: message.not_found ?? false,
+            // Label "bukan dari dokumen" harus ikut saat riwayat dibuka lagi.
+            // Kalau hilang setelah reload, jawaban lama terlihat bersumber
+            // padahal tidak.
+            ungrounded: message.ungrounded ?? false,
             state: "done" as const,
           })),
         );
@@ -220,6 +250,11 @@ export function useChat(
               state: "done",
             });
             break;
+          case "ungrounded":
+            // Ditandai sebelum token pertama dirender, supaya labelnya tidak
+            // muncul terlambat di bawah jawaban yang sudah terbaca.
+            patchLastAssistant({ ungrounded: true });
+            break;
           case "error":
             patchLastAssistant({
               state: "error",
@@ -231,13 +266,29 @@ export function useChat(
             patchLastAssistant({ state: "done" });
             queryClient.invalidateQueries({ queryKey: queryKeys.documents });
             queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
+            // Tabel log di /analytics baru di-refetch saat halaman dibuka, jadi
+            // pertanyaan yang baru saja selesai tidak terlihat sampai user
+            // memuat ulang halaman.
+            queryClient.invalidateQueries({ queryKey: ["analytics", "logs"] });
             break;
         }
       };
 
       try {
+        // Scope ditentukan dari state hook ini, bukan dari prop yang bisa
+        // berubah: sesi yang sudah dibuka memakai scope sesinya, sesi baru
+        // memakai scope dari `?doc=`. Server tetap memverifikasi ulang, jadi
+        // nilai di sini hanya optimisasi, kebenarannya ada di backend.
+        const scopeForRequest = activeSessionId
+          ? sessionDocumentId
+          : (options.documentId ?? null);
         await askQuestion(
-          { sessionId: activeSessionId, question },
+          {
+            sessionId: activeSessionId,
+            question,
+            documentId: scopeForRequest,
+            allowUngrounded: options.allowUngrounded ?? false,
+          },
           { onEvent: applyEvent, signal: controller.signal },
         );
       } catch (error) {
@@ -254,7 +305,15 @@ export function useChat(
         settleAssistant(controller.signal.aborted);
       }
     },
-    [patchLastAssistant, queryClient, settleAssistant, startCooldown],
+    [
+      patchLastAssistant,
+      queryClient,
+      settleAssistant,
+      startCooldown,
+      sessionDocumentId,
+      options.documentId,
+      options.allowUngrounded,
+    ],
   );
 
   const send = useCallback(
@@ -272,23 +331,32 @@ export function useChat(
     abortRef.current?.abort();
   }, []);
 
-  const retry = useCallback(() => {
+const retry = useCallback(() => {
     if (!lastQuestion) return;
-    // Hapus pesan gagal terakhir sebelum mengulang agar tidak ada duplikat.
+    // Selalu potong dua pesan terakhir, termasuk kalau hasilnya kosong.
+    // Kalau array kosong dikembalikan apa adanya, bubble error lama tetap
+    // tampil berdampingan dengan pertanyaan ulang.
     setMessages((current) => {
       const last = current[current.length - 1];
       if (last?.role === "assistant" && last.state === "error") {
-        const next = current.slice(0, -2);
-        return next.length > 0 ? next : current;
+        return current.slice(0, -2);
       }
       return current;
     });
     void run(lastQuestion, sessionId);
   }, [lastQuestion, run, sessionId]);
 
-  const startNewSession = useCallback(() => {
+const startNewSession = useCallback(() => {
     abortRef.current?.abort();
-    setSessionId(newSessionId());
+    // Sesi baru = belum ada id sama sekali. Kalau di sini dibuat id lokal,
+    // halaman langsung mencoba memuat histori id itu yang belum pernah ada,
+    // dan pengguna langsung melihat layar "sesi tidak ditemukan".
+    // Id asli datang dari event `session` pada pertanyaan pertama.
+    setSessionId(null);
+    // Scope dilepas juga. Kalau tidak, sesi baru mewarisi dokumen sesi
+    // sebelumnya, pengguna mengira mulai dari nol, tapi pertanyaannya
+    // masih terkunci ke dokumen lama.
+    setSessionDocumentId(null);
     setSessionTitle("");
     setMessages([]);
     setLastQuestion(null);
@@ -307,6 +375,7 @@ export function useChat(
   return {
     messages,
     sessionId,
+    sessionDocumentId,
     sessionTitle,
     isLoadingHistory,
     isSending,

@@ -19,6 +19,9 @@ interface ChatInputProps {
   /** null = belum ada dokumen siap, input dikunci dengan alasannya. */
   disabledReason: string | null;
   onAttach: (file: File) => void;
+  /** Izinkan jawaban dari pengetahuan umum saat konteks dokumen kosong. */
+  allowUngrounded: boolean;
+  onAllowUngroundedChange: (value: boolean) => void;
 }
 
 export function ChatInput({
@@ -27,6 +30,8 @@ export function ChatInput({
   isSending,
   disabledReason,
   onAttach,
+  allowUngrounded,
+  onAllowUngroundedChange,
 }: ChatInputProps) {
   const [value, setValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -85,7 +90,12 @@ export function ChatInput({
           onChange={(event) => {
             const file = event.target.files?.[0];
             if (file) {
-              if (file.size > MAX_FILE_BYTES) {
+              // Atribut `accept` hanya saran di beberapa browser (Safari
+              // menyediakan "Semua berkas"), jadi format ikut diperiksa di sini.
+              const lower = file.name.toLowerCase();
+              if (!ACCEPTED_EXTENSIONS.some((ext) => lower.endsWith(ext))) {
+                window.alert("Format tidak didukung. Gunakan berkas PDF, TXT, atau Markdown.");
+              } else if (file.size > MAX_FILE_BYTES) {
                 window.alert(`Ukuran berkas melebihi ${formatBytes(MAX_FILE_BYTES)}.`);
               } else {
                 onAttach(file);
@@ -109,6 +119,23 @@ export function ChatInput({
         <span className="hidden text-[11px] text-muted-foreground sm:inline">
           Enter untuk kirim, Shift+Enter untuk baris baru
         </span>
+
+        {/*
+          Sakelar ini menentukan perilaku sistem saat tidak ada konteks:
+          menolak (aman, tapi sering tidak berguna) atau menjawab dari
+          pengetahuan umum dengan label. Default menyala supaya pengguna
+          tetap mendapat jawaban; mematikannya mengembalikan mode ketat.
+        */}
+        <label className="ml-auto flex cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground sm:ml-0">
+          <input
+            type="checkbox"
+            checked={allowUngrounded}
+            onChange={(event) => onAllowUngroundedChange(event.target.checked)}
+            className="size-3.5 accent-[var(--brand)]"
+            disabled={isSending}
+          />
+          Jawab tanpa dokumen
+        </label>
 
         {isSending ? (
           <Button

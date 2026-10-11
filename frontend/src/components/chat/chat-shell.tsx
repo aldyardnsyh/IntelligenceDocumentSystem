@@ -3,8 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Upload } from "lucide-react";
-import { toast } from "sonner";
+import { FileText, Upload } from "lucide-react";
+import { notify } from "@/lib/notify";
 import {
   Sheet,
   SheetContent,
@@ -32,12 +32,20 @@ import type { ChatSession } from "@/types/api";
 interface ChatShellProps {
   /** null untuk /chat (sesi baru), id untuk /chat/[sessionId]. */
   sessionId?: string | null;
+  /** Scope dokumen dari `?doc=`, untuk memulai chat privat dokumen itu. */
+  documentId?: string | null;
 }
 
-export function ChatShell({ sessionId: routeSessionId = null }: ChatShellProps) {
+export function ChatShell({
+  sessionId: routeSessionId = null,
+  documentId: routeDocumentId = null,
+}: ChatShellProps) {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const chat = useChat(routeSessionId ?? undefined);
+  // Default menyala: pengguna memilih mode ini secara sadar, dan tanpa itu
+  // pertanyaan di luar dokumen hanya dijawab "tidak ditemukan". Jawabannya
+  // tetap dilabeli sebagai bukan dari dokumen.
+  const [allowUngrounded, setAllowUngrounded] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [attachmentPending, setAttachmentPending] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -47,9 +55,32 @@ export function ChatShell({ sessionId: routeSessionId = null }: ChatShellProps) 
   const documents = useDocuments();
   const sessions = useSessions();
 
-  const activeSessionId = routeSessionId ?? chat.sessionId;
   const activeSession: ChatSession | null =
-    sessions.data?.find((item) => item.id === activeSessionId) ?? null;
+    sessions.data?.find((item) => item.id === routeSessionId) ?? null;
+
+  // Scope dokumen untuk sesi BARU datang dari `?doc=` di URL. Untuk sesi yang
+  // sudah ada, `useChat` sendiri yang tahu scope-nya (dari riwayat sesi yang
+  // dimuat), dan itu lebih andal daripada menunggu daftar sesi termuat.
+  //
+  // Versi sebelumnya mengambil scope HANYA dari `sessions.data`. Kalau daftar
+  // itu sedang refetch, `activeSession` menjadi null, scope ikut null, dan
+  // pertanyaan lanjutan mencari di SELURUH dokumen, kebocoran yang tidak
+  // terlihat di UI.
+  const initialDocumentId = routeSessionId ? null : routeDocumentId;
+
+  const chat = useChat(routeSessionId ?? undefined, "", {
+    documentId: initialDocumentId,
+    allowUngrounded,
+  });
+
+  // Scope yang sedang aktif, dari sumber paling tepercaya ke paling lemah.
+  const activeDocumentId =
+    chat.sessionDocumentId ?? activeSession?.document_id ?? routeDocumentId ?? null;
+  const scopedDocument = activeDocumentId
+    ? ((documents.data ?? []).find((item) => item.id === activeDocumentId) ?? null)
+    : null;
+
+  const activeSessionId = routeSessionId ?? chat.sessionId;
 
   /*
    * ChatShell adalah satu-satunya pemilik aksi ubah nama dan hapus. Sidebar
@@ -69,25 +100,32 @@ export function ChatShell({ sessionId: routeSessionId = null }: ChatShellProps) 
     mutationFn: (file: File) => uploadDocument(file),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.documents });
-      toast.success("Dokumen diterima. Tunggu sampai statusnya siap ditanyai.");
+      notify.success(
+        "Dokumen diterima",
+        "Tunggu sampai statusnya Siap ditanyai sebelum bisa dipakai bertanya.",
+      );
     },
     onError: (error) => {
-      toast.error(
-        error instanceof ApiError ? error.message : "Gagal melampirkan dokumen.",
-      );
+      notify.error(error instanceof ApiError ? error.message : "Gagal melampirkan dokumen.",)
     },
     onSettled: () => setAttachmentPending(false),
   });
 
-  // Setelah pesan pertama, alamat ikut naik ke /chat/[sessionId] supaya
+  // Setelah stream selesai, alamat ikut naik ke /chat/[sessionId] supaya
   // percakapan bisa dibagikan dan dibuka ulang lewat sidebar.
+  //
+  // PENTING: navigasi harus menunggu stream selesai. `/chat` dan
+  // `/chat/[sessionId]` adalah dua halaman berbeda, jadi `router.replace`
+  // saat jawaban masih mengalir akan melepas ChatShell lama, cleanup hook
+  // membatalkan fetch, dan jawaban pertama tidak pernah sampai ke layar.
   useEffect(() => {
     const id = chat.sessionId;
     if (!id || routeSessionId) return;
+    if (chat.isSending) return;
     if (promotedToRoute.current === id) return;
     promotedToRoute.current = id;
     router.replace(`/chat/${id}`);
-  }, [chat.sessionId, routeSessionId, router]);
+  }, [chat.sessionId, chat.isSending, routeSessionId, router]);
 
   // Auto-scroll mengikuti pesan baru dan token streaming.
   useEffect(() => {
@@ -95,7 +133,10 @@ export function ChatShell({ sessionId: routeSessionId = null }: ChatShellProps) 
   }, [chat.messages]);
 
   const lastMessage = chat.messages[chat.messages.length - 1];
-  const canAsk = readyDocuments.length > 0;
+  // Dokumen ber-scope dianggap cukup untuk bertanya meski daftar global belum
+  // termuat: pengguna sudah memilih dokumennya, dan memblokir di sini hanya
+  // membuat tombol kirim mati tanpa alasan yang terlihat.
+  const canAsk = readyDocuments.length > 0 || scopedDocument?.status === "ready";
   const disabledReason = canAsk
     ? null
     : documents.isPending
@@ -104,7 +145,10 @@ export function ChatShell({ sessionId: routeSessionId = null }: ChatShellProps) 
 
   const handleSend = (question: string) => {
     if (!canAsk) {
-      toast.error("Unggah minimal satu dokumen siap sebelum bertanya.");
+      notify.warning(
+        "Belum ada dokumen siap",
+        "Unggah dokumen lebih dulu di halaman Dokumen, lalu tunggu sampai selesai diproses.",
+      );
       return;
     }
     chat.send(question);
@@ -150,6 +194,41 @@ export function ChatShell({ sessionId: routeSessionId = null }: ChatShellProps) 
             onRename={actions.startRename}
             onDelete={actions.startDelete}
           />
+          {/*
+            Badge scope: dengan chat privat per dokumen, "percakapan ini
+            mencari di mana" adalah informasi yang menentukan jawaban. Tanpa
+            badge, pengguna tidak bisa membedakan sesi global dari sesi dokumen.
+          */}
+          {/*
+            Badge scope: dengan chat privat per dokumen, "percakapan ini
+            mencari di mana" adalah informasi yang menentukan jawaban.
+
+            Dua mode ini harus terlihat BEDA, bukan sekadar berbeda teks:
+            - Sesi dokumen: badge berlatar brand (menonjol) dengan nama berkas.
+            - Sesi global: badge abu-abu bertuliskan "Semua dokumen".
+
+            Sebelumnya keduanya nyaris sama, jadi pengguna tidak bisa tahu
+            mode mana yang sedang aktif, dan itu yang membuat scope terasa
+            tidak sinkron.
+          */}
+          {activeDocumentId ? (
+            <span
+              className="ml-auto flex min-w-0 shrink items-center gap-1.5 rounded-full bg-brand px-2.5 py-1 text-[11px] font-semibold text-primary-foreground"
+              title={`Pencarian dibatasi ke ${scopedDocument?.filename ?? "satu dokumen"}`}
+            >
+              <FileText className="size-3 shrink-0" aria-hidden />
+              <span className="truncate">
+                {scopedDocument ? scopedDocument.filename : "Satu dokumen"}
+              </span>
+            </span>
+          ) : (
+            <span
+              className="ml-auto shrink-0 rounded-full border border-dashed border-border px-2.5 py-1 text-[11px] font-medium text-muted-foreground"
+              title="Pencarian mencakup semua dokumen yang siap"
+            >
+              Semua dokumen
+            </span>
+          )}
         </div>
 
         <div className="flex-1 overflow-y-auto scrollbar-slim">
@@ -208,6 +287,8 @@ export function ChatShell({ sessionId: routeSessionId = null }: ChatShellProps) 
               onStop={chat.stop}
               isSending={chat.isSending}
               disabledReason={disabledReason}
+              allowUngrounded={allowUngrounded}
+              onAllowUngroundedChange={setAllowUngrounded}
               onAttach={(file) => {
                 setAttachmentPending(true);
                 uploadMutation.mutate(file);

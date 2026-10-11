@@ -3,7 +3,7 @@
 import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
+import { notify } from "@/lib/notify";
 import { deleteSession, renameSession } from "@/lib/api";
 import { ApiError } from "@/lib/api/error";
 import { queryKeys } from "@/lib/queries";
@@ -57,7 +57,7 @@ export function useSessionActions({
     onSuccess: (_result, variables) => {
       invalidateSessions();
       onRenamed?.(variables.id, variables.title);
-      toast.success("Nama percakapan diperbarui.");
+      notify.success("Nama percakapan diperbarui");
     },
   });
 
@@ -65,15 +65,16 @@ export function useSessionActions({
     mutationFn: (id: string) => deleteSession(id),
     onSuccess: (_result, id) => {
       invalidateSessions();
-      toast.success("Percakapan dihapus.");
+      notify.success(
+        "Percakapan dihapus",
+        "Sesi ini beserta pesanannya tidak bisa dibuka lagi.",
+      );
       // Sesi yang sedang dibuka tidak boleh dibiarkan terbuka setelah dihapus:
       // history-nya sudah tidak ada, jadi halamannya akan jatuh ke error 404.
       if (id === activeSessionId) router.push("/chat");
     },
     onError: (error) => {
-      toast.error(
-        error instanceof ApiError ? error.message : "Percakapan gagal dihapus.",
-      );
+      notify.error(error instanceof ApiError ? error.message : "Percakapan gagal dihapus.",)
       // Sesi mungkin sudah hilang di server. Segarkan daftar supaya barisnya
       // ikut hilang, kalau tidak user akan melihat tombol yang selalu gagal.
       invalidateSessions();

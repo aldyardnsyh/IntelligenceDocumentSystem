@@ -1,11 +1,31 @@
 "use client";
 
-import { CircleAlert, RotateCw } from "lucide-react";
+import { CircleAlert, Info, RotateCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AnswerText } from "./answer-text";
 import { CitationCard, NoAnswerNotice } from "./citation-card";
 import { TypingDots } from "./typing-dots";
 import type { UiMessage } from "./use-chat";
+
+/**
+ * Penanda jawaban dari pengetahuan umum, bukan dari dokumen.
+ *
+ * Sengaja ditempatkan di atas jawaban, bukan di bawah: label yang muncul
+ * setelah teks panjang sudah terbaca terlambat untuk mencegah salah paham.
+ */
+function UngroundedNotice() {
+  return (
+    <div className="mb-3 flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2.5">
+      <Info className="mt-0.5 size-4 shrink-0 text-warning-ink" aria-hidden />
+      <p className="text-[12px] leading-relaxed text-warning-ink">
+        <span className="font-medium">Bukan dari dokumen Anda.</span> Tidak ada
+        bagian dokumen yang cukup mirip dengan pertanyaan ini, jadi jawaban
+        berikut berasal dari pengetahuan umum model dan tidak punya sitasi.
+        Verifikasi sebelum dipakai.
+      </p>
+    </div>
+  );
+}
 
 interface MessageBubbleProps {
   message: UiMessage;
@@ -48,6 +68,13 @@ export function MessageBubble({ message, onRetry }: MessageBubbleProps) {
             <AnswerText text={message.content} />
           </div>
         ) : null}
+
+        {/*
+          Label ini tidak boleh hilang. Jawaban dari pengetahuan umum terlihat
+          identik dengan jawaban bersumber dokumen, dan menyamarkan asalnya
+          membuat pengguna memakai informasi yang tidak bisa diverifikasi.
+        */}
+        {message.ungrounded ? <UngroundedNotice /> : null}
 
         {message.notFound ? <NoAnswerNotice /> : null}
         {message.citations.length > 0 ? <CitationCard citations={message.citations} /> : null}

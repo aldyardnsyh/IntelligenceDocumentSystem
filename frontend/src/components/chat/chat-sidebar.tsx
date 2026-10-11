@@ -24,47 +24,63 @@ interface ChatSidebarProps {
 interface SessionRowProps {
   session: ChatSession;
   active: boolean;
+  /** Nama dokumen scope sesi, atau null untuk sesi lintas dokumen. */
+  documentName: string | null;
   onRename: (session: ChatSession) => void;
   onDelete: (session: ChatSession) => void;
 }
 
-function SessionRow({ session, active, onRename, onDelete }: SessionRowProps) {
+function SessionRow({ session, active, documentName, onRename, onDelete }: SessionRowProps) {
   return (
     <li className="group/session relative">
+      {/*
+        Baris sesi harus terbaca sebagai kartu percakapan, bukan sekadar teks
+        di atas latar. Latarnya lebih gelap dari panel sidebar (`bg-muted`),
+        dengan garis tepi halus supaya batas kartunya terlihat tanpa harus
+        di-hover.
+
+        Tombol titik-tiga selalu terlihat (opacity penuh), bukan hanya saat
+        hover. Pada sidebar yang isinya banyak, tombol yang muncul-hilang
+        membuat pengguna mengira aksinya tidak ada.
+      */}
       <Link
         href={`/chat/${session.id}`}
         aria-current={active ? "page" : undefined}
-        className={`flex flex-col gap-0.5 rounded-lg py-2 pr-9 pl-3 transition-colors ${
-          active ? "bg-primary text-primary-foreground" : "hover:bg-muted"
+        className={`flex flex-col gap-1 rounded-lg border py-2 pr-9 pl-3 transition-colors ${
+          active
+            ? "border-primary bg-primary text-primary-foreground shadow-sm"
+            : "border-border/70 bg-muted/60 hover:border-brand/40 hover:bg-muted"
         }`}
       >
         <span className="truncate text-[13px] font-medium" title={session.title}>
           {session.title}
         </span>
         <span
-          className={`text-[11px] tnum ${active ? "text-primary-foreground/70" : "text-muted-foreground"}`}
+          className={`flex items-center gap-1.5 truncate text-[11px] tnum ${
+            active ? "text-primary-foreground/75" : "text-muted-foreground"
+          }`}
         >
-          {formatRelative(session.last_active_at)}
-          {" · "}
-          {session.message_count} pesan
+          {/*
+            Scope ditandai di setiap baris: dengan chat per dokumen, dua sesi
+            dengan judul mirip bisa mencari di ruang yang berbeda. Tanpa
+            penanda ini, pengguna harus membuka satu per satu untuk tahu.
+          */}
+          {documentName ? (
+            <>
+              <FileText className="size-2.5 shrink-0" aria-hidden />
+              <span className="truncate">{documentName}</span>
+              <span aria-hidden>·</span>
+            </>
+          ) : (
+            <>
+              <span className="shrink-0">Semua dokumen</span>
+              <span aria-hidden>·</span>
+            </>
+          )}
+          <span className="shrink-0">{formatRelative(session.last_active_at)}</span>
         </span>
       </Link>
 
-      {/*
-        Tombol aksi disembunyikan sampai baris disorot atau difokus, supaya
-        sidebar terbaca sebagai daftar percakapan, bukan daftar kendali.
-        Baris yang aktif tetap menampilkannya, karena di sanalah pengguna
-        berada dan aksi di situlah yang dicari.
-
-        Untuk baris aktif, warna teks harus ditulis ulang di **semua** state
-        interaktif. `variant="ghost"` membawa `hover:text-foreground` dan
-        `aria-expanded:text-foreground`; keduanya pakai modifier berbeda dari
-        `text-primary-foreground`, jadi tidak saling menggantikan dan tetap
-        aktif. Akibatnya titik-titiknya putih saat diam lalu gelap saat di-hover
-        di atas latar navy, jadi praktis tak terlihat. Menulis ulang keempat
-        state itu lewat className sender mengalahkannya, karena className
-        diproses belakangan oleh tailwind-merge.
-      */}
       <SessionActionsMenu
         session={session}
         onRename={onRename}
@@ -73,7 +89,7 @@ function SessionRow({ session, active, onRename, onDelete }: SessionRowProps) {
         className={
           active
             ? "opacity-100 text-primary-foreground hover:bg-primary-foreground/15 hover:text-primary-foreground aria-expanded:bg-primary-foreground/15 aria-expanded:text-primary-foreground"
-            : "opacity-0 transition-opacity focus-visible:opacity-100 group-hover/session:opacity-100 group-focus-within/session:opacity-100"
+            : "text-muted-foreground opacity-70 hover:bg-background hover:text-foreground hover:opacity-100 focus-visible:opacity-100 group-hover/session:opacity-100 group-focus-within/session:opacity-100"
         }
       />
     </li>
@@ -90,6 +106,21 @@ export function ChatSidebarContent({
   const sessions = useSessions();
 
   const { ready: readyDocuments, pending: pendingDocuments } = splitByReady(documents.data);
+
+  const documentNames = new Map((documents.data ?? []).map((item) => [item.id, item.filename]));
+  // Urutan: sesi lintas dokumen dulu (paling sering dipakai), lalu per dokumen.
+  const groupedSessions = (() => {
+    const groups = new Map<string, { key: string; label: string; sessions: ChatSession[] }>();
+    for (const session of sessions.data ?? []) {
+      const scope = session.document_id ?? null;
+      const key = scope ?? "__global__";
+      const label = scope ? (documentNames.get(scope) ?? "Dokumen") : "Semua dokumen";
+      const group = groups.get(key) ?? { key, label, sessions: [] };
+      group.sessions.push(session);
+      groups.set(key, group);
+    }
+    return [...groups.values()];
+  })();
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-card">
@@ -133,6 +164,18 @@ export function ChatSidebarContent({
                         {document.chunk_count ? ` · ${document.chunk_count} chunk` : null}
                       </span>
                     </Link>
+                    {/*
+                      Jalan pintas ke chat privat dokumen ini. Tanpa tombol
+                      ini, pengguna harus tahu bahwa scope dokumen itu ada,
+                      fitur yang tidak punya pintu masuk sama saja tidak ada.
+                    */}
+                    <Link
+                      href={`/chat?doc=${document.id}`}
+                      className="ml-3 flex w-fit items-center gap-1.5 rounded px-2 py-1 text-[11px] font-medium text-brand-ink transition-colors hover:bg-brand-wash"
+                    >
+                      <MessageSquarePlus className="size-3" aria-hidden />
+                      Tanya dokumen ini
+                    </Link>
                   </li>
                 ))}
               </ul>
@@ -164,17 +207,34 @@ export function ChatSidebarContent({
                 hilang setelah sesi berakhir.
               </p>
             ) : (
-              <ul className="flex flex-col gap-0.5">
-                {(sessions.data ?? []).map((session) => (
-                  <SessionRow
-                    key={session.id}
-                    session={session}
-                    active={session.id === activeSessionId}
-                    onRename={onRenameSession}
-                    onDelete={onDeleteSession}
-                  />
+              // Dikelompokkan per dokumen: dengan chat privat per dokumen,
+              // "sesi ini mencari di mana" adalah informasi yang menentukan,
+              // dan daftar datar menyembunyikannya.
+              <div className="flex flex-col gap-4">
+                {groupedSessions.map((group) => (
+                  <div key={group.key} className="flex flex-col gap-1">
+                    <p className="px-1 text-[11px] font-medium text-muted-foreground">
+                      {group.label}
+                    </p>
+                    <ul className="flex flex-col gap-0.5">
+                      {group.sessions.map((session) => (
+                        <SessionRow
+                          key={session.id}
+                          session={session}
+                          active={session.id === activeSessionId}
+                          documentName={
+                            session.document_id
+                              ? (documentNames.get(session.document_id) ?? "Dokumen")
+                              : null
+                          }
+                          onRename={onRenameSession}
+                          onDelete={onDeleteSession}
+                        />
+                      ))}
+                    </ul>
+                  </div>
                 ))}
-              </ul>
+              </div>
             )}
           </section>
         </div>
