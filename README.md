@@ -2,7 +2,7 @@
 
 <!-- Stack teknologi. Versinya disamakan dengan pyproject.toml dan
      package.json, jadi badge ini ikut berubah saat dependency diperbarui. -->
-[![Next.js](https://img.shields.io/badge/Next.js-16.3.7-000000?logo=nextdotjs&logoColor=white)](https://nextjs.org)
+[![Next.js](https://img.shields.io/badge/Next.js-16.4.0-000000?logo=nextdotjs&logoColor=white)](https://nextjs.org)
 [![React](https://img.shields.io/badge/React-19.2-61DAFB?logo=react&logoColor=black)](https://react.dev)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-4-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com)
@@ -15,8 +15,8 @@
 
 <!-- Status kualitas. Angkanya berasal dari perintah di bagian verifikasi,
      bukan klaim. -->
-[![pytest](https://img.shields.io/badge/pytest-403_passed-0A9EDC?logo=pytest&logoColor=white)](#verifikasi-dan-pengujian)
-[![Playwright](https://img.shields.io/badge/Playwright-39_specs-2EAD33?logo=playwright&logoColor=white)](#verifikasi-dan-pengujian)
+[![pytest](https://img.shields.io/badge/pytest-416_passed-0A9EDC?logo=pytest&logoColor=white)](#verifikasi-dan-pengujian)
+[![Playwright](https://img.shields.io/badge/Playwright-46_specs-2EAD33?logo=playwright&logoColor=white)](#verifikasi-dan-pengujian)
 [![coverage](https://img.shields.io/badge/coverage-83%25-4C1)](#verifikasi-dan-pengujian)
 [![Lisensi](https://img.shields.io/badge/lisensi-PSHT-blue)](LICENSE.md)
 
@@ -64,6 +64,7 @@ Tiga aturan yang menjaga sistem ini bisa dipercaya:
 - [Deployment ke server](#deployment-ke-server)
 - [Struktur proyek](#struktur-proyek)
 - [Kualitas dan pengujian](#kualitas-dan-pengujian)
+- [Keamanan](#keamanan)
 - [Keputusan teknis penting](#keputusan-teknis-penting)
 - [Lisensi](#lisensi)
 
@@ -246,7 +247,7 @@ Evaluasi ini tidak memerlukan API key tambahan. Untuk skor RAGAS lengkap
 
 ```powershell
 cd backend
-python -m pytest                 # 403 test, coverage gate 70%
+python -m pytest                 # 416 test, coverage gate 70%
 python -m ruff check app tests scripts
 ```
 
@@ -272,7 +273,7 @@ python -m scripts.e2e_check
 
 ### Uji browser otomatis
 
-39 skenario Playwright yang mencakup login, unggah tiga format berkas, tanya
+46 skenario Playwright yang mencakup login, unggah tiga format berkas, tanya
 jawab dengan sitasi, penolakan halusinasi, pratinjau PDF, pemilih dokumen di
 halaman evaluasi, dan notifikasi.
 
@@ -317,7 +318,7 @@ Dua hal yang wajib dilakukan sebelum `docker compose up`:
 
 ```
 frontend/             Next.js 16 + React 19 + Tailwind v4 (9 halaman)
-frontend/e2e/         39 skenario Playwright
+frontend/e2e/         46 skenario Playwright
 frontend/scripts/     Pembuat favicon dari logo aplikasi
 backend/              FastAPI + ChromaDB + SQLite + Groq atau Ollama
 backend/samples/      Tiga dokumen contoh untuk uji manual
@@ -333,15 +334,51 @@ Angka di badge atas bukan klaim, tapi hasil perintah berikut:
 
 | Pemeriksaan | Perintah | Hasil |
 |---|---|---|
-| Test backend | `python -m pytest` | 403 test, coverage 83% |
+| Test backend | `python -m pytest` | 416 test, coverage 83% |
 | Lint backend | `python -m ruff check app tests scripts` | Bersih |
 | Tipe dan lint frontend | `npx tsc --noEmit; npm run lint` | Bersih |
 | Build frontend | `npm run build` | Sukses |
-| Uji browser | `npx playwright test` | 39 skenario |
+| Uji browser | `npx playwright test` | 46 skenario |
 | Uji ujung ke ujung | `python -m scripts.e2e_check` | 21 pemeriksaan |
 
 Cara menjalankan semuanya ada di bagian
 [Verifikasi dan pengujian](#verifikasi-dan-pengujian).
+
+## Keamanan
+
+Yang sudah ditangani, dan alasannya:
+
+| Area | Penanganan |
+|---|---|
+| Passcode | Dibandingkan sebagai SHA-256 dengan `hmac.compare_digest`, jadi selisih waktu tidak membocorkan berapa karakter yang cocok |
+| Sesi | Token acak 32 byte, disimpan di server, dicabut saat logout. Cookie `HttpOnly`, `SameSite=Lax`, `Secure` di produksi |
+| Rate limit login | 5 percobaan per 5 menit per IP, dengan header `Retry-After` |
+| Kepemilikan sesi | Percakapan diikat ke token yang membuatnya. ID saja tidak cukup untuk membuka riwayat orang lain |
+| Path traversal | Nama berkas disanitasi di server. Berkas asli disimpan dengan nama dari ID dokumen, bukan nama dari klien |
+| SQL injection | Semua nilai lewat parameter binding. Nama kolom di `UPDATE` diambil dari daftar putih |
+| XSS | Nama berkas dibersihkan dari markup di server. Frontend tidak memakai `dangerouslySetInnerHTML` |
+| Prompt injection | Isi dokumen diberi penanda batas, dan prompt sistem menyatakan bahwa konteks adalah data, bukan instruksi |
+| PDF berbahaya | Batas 10 MB, batas 3000 halaman, dan batas waktu 120 detik per dokumen |
+| Ukuran unggahan | Dibatasi tiga lapis: 16 MB di Caddy, `Content-Length` di route, lalu pembacaan bertahap |
+| Open redirect | `?next=` divalidasi dengan daftar karakter yang diizinkan, lalu dicek lagi hasil resolusi URL-nya |
+| Clickjacking | `X-Frame-Options: SAMEORIGIN` dan `frame-ancestors 'self'`. SAMEORIGIN, bukan DENY, karena pratinjau PDF memakai iframe same-origin |
+| Error | Pesan 500 selalu generik. Detail aslinya hanya masuk log server |
+
+Audit dependensi:
+
+```bash
+# Frontend. Yang penting: nol kerentanan di dependency runtime.
+npm audit --omit=dev
+
+# Backend.
+python -m pip install pip-audit
+python -m pip_audit
+```
+
+`npm audit --omit=dev` bersih. Yang tersisa di `npm audit` penuh semuanya
+berada di alat pengembangan (`shadcn` beserta rantai `fast-glob`), dan
+paket-paket itu tidak ikut ke image produksi. `shadcn` juga sudah dipindahkan
+ke `devDependencies` supaya batas itu terlihat jelas.
 
 ## Keputusan teknis penting
 
