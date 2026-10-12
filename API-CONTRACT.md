@@ -9,6 +9,7 @@ Status tiap endpoint:
 | Kolom | Arti |
 | --- | --- |
 | `UI` | Dipakai halaman atau komponen frontend |
+| `Publik` | Bisa dipanggil tanpa sesi (healthcheck, login, logout) |
 | `Tersedia` | Ada di backend, belum dipakai UI |
 | `Hanya lokal` | Dikerjakan Next.js, tidak perlu ada di FastAPI |
 
@@ -36,7 +37,7 @@ Status tiap endpoint:
 | PUT | `/api/v1/settings` | UI | `/settings` (debounce 800 ms) |
 | GET | `/api/v1/analytics/summary` | UI | `/analytics` |
 | GET | `/api/v1/analytics/logs` | UI | `/analytics` |
-| GET | `/api/v1/health` | Tersedia | belum dipakai UI |
+| GET | `/api/v1/health` | Publik | healthcheck, halaman login (boot_id) |
 | POST | `/api/logout` | Hanya lokal | header, route handler Next.js |
 
 ### Alasan beberapa endpoint ada di luar alur utama
@@ -89,6 +90,22 @@ apa adanya sebagai pesan di UI.
 
 Frontend hanya melakukan retry otomatis untuk 408, 5xx, dan kegagalan
 jaringan. 404 atau 422 tidak akan membaik dengan dicoba ulang.
+
+### Dokumentasi interaktif
+
+`/docs`, `/redoc`, dan `/openapi.json` **mati secara default**. Ketiganya
+dinyalakan bersama lewat `API_DOCS_ENABLED=1`.
+
+Skema OpenAPI memuat seluruh bentuk request dan response termasuk nama field
+internal, dan `/docs` membiarkan siapa pun mencoba endpoint tanpa menulis
+kode. Untuk aplikasi yang menampilkan dokumen pribadi, itu permukaan yang
+tidak perlu terbuka. Ketiganya dikendalikan satu sakelar supaya tidak ada
+jalur yang lupa ditutup: membiarkan `/openapi.json` hidup akan membocorkan
+hal yang sama lewat jalur lain.
+
+Halaman `/about` menautkan ke dokumentasi ini lewat
+`NEXT_PUBLIC_API_DOCS_URL`. Kalau sakelarnya mati, tautan itu harus
+dikosongkan juga, kalau tidak pengguna diarahkan ke halaman 404.
 
 ---
 
@@ -468,12 +485,10 @@ kesenjangan antara dua dashboard.
   "llm": "ok", "vector_store": "ok", "memory": "ok",
   "version": "1.0.0",
   "fallback": {
-    "repository": "sqlite",
-    "memory": "in-memory",
     "vector_store": "chroma",
     "vector_store_persistent": true,
-    "tracing": false,
-    "mode": "full"
+    "mode": "full",
+    "boot_id": "987ee79b4819"
   }
 }
 ```
@@ -486,8 +501,15 @@ Field `fallback` memberi tahu mode apa yang sedang aktif, bukan sekadar
 "sehat atau tidak". `mode: "reduced"` berarti salah satu komponen berjalan
 dalam mode fallback (misalnya vector store in-memory yang hilang saat
 restart), dan operator tidak boleh mengira data sudah persisten padahal belum.
-`tracing: false` menjelaskan kenapa kolom Trace di /analytics kosong: bukan
-error, memang dimatikan.
+
+**Isinya sengaja terbatas.** Endpoint ini publik, dipanggil healthcheck dan
+halaman login sebelum sesi ada. Yang dikirim hanya yang benar-benar dipakai
+frontend: `mode` dan `vector_store_persistent` untuk peringatan "mode
+terbatas" di header, `boot_id` untuk mendeteksi backend yang dijalankan
+ulang. Nama repository, memory store, provider LLM, dan model embedding
+**tidak** dikirim ke sini, karena itu memberi penyerang peta komponen
+internal tanpa satu pun dipakai UI. Detail itu ada di log server saat
+startup, tempat yang memang hanya bisa dibaca operator.
 
 ---
 

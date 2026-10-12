@@ -351,8 +351,10 @@ Yang sudah ditangani, dan alasannya:
 | Area | Penanganan |
 |---|---|
 | Passcode | Dibandingkan sebagai SHA-256 dengan `hmac.compare_digest`, jadi selisih waktu tidak membocorkan berapa karakter yang cocok |
-| Sesi | Token acak 32 byte, disimpan di server, dicabut saat logout. Cookie `HttpOnly`, `SameSite=Lax`, `Secure` di produksi |
+| Panjang passcode | Minimal 12 karakter, ditolak oleh `scripts.make_passcode`, bukan hanya disarankan |
+| Sesi | Token acak 32 byte, disimpan di server, dicabut saat logout. Cookie `HttpOnly`, `SameSite=Lax`, `Secure` mengikuti skema permintaan |
 | Rate limit login | 5 percobaan per 5 menit per IP, dengan header `Retry-After` |
+| CORS | Origin harus disebut satu per satu. `*` ditolak saat start, karena aplikasi ini memakai cookie sesi |
 | Kepemilikan sesi | Percakapan diikat ke token yang membuatnya. ID saja tidak cukup untuk membuka riwayat orang lain |
 | Path traversal | Nama berkas disanitasi di server. Berkas asli disimpan dengan nama dari ID dokumen, bukan nama dari klien |
 | SQL injection | Semua nilai lewat parameter binding. Nama kolom di `UPDATE` diambil dari daftar putih |
@@ -362,7 +364,13 @@ Yang sudah ditangani, dan alasannya:
 | Ukuran unggahan | Dibatasi tiga lapis: 16 MB di Caddy, `Content-Length` di route, lalu pembacaan bertahap |
 | Open redirect | `?next=` divalidasi dengan daftar karakter yang diizinkan, lalu dicek lagi hasil resolusi URL-nya |
 | Clickjacking | `X-Frame-Options: SAMEORIGIN` dan `frame-ancestors 'self'`. SAMEORIGIN, bukan DENY, karena pratinjau PDF memakai iframe same-origin |
+| Dokumentasi API | `/docs`, `/redoc`, dan `/openapi.json` mati secara default, dinyalakan bersama lewat `API_DOCS_ENABLED=1` |
+| Endpoint publik | `/health` hanya mengirim `mode`, `vector_store`, `boot_id`. Nama repository, memory store, provider LLM, dan model embedding hanya ada di log server |
 | Error | Pesan 500 selalu generik. Detail aslinya hanya masuk log server |
+
+Konfigurasi yang berbahaya dicatat di log saat startup, bukan dibiarkan lewat
+tanpa jejak: `DEBUG=true`, provider `mock`, passcode yang belum diisi,
+dokumentasi API yang dinyalakan, dan origin `http://` untuk host non-lokal.
 
 Audit dependensi:
 
@@ -379,6 +387,18 @@ python -m pip_audit
 berada di alat pengembangan (`shadcn` beserta rantai `fast-glob`), dan
 paket-paket itu tidak ikut ke image produksi. `shadcn` juga sudah dipindahkan
 ke `devDependencies` supaya batas itu terlihat jelas.
+
+Sebelum menaruh aplikasi ini di internet, periksa daftar berikut:
+
+| Setelan | Nilai yang benar |
+|---|---|
+| `DEBUG` | `false` |
+| `CORS_ORIGINS` | Domain Anda, tanpa `*` |
+| `ACCESS_PASSCODE_SHA256` | Diisi, dibuat dengan `python -m scripts.make_passcode` |
+| `API_DOCS_ENABLED` | `0`, kecuali ini demo publik |
+| `LLM_PROVIDER` | `groq` atau `ollama`, bukan `mock` |
+| `TRUST_PROXY_HEADERS` | `1` kalau di balik Caddy, `0` kalau tidak |
+| `NEXT_PUBLIC_DEV_PASSCODE_HINT` | Kosong |
 
 ## Keputusan teknis penting
 
