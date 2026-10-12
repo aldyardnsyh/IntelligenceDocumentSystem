@@ -46,3 +46,43 @@ test.describe("gerbang akses", () => {
     await expect(page).toHaveURL(/\/login/);
   });
 });
+
+/**
+ * `?next=` berasal dari URL, jadi siapa pun bisa mengisinya. Nilai itu
+ * dipakai untuk `redirect()` setelah login, dan `redirect()` meneruskan
+ * apa pun yang diberikan.
+ *
+ * Validasi lama hanya memeriksa tiga hal (diawali `/`, bukan `//`, bukan
+ * `/\`), dan itu bisa dilewati dengan karakter kontrol: `"/\n/evil.example"`
+ * lolos ketiga syarat itu, lalu dibaca browser sebagai `//evil.example`.
+ * Yang diuji di sini adalah janji yang lebih kuat: setelah login, browser
+ * harus tetap berada di origin aplikasi, apa pun isi `?next=`.
+ */
+test.describe("tujuan login tidak bisa dipakai keluar origin", () => {
+  const jahat = [
+    "//evil.example",
+    "/\\evil.example",
+    "https://evil.example",
+    "/%5Cevil.example",
+    "/\n/evil.example",
+    "/\t/evil.example",
+    "/%0d%0aLocation:%20//evil.example",
+  ];
+
+  for (const nilai of jahat) {
+    test(`ditolak: ${JSON.stringify(nilai)}`, async ({ page }) => {
+      await page.goto(`/login?next=${encodeURIComponent(nilai)}`);
+      // Origin diambil setelah navigasi: sebelum itu `page.url()` masih
+      // `about:blank`, dan origin-nya `"null"` sehingga perbandingan di
+      // bawah akan selalu gagal.
+      const origin = new URL(page.url()).origin;
+
+      await page.getByLabel("Passcode akses").fill(PASSCODE);
+      await page.getByRole("button", { name: "Masuk" }).click();
+
+      // Yang penting bukan sekadar "tidak error", tapi tetap di origin ini.
+      await expect(page).toHaveURL(/\/chat/);
+      expect(new URL(page.url()).origin).toBe(origin);
+    });
+  }
+});
