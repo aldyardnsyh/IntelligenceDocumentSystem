@@ -47,6 +47,35 @@ def main() -> int:
         )
         return 1
 
+    # Panjang minimum ditegakkan di sini, bukan hanya disarankan di dokumen.
+    #
+    # Passcode ini satu-satunya yang berdiri di antara internet dan seluruh
+    # dokumen pengguna. Rate limit membatasi percobaan per IP, tapi itu tidak
+    # menolong sama sekali kalau passcode-nya "1234": daftar kata yang dicoba
+    # dari banyak IP akan menemukannya. Ditolak di sini, sebelum hash-nya
+    # dipakai, karena setelah terpasang tidak ada yang akan menyadarinya.
+    min_length = 12
+    if len(passcode) < min_length:
+        print(
+            f"Passcode terlalu pendek ({len(passcode)} karakter). "
+            f"Minimal {min_length} karakter.",
+            file=sys.stderr,
+        )
+        print(
+            "Passcode ini melindungi seluruh dokumen pengguna, dan rate limit "
+            "tidak menolong kalau passcode-nya mudah ditebak.",
+            file=sys.stderr,
+        )
+        return 1
+
+    if passcode.strip() != passcode:
+        print(
+            "Passcode diawali atau diakhiri spasi. Hapus spasinya, karena "
+            "spasi di ujung sulit terlihat saat mengetik ulang di layar login.",
+            file=sys.stderr,
+        )
+        return 1
+
     digest = hash_passcode(passcode)
 
     # Verifikasi sekali jalan. Kalau ada bug di implementasi hashing atau di
