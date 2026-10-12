@@ -104,6 +104,15 @@ def init_services(app_settings: Settings | None = None) -> None:
         _store.name,
         ",".join(_chain.provider_names),
     )
+    # Detail komponen hanya dicatat di log server, bukan dikirim lewat
+    # endpoint publik /health. Log hanya bisa dibaca operator, sedangkan
+    # /health bisa dipanggil siapa pun.
+    logger.info(
+        "Detail komponen: tracing=%s vector_persistent=%s embedding=%s",
+        "aktif" if _tracer.enabled else "mati",
+        _store.persistent,
+        _settings.embedding_model if _settings.use_local_embedding else "hashing-fallback",
+    )
 
 
 def _index_entries(repository: MetadataRepository) -> list:

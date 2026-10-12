@@ -53,6 +53,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """
     settings = get_settings()
     init_services(settings)
+
+    # Konfigurasi yang berbahaya di produksi diperiksa saat start, bukan
+    # dibiarkan lewat tanpa jejak. Semuanya ditulis sebagai peringatan keras,
+    # bukan crash: aplikasi yang jalan dengan satu setelan salah masih lebih
+    # berguna daripada yang tidak bisa start sama sekali, dan log yang jelas
+    # membuat penyebabnya bisa ditemukan.
+    _warn_unsafe_production_settings(settings)
+
     app.state.auth_limiter = SlidingWindowLimiter(
         max_attempts=settings.auth_max_attempts,
         window_seconds=settings.auth_window_seconds,
@@ -109,6 +117,15 @@ def create_app() -> FastAPI:
             "berantai fallback provider, memori sesi, dan analitik evaluasi."
         ),
         lifespan=lifespan,
+        # Dokumentasi interaktif dimatikan secara default. Skema OpenAPI
+        # memuat seluruh bentuk request dan response termasuk nama field
+        # internal, dan /docs membiarkan siapa pun mencoba endpoint tanpa
+        # menulis kode. Untuk aplikasi yang menampilkan dokumen pribadi, itu
+        # permukaan yang tidak perlu terbuka. Nyalakan dengan API_DOCS_ENABLED=1
+        # kalau memang dipakai sebagai demo portofolio.
+        docs_url="/docs" if settings.api_docs_enabled else None,
+        redoc_url="/redoc" if settings.api_docs_enabled else None,
+        openapi_url="/openapi.json" if settings.api_docs_enabled else None,
     )
 
     app.add_middleware(
@@ -184,6 +201,60 @@ def create_app() -> FastAPI:
     app.include_router(public_router)
     app.include_router(v1_router)
     return app
+
+
+def _warn_unsafe_production_settings(settings: object) -> None:
+    """Catat konfigurasi yang berbahaya kalau aplikasi ini di-host.
+
+    Semua ini adalah setelan yang "supaya cepat jalan" di mesin sendiri, tapi
+    berbahaya begitu ada di internet. Tidak ada yang mematikan aplikasi:
+    yang gagal start tidak akan dibaca lognya oleh siapa pun, dan operator
+    lebih baik melihat layanan jalan dengan pesan jelas di log daripada
+    container yang crash-loop tanpa penjelasan.
+    """
+    from app.core.config import Settings  # noqa: PLC0415
+
+    assert isinstance(settings, Settings)
+
+    if settings.debug:
+        logger.warning(
+            "DEBUG=true aktif. Jangan pakai ini di server yang bisa diakses "
+            "publik: pesan error internal ikut terkirim ke klien."
+        )
+
+    if settings.llm_provider == "mock":
+        logger.warning(
+            "LLM_PROVIDER=mock: jawaban yang muncul adalah cuplikan dokumen, "
+            "bukan sintesis LLM. Set LLM_PROVIDER=groq atau ollama untuk "
+            "penggunaan nyata."
+        )
+
+    if not settings.access_passcode_sha256:
+        logger.error(
+            "ACCESS_PASSCODE_SHA256 belum diisi. SEMUA percobaan login akan "
+            "ditolak sampai nilainya diisi. Buat dengan: "
+            "python -m scripts.make_passcode"
+        )
+
+    if settings.api_docs_enabled:
+        logger.warning(
+            "API_DOCS_ENABLED aktif: /docs, /redoc, dan /openapi.json terbuka "
+            "tanpa autentikasi. Matikan kecuali aplikasi ini memang demo publik."
+        )
+
+    insecure_origins = [
+        origin for origin in settings.cors_origins if origin.startswith("http://")
+    ]
+    if insecure_origins:
+        # `http://localhost` wajar saat pengembangan; yang berbahaya adalah
+        # origin http:// untuk domain sungguhan.
+        non_local = [o for o in insecure_origins if "localhost" not in o and "127.0.0.1" not in o]
+        if non_local:
+            logger.warning(
+                "CORS_ORIGINS memuat origin http:// untuk host non-lokal: %s. "
+                "Cookie sesi sebaiknya hanya dikirim lewat HTTPS.",
+                ", ".join(non_local),
+            )
 
 
 def _code_for(status_code: int) -> str:
