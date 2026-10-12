@@ -115,7 +115,14 @@ services:
         max-file: "3"
 
   caddy:
-    image: caddy:2-alpine
+    # Versi di-pin, bukan `2-alpine` yang mengambang.
+    #
+    # Caddyfile di repo ini memakai direktif `request_body` (batas ukuran
+    # body) yang baru ada sejak Caddy 2.10 dan masih ditandai experimental.
+    # Dengan tag mengambang, `docker compose pull` bisa mengambil versi yang
+    # mengubah atau menghapus perilakunya tanpa satu pun baris di repo ini
+    # berubah, dan gejalanya baru muncul saat deploy.
+    image: caddy:2.11.7-alpine
     restart: unless-stopped
     depends_on:
       api:

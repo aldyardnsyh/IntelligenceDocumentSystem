@@ -16,7 +16,6 @@
 #
 # Uji coba lokal tanpa TLS: `caddy run --config Caddyfile --adapter caddyfile`
 # dengan baris `localhost` di bawah diganti `http://localhost`.
-
 {
 	# Email ini hanya dipakai untuk pemberitahuan kedaluwarsa sertifikat.
 	# Kosongkan kalau tidak ingin memberi tahu siapa pun.
@@ -39,12 +38,26 @@
 example.com {
 	encode zstd gzip
 
-	# Header keamanan dasar. `Content-Security-Policy` sengaja tidak
-	# disetel ketat di sini karena frontend Next.js memakai inline script
-	# untuk hydration; tighten nanti kalau sudah ada kebijakan konkret.
+	# Header keamanan dasar.
+	#
+	# `X-Frame-Options` di sini SAMEORIGIN, bukan DENY, dan itu keputusan
+	# sadar. Halaman /documents/[id] menampilkan berkas PDF asli di dalam
+	# iframe (lihat document-preview.tsx), dan iframe itu memuat
+	# /api/v1/documents/{id}/file dari origin yang sama. DENY melarang
+	# SEMUA framing termasuk same-origin, jadi pratinjau PDF-nya kosong di
+	# produksi padahal jalan di lokal (server dev tidak memasang header ini).
+	# SAMEORIGIN tetap menutup clickjacking dari situs lain, yang merupakan
+	# satu-satunya ancaman nyata di sini.
+	#
+	# `Content-Security-Policy: frame-ancestors 'self'` ditambahkan sebagai
+	# padanan modernnya: browser yang mendukung CSP memakai aturan itu, yang
+	# lain jatuh ke X-Frame-Options. Hanya direktif `frame-ancestors` yang
+	# disetel, tidak ada `script-src` atau `style-src`, jadi inline script
+	# untuk hydration Next.js tidak terpengaruh.
 	header {
 		X-Content-Type-Options nosniff
-		X-Frame-Options DENY
+		X-Frame-Options SAMEORIGIN
+		Content-Security-Policy "frame-ancestors 'self'"
 		Referrer-Policy strict-origin-when-cross-origin
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		-Server
@@ -54,6 +67,23 @@ example.com {
 	# ditulis ulang ke `/`, karena FastAPI sudah tahu path lengkapnya dan
 	# menulis ulang ke / akan memecahkan path OpenAPI.
 	handle /api/v1/* {
+		# Batas ukuran body di lapisan proxy.
+		#
+		# Parser multipart FastAPI menelan dan men-spool seluruh request ke
+		# disk SEBELUM handler upload dijalankan. Jadi pemeriksaan
+		# `Content-Length` dan `_read_limited` di routes.py hanya membatasi
+		# salinan di memori, bukan yang sudah tersimpan di disk. Tanpa batas
+		# di sini, satu request berukuran gigabyte cukup untuk memenuhi disk
+		# container, dan itu terjadi sebelum kode aplikasi mana pun berjalan.
+		#
+		# 16 MB = batas berkas 10 MB + ruang untuk amplop multipart. Angka
+		# ini sengaja lebih longgar dari batas aplikasi supaya pesan error
+		# yang diterima pengguna tetap datang dari aplikasi ("maksimal 10
+		# MB"), bukan dari proxy.
+		request_body {
+			max_size 16MB
+		}
+
 		reverse_proxy api:8000 {
 			# SSE (streaming jawaban) butuh buffering dimatikan. Tanpa ini,
 			# respons terkirim utuh di akhir dan pengguna melihat jawaban
