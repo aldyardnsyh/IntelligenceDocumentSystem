@@ -34,12 +34,18 @@ class Settings(BaseSettings):
     app_name: str = "Intelligent Document Assistant API"
     version: str = "1.0.0"
     debug: bool = False
-    # Origin frontend yang diizinkan. Dipakai CORS; "*" hanya untuk dev.
+    # Origin frontend yang diizinkan. Dipakai CORS.
     #
     # ``NoDecode`` wajib ada di sini. Tanpa itu, pydantic-settings mencoba
     # ``json.loads`` pada nilai env **sebelum** validator berjalan, jadi
     # ``CORS_ORIGINS=http://localhost:3000`` gagal dengan JSONDecodeError.
     # Nilai env memang ditulis sebagai daftar dipisah koma, bukan JSON.
+    #
+    # JANGAN isi dengan ``*``. Aplikasi ini memakai cookie sesi, dan
+    # ``allow_credentials=True`` membuat Starlette memantulkan origin
+    # pemanggil apa adanya begitu request membawa cookie. Artinya situs mana
+    # pun bisa membaca respons API ini memakai sesi pengguna yang sedang
+    # login. Validator di bawah menolaknya, bukan hanya memperingatkan.
     cors_origins: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["http://localhost:3000"]
     )
@@ -65,6 +71,21 @@ class Settings(BaseSettings):
     ulang bucket rate limit sesuka hatinya lewat header palsu.
     """
     trust_proxy_headers: bool = False
+
+    """Tampilkan dokumentasi API interaktif di ``/docs`` dan ``/redoc``.
+
+    Dimatikan secara default karena ini aplikasi yang menampilkan dokumen
+    pribadi, bukan API publik. Skema OpenAPI di ``/openapi.json`` memuat
+    seluruh bentuk request dan response, termasuk nama field internal, dan
+    halaman ``/docs`` membiarkan siapa pun mencoba endpoint tanpa perlu
+    menulis kode. Itu permukaan yang tidak perlu terbuka di produksi.
+
+    Nyalakan (``API_DOCS_ENABLED=1``) kalau aplikasinya memang dipakai
+    sebagai demo portofolio dan halaman /about menautkan ke sana. Saat
+    dimatikan, ``/openapi.json`` ikut mati: membiarkannya hidup akan
+    membocorkan hal yang sama lewat jalur lain.
+    """
+    api_docs_enabled: bool = False
 
     # ------------------------------------------------------------------- llm
     """Provider aktif untuk generation. Ganti ke ``ollama`` untuk fully local."""
@@ -187,6 +208,51 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return [item.strip() for item in value.split(",") if item.strip()]
         return value
+
+    @field_validator("cors_origins")
+    @classmethod
+    def _reject_wildcard_origin(cls, value: list[str]) -> list[str]:
+        """Tolak ``*`` di CORS.
+
+        Ini bukan peringatan, tapi penolakan. Aplikasi ini memakai cookie
+        sesi, dan Starlette dengan ``allow_credentials=True`` memantulkan
+        origin pemanggil apa adanya begitu request membawa cookie. Dengan
+        ``*``, situs mana pun bisa membaca respons API ini memakai sesi
+        pengguna yang sedang login.
+
+        Nilai ``*`` mudah ditulis karena "cara cepat supaya jalan", dan
+        efeknya tidak terlihat sampai ada yang menyalahgunakannya. Lebih
+        baik gagal saat start dengan pesan yang menjelaskan daripada jalan
+        dengan lubang yang tidak kelihatan.
+        """
+        if "*" in value:
+            raise ValueError(
+                "CORS_ORIGINS tidak boleh berisi '*'. Aplikasi ini memakai cookie "
+                "sesi, jadi origin harus disebut satu per satu. Contoh: "
+                "CORS_ORIGINS=https://domain-anda.example"
+            )
+        return value
+
+    @field_validator("access_passcode_sha256")
+    @classmethod
+    def _validate_passcode_hash(cls, value: str | None) -> str | None:
+        """Pastikan yang diisi benar-benar hash SHA-256, bukan passcode mentah.
+
+        Kesalahan yang paling mudah terjadi: operator mengisi passcode
+        aslinya, bukan hash-nya. Gejalanya "login selalu gagal" tanpa pesan
+        yang menjelaskan, dan penyebabnya sulit terlihat karena nilainya
+        memang tampak seperti string biasa.
+        """
+        if value is None or not value.strip():
+            return None
+        cleaned = value.strip().lower()
+        if len(cleaned) != 64 or not all(c in "0123456789abcdef" for c in cleaned):
+            raise ValueError(
+                "ACCESS_PASSCODE_SHA256 harus 64 karakter heksadesimal, yaitu "
+                "hash SHA-256 dari passcode, BUKAN passcode-nya. Buat dengan: "
+                "python -m scripts.make_passcode"
+            )
+        return cleaned
 
     @field_validator("llm_fallback_chain")
     @classmethod

@@ -27,7 +27,7 @@ os.environ.update(
     {
         "ACCESS_PASSCODE_SHA256": (
             # sha256("rahasia-uji")
-            "9a4c1b9e05b1e6c78e0f0e8b3e3d5a2b1c0d4e6f7a8b9c0d1e2f3a4b5c6d7e8"
+            "513718b43bd8e80dcfc368281c7961e9f8c90c1815cc9aeaaa8c1d014150d480"
         ),
         "LLM_PROVIDER": "mock",
         "LLM_FALLBACK_CHAIN": "",
