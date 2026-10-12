@@ -194,13 +194,15 @@ export interface HealthStatus {
   /**
    * Mode fallback yang sedang aktif di backend (API-CONTRACT.md Section 8).
    * `mode: "reduced"` berarti salah satu komponen berjalan non-persisten.
+   *
+   * Isinya sengaja terbatas. `/health` adalah endpoint publik yang dipanggil
+   * sebelum sesi ada (healthcheck, halaman login), jadi nama repository,
+   * memory store, provider LLM, dan model embedding tidak dikirim ke sini.
+   * Detail itu hanya ada di log server.
    */
   fallback?: {
-    repository?: string;
-    memory?: string;
     vector_store?: string;
     vector_store_persistent?: boolean;
-    tracing?: boolean;
     mode?: "full" | "reduced" | string;
     /**
      * Penanda proses backend. Berubah setiap kali backend dijalankan ulang,
@@ -208,9 +210,6 @@ export interface HealthStatus {
      * proses sebelumnya (sesi memori tidak bertahan melewati restart).
      */
     boot_id?: string;
-    embedding?: string;
-    embedding_model?: string;
-    llm?: string;
   } | null;
 }
 

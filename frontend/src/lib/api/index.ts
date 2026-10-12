@@ -394,12 +394,11 @@ export function getHealth(signal?: AbortSignal): Promise<HealthStatus> {
       vector_store: "unreachable",
       memory: "unreachable",
       version: "fixture lokal",
+      // Bentuknya disamakan dengan respons backend sungguhan, termasuk
+      // batasnya: nama komponen internal tidak dikirim lewat /health.
       fallback: {
-        repository: "fixture",
-        memory: "fixture",
         vector_store: "fixture",
         vector_store_persistent: false,
-        tracing: false,
         mode: "reduced",
       },
     });
