@@ -215,10 +215,38 @@ async def verify_passcode_endpoint(
         max_age=config.session_ttl_seconds,
         httponly=True,
         samesite="lax",
-        secure=config.debug is False,
+        # Flag `Secure` ditentukan oleh skema yang benar-benar dipakai, bukan
+        # oleh `debug`.
+        #
+        # Versi sebelumnya memakai `config.debug is False`, dan itu keliru:
+        # satu env `DEBUG=true` di server produksi cukup untuk membuat cookie
+        # sesi terkirim TANPA `Secure`, sehingga browser mau mengirimkannya
+        # lewat HTTP polos dan siapa pun di jaringan yang sama bisa
+        # membacanya. Yang menentukan bukan mode aplikasi, melainkan apakah
+        # permintaan ini datang lewat HTTPS.
+        #
+        # `X-Forwarded-Proto` dipakai karena TLS diterminasi di Caddy, bukan
+        # di uvicorn. Header itu aman dibaca di sini: uvicorn hanya
+        # memercayainya dari proxy yang diizinkan (`--forwarded-allow-ips`),
+        # dan container API tidak pernah dijangkau langsung dari internet.
+        secure=_is_https_request(request),
         path="/",
     )
     return PasscodeResponse(ok=True, expires_in=config.session_ttl_seconds)
+
+
+def _is_https_request(request: Request) -> bool:
+    """True kalau permintaan ini datang lewat HTTPS.
+
+    Diperiksa dari `X-Forwarded-Proto` lebih dulu (TLS diterminasi Caddy),
+    lalu dari skema URL sebagai cadangan untuk pemakaian langsung tanpa
+    proxy.
+    """
+    forwarded = request.headers.get("x-forwarded-proto", "")
+    if forwarded:
+        # Bisa berisi rantai ("https, http"); yang menentukan hop pertama.
+        return forwarded.split(",")[0].strip().lower() == "https"
+    return request.url.scheme == "https"
 
 
 @public_router.post(
@@ -1078,16 +1106,13 @@ async def health(
     repository_ok = await asyncio.to_thread(repository.ping)
     vector_ok = await asyncio.to_thread(ingestion.store.ping)
 
-    from app.dependencies import get_tracer  # noqa: PLC0415
-
-    tracing_on = get_tracer().enabled
-
     # Provider mock dijawab "ok" selama namanya terdaftar, padahal tidak ada LLM
     # yang dipakai sama sekali. Mode provisioning bisa terlihat sehat sementara
     # semua jawaban bukan sintesis, jadi dipakai apa adanya di laporan.
     llm_is_mock = "mock" in rag.provider_names
     # Embedding hashing hanya cocok untuk token identik. Kalau diam-diam aktif,
-    # kualitas retrieval anjlok dan ini harus terlihat di health.
+    # kualitas retrieval anjlok dan ini harus terlihat di health. Penanda ini
+    # ikut menentukan `mode`, jadi operator tetap bisa melihatnya dari luar.
     embedding_is_fallback = getattr(ingestion.embedding, "name", "") == "hashing-fallback"
 
     components_ok = (
@@ -1108,18 +1133,24 @@ async def health(
         memory="ok" if memory_ok else "unreachable",
         version=config.version,
         # Mode fallback yang sedang aktif, supaya operator tidak salah
-        # mengira data sudah persisten padahal belum. Tracing ikut
-        # dilaporkan agar kolom Trace di /analytics bisa menjelaskan kenapa
-        # kosong: bukan error, memang dimatikan.
+        # mengira data sudah persisten padahal belum.
+        #
+        # Endpoint ini publik (dipakai healthcheck dan halaman login sebelum
+        # sesi ada), jadi isinya sengaja dibatasi pada apa yang benar-benar
+        # dibutuhkan frontend:
+        #
+        # - `mode` dan `vector_store_persistent` untuk peringatan "mode
+        #   terbatas" di header.
+        # - `boot_id` untuk mendeteksi backend yang dijalankan ulang.
+        #
+        # Yang TIDAK dikirim: nama repository, nama memory store, nama
+        # provider LLM, dan nama model embedding. Sebelumnya semuanya ikut,
+        # dan itu memberi penyerang peta komponen internal tanpa satu pun
+        # dipakai UI. Informasi itu tetap ada di log server saat startup,
+        # tempat yang memang hanya bisa dibaca operator.
         fallback={
-            "repository": repository.name,
-            "memory": rag.memory.name,
             "vector_store": ingestion.store.name,
             "vector_store_persistent": ingestion.store.persistent,
-            "tracing": tracing_on,
-            "embedding": ingestion.embedding.name,
-            "embedding_model": config.embedding_model,
-            "llm": ",".join(rag.provider_names),
             "mode": (
                 "full"
                 if components_ok and ingestion.store.persistent and not llm_is_mock

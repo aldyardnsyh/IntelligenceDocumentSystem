@@ -151,11 +151,37 @@ class TestHealth:
         Kalau fallback tidak dilaporkan, operator melihat `status: ok` padahal
         retrieval hanya cocok untuk token identik, kegagalan diam-diam yang
         paling mahal karena gejalanya muncul jauh dari penyebabnya.
+
+        Nama provider embedding-nya sendiri tidak dikirim lagi: endpoint ini
+        publik, dan nama komponen internal tidak dipakai UI mana pun. Yang
+        tetap dikirim adalah `status` dan `mode`, yang memberi tahu operator
+        ada yang tidak normal tanpa memberi peta internal ke penyerang.
         """
         body = (await client.get("/api/v1/health")).json()
-        assert body["fallback"]["embedding"] == "hashing-fallback"
         assert body["status"] == "degraded"
         assert body["fallback"]["mode"] == "reduced"
+
+    async def test_health_tidak_membocorkan_komponen_internal(
+        self, client: AsyncClient
+    ) -> None:
+        """Endpoint publik tidak menyebut nama komponen internal.
+
+        /health dipanggil sebelum sesi ada (healthcheck, halaman login), jadi
+        isinya harus terbatas pada apa yang benar-benar dipakai frontend.
+        Nama repository, memory store, provider LLM, dan model embedding
+        hanya ada di log server.
+        """
+        body = (await client.get("/api/v1/health")).json()
+        fallback = body["fallback"]
+
+        # Yang dibutuhkan frontend.
+        assert "mode" in fallback
+        assert "boot_id" in fallback
+        assert "vector_store" in fallback
+
+        # Yang tidak boleh ada.
+        for field in ("repository", "memory", "tracing", "embedding", "embedding_model", "llm"):
+            assert field not in fallback, f"field internal '{field}' bocor di /health"
 
     async def test_health_memuat_header_durasi(self, client: AsyncClient) -> None:
         response = await client.get("/api/v1/health")
@@ -318,6 +344,51 @@ class TestAuth:
         assert response.status_code == 200
         assert response.json() == {"ok": True, "expires_in": 86400}
         assert SESSION_COOKIE_NAME in response.cookies
+
+    async def test_cookie_punya_atribut_keamanan_dasar(
+        self, anon_client: AsyncClient
+    ) -> None:
+        """Cookie sesi selalu HttpOnly dan SameSite, apa pun skemanya.
+
+        `HttpOnly` menutup pencurian lewat JavaScript (XSS), dan `SameSite`
+        menutup pengiriman lintas situs. Keduanya tidak boleh bergantung pada
+        konfigurasi.
+        """
+        response = await anon_client.post(
+            "/api/v1/auth/verify", json={"passcode": TEST_PASSCODE}
+        )
+        header = response.headers.get("set-cookie", "")
+        assert SESSION_COOKIE_NAME in header
+        assert "HttpOnly" in header, "cookie sesi harus HttpOnly"
+        assert "samesite=lax" in header.lower()
+
+    async def test_cookie_secure_aktif_di_https(self, anon_client: AsyncClient) -> None:
+        """Di balik proxy TLS, cookie harus membawa `Secure`."""
+        response = await anon_client.post(
+            "/api/v1/auth/verify",
+            json={"passcode": TEST_PASSCODE},
+            headers={"x-forwarded-proto": "https"},
+        )
+        header = response.headers.get("set-cookie", "")
+        assert "Secure" in header, (
+            "permintaan lewat HTTPS harus menghasilkan cookie Secure, "
+            f"header yang diterima: {header!r}"
+        )
+
+    async def test_debug_tidak_mematikan_secure(self, anon_client: AsyncClient) -> None:
+        """DEBUG=true tidak boleh menghilangkan `Secure` saat lewat HTTPS.
+
+        Ini regresi langsung dari bug yang ditemukan: konfigurasi test
+        memang menyalakan DEBUG, jadi kalau perilakunya kembali ke
+        `config.debug is False`, test ini gagal.
+        """
+        response = await anon_client.post(
+            "/api/v1/auth/verify",
+            json={"passcode": TEST_PASSCODE},
+            headers={"x-forwarded-proto": "https"},
+        )
+        header = response.headers.get("set-cookie", "")
+        assert "Secure" in header
 
     async def test_passcode_salah_gagal(self, anon_client: AsyncClient) -> None:
         response = await anon_client.post(
@@ -1365,11 +1436,19 @@ class TestErrorShape:
         assert set(body) == {"detail", "code"}
         assert body["code"] == "validation_error"
 
-    async def test_openapi_tersedia(self, client: AsyncClient) -> None:
-        # Skema OpenAPI tersedia otomatis dari FastAPI.
-        response = await client.get("/openapi.json")
-        assert response.status_code == 200
-        assert "/api/v1/chat/query" in response.json()["paths"]
+    async def test_openapi_dimatikan_secara_default(self, client: AsyncClient) -> None:
+        """Dokumentasi API tertutup kecuali sengaja dinyalakan.
+
+        Skema OpenAPI memuat seluruh bentuk request dan response termasuk
+        nama field internal, dan /docs membiarkan siapa pun mencoba endpoint
+        tanpa menulis kode. Untuk aplikasi yang menampilkan dokumen pribadi,
+        itu permukaan yang tidak perlu terbuka. Ketiganya harus mati bersama:
+        membiarkan /openapi.json hidup akan membocorkan hal yang sama lewat
+        jalur lain.
+        """
+        for path in ("/openapi.json", "/docs", "/redoc"):
+            response = await client.get(path)
+            assert response.status_code == 404, f"{path} seharusnya tertutup"
 
 
 async def _wait_ready(client: AsyncClient, document_id: str, attempts: int = 20) -> None:
