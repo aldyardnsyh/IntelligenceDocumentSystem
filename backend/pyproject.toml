@@ -20,8 +20,11 @@ dependencies = [
     # Vector store
     "chromadb>=0.6",
 
-    # Parsing PDF
-    "pypdf>=5.1",
+    # Parsing PDF. Batas bawah 6.19 bukan angka sembarang: versi di bawah itu
+    # rentan 14 CVE yang semuanya bisa dipicu berkas PDF buatan penyerang
+    # (runtime panjang, memori membengkak, sampai infinite loop). Berkas PDF di
+    # sini datang dari pengguna, jadi jalur itu benar-benar terbuka.
+    "pypdf>=6.19",
 
     # Memory dan cache
     "redis>=5.2",

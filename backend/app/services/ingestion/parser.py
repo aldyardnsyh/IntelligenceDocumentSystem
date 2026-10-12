@@ -17,6 +17,7 @@ from __future__ import annotations
 import io
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 
 from app.core.config import Settings
@@ -26,6 +27,17 @@ logger = logging.getLogger(__name__)
 #: Batas karakter per halaman sebelum dianggap mencurigakan (biasanya hasil
 #: OCR yang gagal, atau PDF yang hanya berisi gambar).
 MIN_CHARS_PER_PAGE = 40
+
+#: Batas waktu satu dokumen PDF diproses. Nilai ini jauh di atas kebutuhan
+#: dokumen normal (ratusan halaman selesai dalam hitungan detik), tapi cukup
+#: rendah untuk mencegah satu unggahan menahan worker tanpa batas.
+PDF_PARSE_TIMEOUT_SECONDS = 120.0
+
+#: Batas jumlah halaman. Dokumen kerja normal jarang melewati ini; yang
+#: melewatinya biasanya hasil ekspor berulang atau berkas yang dibuat untuk
+#: membebani parser.
+MAX_PDF_PAGES = 3000
+
 #: Karakter markup yang dibuang dari nama berkas. Nama berkas ikut masuk ke
 #: konteks prompt LLM, jadi membiarkannya berarti membuka jalur prompt
 #: injection, bukan hanya masalah tampilan.
@@ -109,7 +121,7 @@ def sanitize_filename(raw: str) -> str:
     name = "".join(char for char in name if char.isprintable()).strip()
     # Tanda markup dibuang di server, bukan hanya saat dirender: nama berkas
     # ikut masuk ke konteks prompt LLM, jadi markup di dalamnya adalah jalur
-    # prompt injection yang tidak perluSentuh sama sekali kerentanan XSS.
+    # prompt injection, terlepas dari apakah frontend kebal XSS atau tidak.
     name = _MARKUP_RE.sub("", name)
     name = re.sub(r"\s+", " ", name).strip(" .")
 
@@ -152,6 +164,30 @@ def _parse_pdf(data: bytes) -> ParsedDocument:
 
     ``pypdf`` dipilih karena ringan dan murni Python; ``pdfplumber`` lebih
     akurat untuk tata letak rumit tapi menambah dependensi besar.
+
+    ## Kenapa ada dua batas keras di sini
+
+    Isi berkas PDF sepenuhnya dikendalikan pengunggah, dan pypdf adalah
+    parser yang membaca struktur yang bisa dibuat berlapis-lapis dengan
+    sengaja. Riwayat CVE-nya menunjukkan polanya: bukan eksekusi kode, tapi
+    dokumen yang membuat parser berjalan sangat lama atau memakan memori
+    sangat besar. Versi minimum di ``pyproject.toml`` menutup yang sudah
+    diketahui, tapi ini pertahanan lapis kedua supaya kelas serangan yang
+    sama tidak bisa dipakai lagi lewat celah baru.
+
+    1. **Batas waktu per dokumen.** Satu PDF tidak boleh menyita worker
+       lebih dari ``PDF_PARSE_TIMEOUT_SECONDS``. Tanpa ini, satu unggahan
+       cukup untuk menahan satu worker sampai prosesnya dibunuh.
+    2. **Batas jumlah halaman.** ``MAX_PDF_PAGES`` menolak lebih awal,
+       sebelum per halaman diekstrak. Memeriksa ``len(reader.pages)`` saja
+       tidak cukup: pada PDF tertentu daftar itu dibangun malas dan
+       panjangnya baru diketahui sambil berjalan.
+
+    Batas waktu diperiksa di antara halaman, bukan dengan alarm yang
+    memotong di tengah C call. Itu disengaja: memotong pypdf di tengah
+    operasinya bisa meninggalkan state yang tidak jelas, sedangkan
+    pemeriksaan per halaman sudah menutup kasus yang realistis (dokumen
+    dengan halaman sangat banyak atau satu halaman yang sangat berat).
     """
     try:
         from pypdf import PdfReader
@@ -175,7 +211,19 @@ def _parse_pdf(data: bytes) -> ParsedDocument:
 
     pages: list[ParsedPage] = []
     empty_pages: list[int] = []
+    deadline = time.monotonic() + PDF_PARSE_TIMEOUT_SECONDS
+
     for index, page in enumerate(reader.pages, start=1):
+        if index > MAX_PDF_PAGES:
+            raise ParseError(
+                f"PDF ini punya lebih dari {MAX_PDF_PAGES} halaman. "
+                "Pecah dokumennya lalu unggah bagian yang dibutuhkan."
+            )
+        if time.monotonic() > deadline:
+            raise ParseError(
+                "PDF ini terlalu berat untuk diproses. Coba pecah dokumennya "
+                "atau ekspor ulang tanpa kompresi berlapis."
+            )
         try:
             text = page.extract_text() or ""
         except Exception as exc:  # noqa: BLE001

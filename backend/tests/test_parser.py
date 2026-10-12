@@ -113,3 +113,70 @@ class TestParsePdf:
     def test_menolak_data_pdf_rusak(self, config: Settings) -> None:
         with pytest.raises(ParseError, match="tidak bisa dibaca"):
             parse_document("rusak.pdf", b"%PDF-1.4\ncorrupt", config)
+
+
+def _make_pdf_with_pages(count: int) -> bytes:
+    """PDF dengan jumlah halaman tertentu, untuk menguji batas halaman."""
+    from pypdf import PdfWriter
+
+    writer = PdfWriter()
+    for _ in range(count):
+        writer.add_blank_page(width=200, height=200)
+    buffer = io.BytesIO()
+    writer.write(buffer)
+    return buffer.getvalue()
+
+
+class TestBatasSumberDayaPdf:
+    """Batas keras saat memproses PDF dari pengguna.
+
+    Isi PDF sepenuhnya dikendalikan pengunggah. Riwayat CVE pypdf menunjukkan
+    polanya berulang: bukan eksekusi kode, tapi dokumen yang membuat parser
+    berjalan sangat lama atau memakan memori sangat besar. Versi minimum di
+    pyproject menutup yang sudah diketahui, dan batas di sini menutup kelas
+    serangan yang sama kalau muncul lagi lewat celah baru.
+    """
+
+    def test_menolak_pdf_melebihi_batas_halaman(
+        self, config: Settings, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Dokumen dengan halaman sangat banyak ditolak dengan pesan jelas.
+
+        Batasnya diturunkan supaya tes tidak perlu membuat ribuan halaman.
+        """
+        monkeypatch.setattr(
+            "app.services.ingestion.parser.MAX_PDF_PAGES", 3, raising=True
+        )
+        data = _make_pdf_with_pages(5)
+        with pytest.raises(ParseError, match="lebih dari 3 halaman"):
+            parse_document("besar.pdf", data, config)
+
+    def test_pdf_dalam_batas_tetap_diproses(
+        self, config: Settings, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Batas halaman tidak boleh menolak dokumen yang sah."""
+        monkeypatch.setattr(
+            "app.services.ingestion.parser.MAX_PDF_PAGES", 10, raising=True
+        )
+        data = _make_pdf_with_pages(3)
+        # Tiga halaman kosong: parsingnya jalan sampai akhir, lalu ditolak
+        # karena tidak ada teks. Yang penting bukan hasil akhirnya, tapi
+        # bahwa penolakannya BUKAN karena batas halaman.
+        with pytest.raises(ParseError, match="Tidak ada teks"):
+            parse_document("kecil.pdf", data, config)
+
+    def test_menolak_pdf_yang_melewati_batas_waktu(
+        self, config: Settings, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Dokumen yang memakan waktu melewati batas dihentikan.
+
+        Waktu dibuat selalu lewat, bukan dengan menunggu sungguhan: tes yang
+        menunggu 120 detik tidak akan pernah dijalankan siapa pun.
+        """
+        monkeypatch.setattr(
+            "app.services.ingestion.parser.PDF_PARSE_TIMEOUT_SECONDS", -1.0,
+            raising=True,
+        )
+        data = _make_pdf_with_pages(2)
+        with pytest.raises(ParseError, match="terlalu berat"):
+            parse_document("lambat.pdf", data, config)
