@@ -53,3 +53,15 @@
 *.lock text eol=lf
 Dockerfile text eol=lf
 Caddyfile text eol=lf
+
+# Skrip shell: LF wajib, bukan sekadar disarankan.
+#
+# Shell membaca baris pertama sebagai shebang. Dengan CRLF, baris itu
+# menjadi "#!/usr/bin/env bash\r", dan kernel mencari program bernama
+# "bash\r" yang tidak ada. Gejalanya "bad interpreter: No such file or
+# directory" padahal berkasnya jelas ada, dan itu membingungkan.
+#
+# `text=auto eol=lf` di atas sebenarnya sudah menutup ini, tapi aturan
+# eksplisit lebih aman: satu berkas yang dibuat di Windows tanpa
+# memperhatikan `.gitattributes` tetap akan dinormalkan saat di-commit.
+*.sh text eol=lf

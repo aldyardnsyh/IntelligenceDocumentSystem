@@ -323,7 +323,29 @@ Jadi **2 GB RAM sudah cukup**. Dengan 1 GB, aplikasi tetap jalan tapi wajib
 swap. Disk: sekitar 9 GB untuk sistem dan build cache, jadi 20 GB cukup dan
 40 GB lebih lega.
 
-### Ringkasan langkah
+### Cara cepat: satu skrip
+
+Ada skrip yang mengerjakan seluruh langkah di bawah secara berurutan. Cocok
+dipakai dari terminal web penyedia (OrcaTerm di Tencent), tanpa perlu SSH
+dari komputer sendiri.
+
+```bash
+sudo apt-get update && sudo apt-get install -y git
+git clone https://github.com/aldyardnsyh/IntelligenceDocumentSystem.git /opt/ida
+cd /opt/ida/backend
+bash scripts/setup-vps.sh
+```
+
+Skripnya menanyakan domain, email, passcode, dan Groq API key, lalu
+mengerjakan sisanya: swap, Docker, konfigurasi, build, dan verifikasi.
+Aman dijalankan ulang, dan konfigurasi yang sudah ada tidak ditimpa tanpa
+bertanya.
+
+Satu hal yang **harus** Anda lakukan sendiri di panel penyedia: **buka port
+80 dan 443 di firewall**. Skrip tidak bisa menutupnya karena firewall-nya
+ada di luar server, dan ini penyebab kegagalan yang paling sering.
+
+### Ringkasan langkah manual
 
 | Langkah | Yang dilakukan |
 |---|---|
@@ -337,14 +359,14 @@ swap. Disk: sekitar 9 GB untuk sistem dan build cache, jadi 20 GB cukup dan
 
 Tiga hal yang paling sering terlewat:
 
-1. **Swap kalau RAM 1 GB.** Aplikasi ini butuh sekitar 1,6 GB. Tanpa swap,
+1. **Port 80 dan 443 di firewall penyedia.** Gejalanya menyesatkan: semua
+   container sehat, API menjawab dari dalam server, tapi situs tidak bisa
+   dibuka dan log Caddy penuh percobaan ACME yang gagal.
+2. **Swap kalau RAM 1 GB.** Aplikasi ini butuh sekitar 1,6 GB. Tanpa swap,
    kernel akan membunuh container saat ingestion. Dengan RAM 2 GB, swap
    tidak wajib tapi tetap disarankan sebagai jaring pengaman.
-2. **Domain di `Caddyfile`.** Nilai bawaannya `example.com` milik IANA, dan
+3. **Domain di `Caddyfile`.** Nilai bawaannya `example.com` milik IANA, dan
    sertifikat TLS tidak akan pernah terbit untuk domain itu.
-3. **`TRUST_PROXY_HEADERS=1`.** Tanpa ini, semua klien terlihat sebagai IP
-   Caddy, sehingga rate limit login jadi satu bucket global dan lima
-   percobaan gagal mengunci semua pengguna.
 
 **Vercel tidak bisa dipakai untuk backend.** Batas bundle Hobby 250 MB,
 sedangkan `torch` sendiri 1.260 MB, dan Vercel tidak punya disk persisten

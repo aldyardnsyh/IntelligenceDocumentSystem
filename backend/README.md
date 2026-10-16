@@ -129,6 +129,42 @@ dokumen. **20 GB cukup**, 40 GB lebih lega.
 VPS dengan 2 GB lebih dipilih karena tidak perlu bergantung pada swap. Swap
 bekerja, tapi lambat, dan build pertama akan terasa jauh lebih lama.
 
+### Cara cepat: satu skrip
+
+Ada skrip yang mengerjakan seluruh langkah di bawah secara berurutan, dari
+server kosong sampai aplikasi jalan. Cocok dipakai dari OrcaTerm atau
+terminal web lain, tanpa perlu SSH dari komputer sendiri.
+
+```bash
+# Dari server yang baru dibuat.
+sudo apt-get update && sudo apt-get install -y git
+git clone https://github.com/aldyardnsyh/IntelligenceDocumentSystem.git /opt/ida
+cd /opt/ida/backend
+bash scripts/setup-vps.sh
+```
+
+Skrip akan menanyakan empat hal, lalu mengerjakan sisanya:
+
+| Pertanyaan | Keterangan |
+|---|---|
+| Domain | Harus sudah menunjuk ke IP server ini |
+| Email | Untuk pemberitahuan kedaluwarsa sertifikat. Isinya bebas |
+| Passcode | Minimal 12 karakter, untuk masuk ke aplikasi |
+| Groq API key | Dari <https://console.groq.com/keys>, gratis |
+
+Skripnya **idempoten**: aman dijalankan ulang. Kalau konfigurasi sudah ada,
+ia bertanya dulu sebelum mengubah, dan langkah yang sudah selesai dilewati.
+
+Yang **tidak** dikerjakan skrip ini, dan harus Anda lakukan di panel
+penyedia: **buka port 80 dan 443 di firewall**. Tanpa itu, Caddy tidak bisa
+menerbitkan sertifikat dan situs tidak bisa diakses dari internet. Ini
+penyebab kegagalan yang paling sering, dan skrip tidak bisa menutupnya
+karena firewall-nya ada di luar server.
+
+Kalau lebih suka mengerjakan manual, atau ingin tahu apa yang sebenarnya
+dilakukan, lanjutkan membaca bagian di bawah. Isinya sama, hanya dipecah
+per langkah.
+
 ### Kenapa satu server, bukan Vercel + backend terpisah
 
 Pertanyaan ini sering muncul, jadi jawabannya ditulis di sini.
@@ -157,7 +193,9 @@ Firewall ada di panel Lighthouse, bukan di dalam server.
 **AWS EC2.** Launch instance dengan AMI Ubuntu 24.04 LTS (x86_64), tipe
 `t3.micro`, storage gp3 20 GB, lalu buat atau pilih key pair.
 
-Masuk ke server:
+Masuk ke server. Tencent punya terminal web (**OrcaTerm**) di panel, jadi
+langkah ini bisa dilewati sepenuhnya: buka OrcaTerm dan Anda langsung
+berada di dalam server.
 
 ```bash
 ssh -i <key>.pem ubuntu@<ip-server>          # AWS
@@ -168,12 +206,19 @@ ssh root@<ip-server>                          # Tencent, atau user yang Anda bua
 
 Inbound: **hanya HTTP (80) dan HTTPS (443)**, source `0.0.0.0/0`.
 
-- **Tencent Lighthouse:** menu Firewall di panel, tambahkan rule untuk 80
-  dan 443. Lighthouse secara default hanya membuka 22, jadi langkah ini
-  wajib.
+- **Tencent Lighthouse:** menu **Firewall** di panel, tambahkan rule untuk
+  port 80 dan 443. Lighthouse secara default hanya membuka 22, jadi langkah
+  ini wajib. Tanpa ini, Caddy tidak akan pernah bisa menerbitkan sertifikat
+  dan situs tidak bisa diakses dari internet.
 - **AWS:** Security group instance, tambahkan inbound rule yang sama.
 
 Port 8000 **jangan** dibuka. API hanya dijangkau lewat Caddy.
+
+> Ini penyebab kegagalan yang paling sering, dan gejalanya menyesatkan:
+> semua container terlihat sehat, `curl localhost:8000/api/v1/health`
+> berhasil dari dalam server, tapi situs tidak bisa dibuka dari luar dan
+> log Caddy penuh percobaan ACME yang gagal. Kalau itu terjadi, periksa
+> firewall dulu, bukan konfigurasi Caddy.
 
 > Kalau memakai Tencent di China mainland, port 80 dan 443 untuk domain
 > yang belum terdaftar (ICP filing) akan diblokir. Region Singapore tidak
