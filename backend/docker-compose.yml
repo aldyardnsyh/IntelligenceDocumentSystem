@@ -55,9 +55,10 @@ services:
       timeout: 5s
       retries: 3
       # Lifespan mengunduh model embedding (~470 MB) sebelum server listen.
-      # Jendela 90s sering tidak cukup di t3.micro, dan karena healthcheck
-      # tidak memicu restart, compose berhenti dengan "dependency failed to
-      # start" -- frontend dan Caddy tidak pernah dijalankan.
+      # Jendela 90s sering tidak cukup di server 1 GB dengan disk lambat, dan
+      # karena healthcheck tidak memicu restart, compose berhenti dengan
+      # "dependency failed to start": frontend dan Caddy tidak pernah
+      # dijalankan.
       start_period: 600s
     logging:
       driver: json-file

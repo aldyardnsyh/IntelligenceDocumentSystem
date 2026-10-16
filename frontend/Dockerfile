@@ -58,6 +58,19 @@ ENV NEXT_PUBLIC_USE_BACKEND=$NEXT_PUBLIC_USE_BACKEND \
 # jadi lebih cepat dan tidak pernah gagal karena tries menghubungi jaringan.
 ENV NEXT_TELEMETRY_DISABLED=1
 
+# Batas heap Node saat build.
+#
+# Node menghitung batas heap defaultnya dari RAM yang terlihat, dan di
+# container dengan batas memori, perhitungan itu bisa terlalu optimistis.
+# Di server 2 GB, `next build` yang memakai heap besar akan membuat kernel
+# memilih antara membunuh proses build (gagal, harus ulang dari awal) atau
+# memakai swap (lambat tapi selesai).
+#
+# 1536 MB cukup untuk proyek ini dan menyisakan ruang untuk sistem. Kalau
+# nanti build gagal dengan "JavaScript heap out of memory", naikkan angka
+# ini, bukan RAM server.
+ENV NODE_OPTIONS="--max-old-space-size=1536"
+
 RUN --mount=type=cache,target=/root/.npm \
     npm run build
 

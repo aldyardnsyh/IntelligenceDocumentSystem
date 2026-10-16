@@ -305,25 +305,41 @@ seharusnya ditolak tapi justru dijawab, skrip keluar dengan kode error.
 ## Deployment ke server
 
 Panduan lengkap ada di **[backend/README.md](backend/README.md)**: satu
-instance AWS EC2 free tier dengan Caddy untuk TLS otomatis dan volume
-persisten. Tidak perlu Supabase, Redis, atau object storage.
+server dengan Caddy untuk TLS otomatis dan volume persisten. Tidak perlu
+Supabase, Redis, atau object storage. Kodenya tidak terikat penyedia
+tertentu, jadi VPS apa pun dengan Docker bisa dipakai.
 
-Ringkasnya:
+### Kebutuhan minimum
+
+| Komponen | RAM |
+|---|---|
+| Ubuntu dan Docker | ~300 MB |
+| FastAPI dan ChromaDB | ~250 MB |
+| torch saat dimuat | ~600 MB |
+| Model embedding | ~470 MB |
+| **Total** | **~1,6 GB** |
+
+Jadi **2 GB RAM sudah cukup**. Dengan 1 GB, aplikasi tetap jalan tapi wajib
+swap. Disk: sekitar 9 GB untuk sistem dan build cache, jadi 20 GB cukup dan
+40 GB lebih lega.
+
+### Ringkasan langkah
 
 | Langkah | Yang dilakukan |
 |---|---|
-| 1 | Buat instance `t3.micro`, Ubuntu 24.04, disk 20 GB |
-| 2 | Security group: hanya port 80 dan 443 |
+| 1 | Siapkan server, Ubuntu 24.04 |
+| 2 | Buka firewall: hanya port 80 dan 443 |
 | 3 | Siapkan domain. Bisa domain sendiri, atau DuckDNS gratis |
-| 4 | Tambah **swap 4 GB** (wajib di t3.micro), pasang Docker, buat passcode, isi `.env` |
+| 4 | Swap (wajib kalau RAM 1 GB), pasang Docker, buat passcode, isi `.env` |
 | 5 | Ganti domain di `backend/Caddyfile` |
-| 6 | `docker compose up -d --build`, tunggu 10 sampai 15 menit |
+| 6 | `docker compose up -d --build`, tunggu 5 sampai 15 menit |
 | 7 | Verifikasi: health check, TLS, lalu unggah dokumen contoh dan tanya |
 
 Tiga hal yang paling sering terlewat:
 
-1. **Swap.** t3.micro hanya 1 GB, sedangkan aplikasi ini butuh sekitar
-   1,65 GB. Tanpa swap, kernel akan membunuh container saat ingestion.
+1. **Swap kalau RAM 1 GB.** Aplikasi ini butuh sekitar 1,6 GB. Tanpa swap,
+   kernel akan membunuh container saat ingestion. Dengan RAM 2 GB, swap
+   tidak wajib tapi tetap disarankan sebagai jaring pengaman.
 2. **Domain di `Caddyfile`.** Nilai bawaannya `example.com` milik IANA, dan
    sertifikat TLS tidak akan pernah terbit untuk domain itu.
 3. **`TRUST_PROXY_HEADERS=1`.** Tanpa ini, semua klien terlihat sebagai IP

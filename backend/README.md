@@ -93,53 +93,91 @@ docker compose up -d --build
 docker compose logs -f api
 ```
 
-## Deployment ke AWS EC2 (free tier)
+## Deployment ke satu VPS
 
-Shape EC2 yang dipakai: **satu** instance dengan disk persisten.
-Semua state ada di satu volume, jadi tidak ada database eksternal.
+Shape yang dipakai: **satu** server dengan disk persisten. Semua state ada di
+satu volume, jadi tidak ada database eksternal. Kode ini tidak terikat pada
+penyedia tertentu: tidak ada satu pun baris yang menyebut AWS, jadi VPS mana
+pun dengan Docker bisa dipakai.
 
-### Kenapa satu instance, bukan Vercel + backend terpisah
+### Kebutuhan minimum
+
+| Komponen | RAM |
+|---|---|
+| Ubuntu dan Docker | ~300 MB |
+| FastAPI dan ChromaDB | ~250 MB |
+| torch saat dimuat | ~600 MB |
+| Model embedding | ~470 MB |
+| **Total** | **~1,6 GB** |
+
+Jadi **2 GB RAM sudah cukup**, dengan sisa sekitar 400 MB. Dengan 1 GB,
+aplikasi tetap bisa jalan tapi wajib swap (lihat catatan di langkah 4).
+
+Disk: sekitar 9 GB untuk sistem, image, dan build cache, sisanya untuk
+dokumen. **20 GB cukup**, 40 GB lebih lega.
+
+### Pilihan penyedia
+
+| | Tencent Lighthouse (Singapore) | AWS EC2 t3.micro |
+|---|---|---|
+| RAM | 2 GB | 1 GB |
+| Disk | 40 GB | 20 GB |
+| Biaya | sudah dibayar | gratis 12 bulan, lalu ditagih |
+| Swap | tidak wajib, tapi disarankan | **wajib** |
+| Catatan | region Singapore bisa akses semua layanan | setelah 12 bulan biaya muncul tanpa pemberitahuan jelas |
+
+VPS dengan 2 GB lebih dipilih karena tidak perlu bergantung pada swap. Swap
+bekerja, tapi lambat, dan build pertama akan terasa jauh lebih lama.
+
+### Kenapa satu server, bukan Vercel + backend terpisah
 
 Pertanyaan ini sering muncul, jadi jawabannya ditulis di sini.
 
 **Backend tidak bisa di Vercel.** Batas ukuran bundle Hobby adalah 250 MB
 uncompressed, sedangkan `torch` sendiri 1.260 MB. Ditambah Vercel tidak
 punya disk persisten, sehingga SQLite dan ChromaDB akan hilang setiap kali
-function dingin. Backend butuh disk dan RAM yang tidak disediakan
-platform serverless.
+function dingin. Backend butuh disk dan RAM yang tidak disediakan platform
+serverless.
 
 **Frontend bisa, tapi tidak memberi keuntungan di sini.** Semua halaman
 butuh backend, jadi memisahkannya hanya menambah satu tempat yang bisa
 gagal. Yang lebih penting: aplikasi ini didesain **satu origin** supaya
 cookie sesi bekerja tanpa `SameSite=None`, dan jawaban LLM di-stream lewat
-SSE yang berisiko terputus kalau lewat proxy perantara. Satu instance
+SSE yang berisiko terputus kalau lewat proxy perantara. Satu server
 menghindari ketiga masalah itu sekaligus.
 
-### 1. Buat instance
+### 1. Siapkan server
 
-Di konsol AWS → EC2 → Launch instance:
+Bagian ini berlaku untuk penyedia mana pun. Yang berbeda hanya cara masuk
+dan nama firewall-nya.
 
-| Pengaturan | Nilai |
-|---|---|
-| Name | `ida-rag` |
-| AMI | Ubuntu 24.04 LTS (x86_64) |
-| Instance type | **t3.micro** (1 GB, free tier 12 bulan) |
-| Key pair | Buat baru, atau pilih yang sudah ada |
-| Storage | **gp3, 20 GB** |
+**Tencent Lighthouse.** Beli paket Singapore, pilih image **Ubuntu 24.04**.
+Firewall ada di panel Lighthouse, bukan di dalam server.
 
-> **RAM t3.micro tidak cukup tanpa swap.** Perhitungannya: Ubuntu dan Docker
-> sekitar 300 MB, FastAPI dan ChromaDB sekitar 250 MB, torch saat dimuat
-> sekitar 600 MB, dan model embedding 470 MB. Totalnya sekitar 1,65 GB,
-> sedangkan yang tersedia 1 GB. Langkah 4 menambahkan swap 4 GB supaya
-> aplikasi tidak dimatikan kernel di tengah ingestion.
->
-> Kalau Anda tidak mau bergantung pada swap, `t3.small` (2 GB) nyaman tapi
-> tidak free tier, sekitar $15 per bulan.
+**AWS EC2.** Launch instance dengan AMI Ubuntu 24.04 LTS (x86_64), tipe
+`t3.micro`, storage gp3 20 GB, lalu buat atau pilih key pair.
 
-### 2. Security group
+Masuk ke server:
 
-Inbound: **Hanya HTTP (80) dan HTTPS (443)**, source `0.0.0.0/0`.
-Port 8000 **jangan** dibuka, API hanya dijangkau lewat Caddy.
+```bash
+ssh -i <key>.pem ubuntu@<ip-server>          # AWS
+ssh root@<ip-server>                          # Tencent, atau user yang Anda buat
+```
+
+### 2. Buka firewall
+
+Inbound: **hanya HTTP (80) dan HTTPS (443)**, source `0.0.0.0/0`.
+
+- **Tencent Lighthouse:** menu Firewall di panel, tambahkan rule untuk 80
+  dan 443. Lighthouse secara default hanya membuka 22, jadi langkah ini
+  wajib.
+- **AWS:** Security group instance, tambahkan inbound rule yang sama.
+
+Port 8000 **jangan** dibuka. API hanya dijangkau lewat Caddy.
+
+> Kalau memakai Tencent di China mainland, port 80 dan 443 untuk domain
+> yang belum terdaftar (ICP filing) akan diblokir. Region Singapore tidak
+> punya batasan ini.
 
 ### 3. Siapkan domain
 
@@ -150,7 +188,7 @@ menunjuk server mereka, dan kita tidak bisa mengubahnya.
 Dua pilihan:
 
 **Domain sendiri (paling rapi).** Beli domain, lalu buat `A` record yang
-menunjuk ke **Public IPv4** instance. Domain `.my.id` sekitar Rp15 ribu per
+menunjuk ke **IP publik server**. Domain `.my.id` sekitar Rp15 ribu per
 tahun dan sudah cukup.
 
 **DuckDNS (gratis).** `duckdns.org` terdaftar di Public Suffix List,
@@ -159,22 +197,21 @@ jadi Caddy bisa menerbitkan sertifikat untuk itu tanpa biaya.
 
 1. Buka <https://www.duckdns.org>, masuk dengan akun Google atau GitHub.
 2. Buat subdomain, misalnya `ida-rag`. Hasilnya `ida-rag.duckdns.org`.
-3. Isi kolom `current ip` dengan Public IPv4 instance Anda, lalu **update**.
+3. Isi kolom `current ip` dengan IP publik server Anda, lalu **update**.
 4. Cek dari komputer sendiri: `nslookup ida-rag.duckdns.org` harus
-   menampilkan IP instance.
+   menampilkan IP server.
 
-Kalau IP instance berubah (misalnya setelah stop lalu start), DuckDNS harus
-diperbarui manual. Itu kelemahan yang perlu diketahui.
+Kalau IP server berubah (misalnya setelah stop lalu start di AWS), DuckDNS
+harus diperbarui manual. Itu kelemahan yang perlu diketahui.
 
 ### 4. Siapkan server
 
-```bash
-ssh -i <key>.pem ubuntu@<ip-EC2>
-```
-
-**Tambahkan swap lebih dulu.** Ini yang membuat t3.micro cukup:
+**Kalau server Anda punya 1 GB RAM (t3.micro), tambahkan swap lebih dulu.**
+Kalau 2 GB atau lebih, swap tidak wajib tapi tetap disarankan sebagai jaring
+pengaman; ukurannya cukup 2 GB.
 
 ```bash
+# 4G untuk server 1 GB, 2G untuk server 2 GB.
 sudo fallocate -l 4G /swapfile
 sudo chmod 600 /swapfile
 sudo mkswap /swapfile
@@ -188,7 +225,7 @@ echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 echo 'vm.swappiness=10' | sudo tee -a /etc/sysctl.conf
 sudo sysctl -p
 
-free -h   # baris Swap harus menunjukkan 4.0Gi
+free -h   # baris Swap harus menunjukkan ukuran yang Anda pasang
 ```
 
 > `chmod 600` bukan formalitas. Swap berisi salinan memori proses, termasuk
@@ -196,7 +233,7 @@ free -h   # baris Swap harus menunjukkan 4.0Gi
 > diproses. Berkas yang bisa dibaca pengguna lain adalah kebocoran.
 
 > Kalau `fallocate` gagal dengan "Operation not supported" (terjadi di
-> filesystem tertentu, bukan ext4 bawaan EC2), ganti baris pertama dengan:
+> filesystem tertentu), ganti baris pertama dengan:
 > `sudo dd if=/dev/zero of=/swapfile bs=1M count=4096 status=progress`.
 > Hasilnya sama, hanya lebih lambat karena benar-benar menulis 4 GB.
 
@@ -222,7 +259,7 @@ yang berdiri di antara internet dan seluruh dokumen pengguna.
 
 > Perintah ini **tidak** mengunduh model embedding. Skripnya hanya membaca
 > `app.core.config` dan `app.core.security`, tidak menyentuh provider
-> embedding. Jadi aman dijalankan di t3.micro sebelum swap ditambahkan,
+> embedding. Jadi aman dijalankan di server 1 GB sebelum swap ditambahkan,
 > dan selesai dalam hitungan detik.
 
 Edit `.env` minimal pada ini:
@@ -285,7 +322,7 @@ docker compose ps
 docker compose logs -f api
 ```
 
-Build pertama memakan **10 sampai 15 menit** di t3.micro: mengunduh torch
+Build pertama memakan **10 sampai 15 menit** di server 1 GB, lebih cepat di 2 GB: mengunduh torch
 CPU, lalu mengunduh model embedding 470 MB saat container pertama start.
 Ini normal, bukan hang. Log akan berhenti di "Layanan siap" setelah modelnya
 selesai diunduh.
@@ -431,8 +468,8 @@ python -m scripts.evaluate_ragas --dry-run
 
 | Gejala | Penyebab | Solusi |
 |---|---|---|
-| Container `api` restart berulang | RAM habis, kernel membunuh proses | Cek `dmesg \| grep -i "killed process"` dan `free -h`. Pastikan swap aktif: baris `Swap` harus 4.0Gi. Kalau sudah ada swap tapi masih mati, naikkan ke `t3.small` |
-| Build berhenti lama tanpa log | Mengunduh torch lalu model 470 MB | Normal, 10 sampai 15 menit di t3.micro. Lihat progres dengan `docker compose logs -f api` |
+| Container `api` restart berulang | RAM habis, kernel membunuh proses | Cek `dmesg \| grep -i "killed process"` dan `free -h`. Pastikan swap aktif: baris `Swap` harus sesuai ukuran yang dipasang. Kalau masih mati, tambah RAM |
+| Build berhenti lama tanpa log | Mengunduh torch lalu model 470 MB | Normal, 10 sampai 15 menit di server 1 GB, sekitar 5 menit di 2 GB. Lihat progres dengan `docker compose logs -f api` |
 | Caddy tidak terbit sertifikat | DNS belum resolve ke instance | `nslookup nama-anda.duckdns.org` harus menunjuk IP instance. Untuk DuckDNS, pastikan kolom `current ip` sudah di-update |
 | Caddy keluar dengan error ACME | Domain di Caddyfile masih `example.com` | Jalankan `sed -i 's/example\.com/domain-anda/g' Caddyfile` lalu `docker compose up -d --force-recreate caddy` |
 | Halaman terbuka tapi API 502 | Container `api` belum sehat | `docker compose ps` harus menunjukkan `healthy`. Caddy sengaja menunggu sampai sehat |

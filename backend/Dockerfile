@@ -120,9 +120,9 @@ EXPOSE 8000
 # terdeteksi.
 #
 # `start-period` longgar karena lifespan mengunduh model embedding (~470 MB)
-# sebelum server listen. Versi 90s sering habis di t3.micro dengan disk lambat,
-# dan karena healthcheck tidak memicu restart, `docker compose up` berhenti
-# dengan "dependency failed to start".
+# sebelum server listen. Versi 90s sering habis di server 1 GB dengan disk
+# lambat, dan karena healthcheck tidak memicu restart, `docker compose up`
+# berhenti dengan "dependency failed to start".
 HEALTHCHECK --interval=30s --timeout=5s --start-period=600s --retries=3 \
     CMD curl -fsS http://127.0.0.1:8000/api/v1/health || exit 1
 
