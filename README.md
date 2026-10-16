@@ -15,7 +15,7 @@
 
 <!-- Status kualitas. Angkanya berasal dari perintah di bagian verifikasi,
      bukan klaim. -->
-[![pytest](https://img.shields.io/badge/pytest-416_passed-0A9EDC?logo=pytest&logoColor=white)](#verifikasi-dan-pengujian)
+[![pytest](https://img.shields.io/badge/pytest-434_passed-0A9EDC?logo=pytest&logoColor=white)](#verifikasi-dan-pengujian)
 [![Playwright](https://img.shields.io/badge/Playwright-46_specs-2EAD33?logo=playwright&logoColor=white)](#verifikasi-dan-pengujian)
 [![coverage](https://img.shields.io/badge/coverage-83%25-4C1)](#verifikasi-dan-pengujian)
 [![Lisensi](https://img.shields.io/badge/lisensi-PSHT-blue)](LICENSE.md)
@@ -247,7 +247,7 @@ Evaluasi ini tidak memerlukan API key tambahan. Untuk skor RAGAS lengkap
 
 ```powershell
 cd backend
-python -m pytest                 # 416 test, coverage gate 70%
+python -m pytest                 # 434 test, coverage gate 70%
 python -m ruff check app tests scripts
 ```
 
@@ -305,14 +305,35 @@ seharusnya ditolak tapi justru dijawab, skrip keluar dengan kode error.
 ## Deployment ke server
 
 Panduan lengkap ada di **[backend/README.md](backend/README.md)**: satu
-instance AWS EC2 dengan Caddy untuk TLS otomatis dan volume persisten. Tidak
-perlu Supabase, Redis, atau object storage untuk setup satu instance.
+instance AWS EC2 free tier dengan Caddy untuk TLS otomatis dan volume
+persisten. Tidak perlu Supabase, Redis, atau object storage.
 
-Dua hal yang wajib dilakukan sebelum `docker compose up`:
+Ringkasnya:
 
-1. Ganti domain di `backend/Caddyfile`. Nilai bawaannya `example.com` milik
-   IANA, dan sertifikat TLS tidak akan pernah terbit untuk domain itu.
-2. Isi `backend/.env` dengan passcode dan API key Anda.
+| Langkah | Yang dilakukan |
+|---|---|
+| 1 | Buat instance `t3.micro`, Ubuntu 24.04, disk 20 GB |
+| 2 | Security group: hanya port 80 dan 443 |
+| 3 | Siapkan domain. Bisa domain sendiri, atau DuckDNS gratis |
+| 4 | Tambah **swap 4 GB** (wajib di t3.micro), pasang Docker, buat passcode, isi `.env` |
+| 5 | Ganti domain di `backend/Caddyfile` |
+| 6 | `docker compose up -d --build`, tunggu 10 sampai 15 menit |
+| 7 | Verifikasi: health check, TLS, lalu unggah dokumen contoh dan tanya |
+
+Tiga hal yang paling sering terlewat:
+
+1. **Swap.** t3.micro hanya 1 GB, sedangkan aplikasi ini butuh sekitar
+   1,65 GB. Tanpa swap, kernel akan membunuh container saat ingestion.
+2. **Domain di `Caddyfile`.** Nilai bawaannya `example.com` milik IANA, dan
+   sertifikat TLS tidak akan pernah terbit untuk domain itu.
+3. **`TRUST_PROXY_HEADERS=1`.** Tanpa ini, semua klien terlihat sebagai IP
+   Caddy, sehingga rate limit login jadi satu bucket global dan lima
+   percobaan gagal mengunci semua pengguna.
+
+**Vercel tidak bisa dipakai untuk backend.** Batas bundle Hobby 250 MB,
+sedangkan `torch` sendiri 1.260 MB, dan Vercel tidak punya disk persisten
+untuk SQLite dan ChromaDB. Domain `*.vercel.app` juga tidak bisa diarahkan
+ke server lain. Penjelasan lengkapnya ada di `backend/README.md`.
 
 ## Struktur proyek
 
@@ -334,7 +355,7 @@ Angka di badge atas bukan klaim, tapi hasil perintah berikut:
 
 | Pemeriksaan | Perintah | Hasil |
 |---|---|---|
-| Test backend | `python -m pytest` | 416 test, coverage 83% |
+| Test backend | `python -m pytest` | 434 test, coverage 83% |
 | Lint backend | `python -m ruff check app tests scripts` | Bersih |
 | Tipe dan lint frontend | `npx tsc --noEmit; npm run lint` | Bersih |
 | Build frontend | `npm run build` | Sukses |

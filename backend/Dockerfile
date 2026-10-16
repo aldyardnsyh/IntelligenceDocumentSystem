@@ -119,7 +119,7 @@ EXPOSE 8000
 # store, jadi container yang dilaporkan "up" tapi dependensinya mati akan
 # terdeteksi.
 #
-# `start-period` longkar karena lifespans mengunduh model embedding (~470 MB)
+# `start-period` longgar karena lifespan mengunduh model embedding (~470 MB)
 # sebelum server listen. Versi 90s sering habis di t3.micro dengan disk lambat,
 # dan karena healthcheck tidak memicu restart, `docker compose up` berhenti
 # dengan "dependency failed to start".

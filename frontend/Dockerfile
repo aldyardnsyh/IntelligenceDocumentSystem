@@ -19,7 +19,7 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 
 # `--legacy-peer-deps` dipakai karena beberapa paket UI punya rentang peer yang
-# saling tumpang tindih. npm 10 lebih ketat soal ini dan build gagal embora
+# saling tumpang tindih. npm 10 lebih ketat soal ini dan build gagal walaupun
 # pohon dependensinya sebenarnya valid.
 RUN --mount=type=cache,target=/root/.npm \
     npm ci --legacy-peer-deps --no-audit --no-fund
