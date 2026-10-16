@@ -331,6 +331,62 @@ class TestKlienShared:
         assert client.is_closed is True
 
 
+class TestShutdownMenutupKoneksi:
+    """Shutdown harus benar-benar menutup koneksi provider.
+
+    Bug yang pernah terjadi: `shutdown_services` memanggil
+    `asyncio.run(closer())` untuk menutup koneksi. Itu tidak pernah berhasil,
+    karena fungsi itu selalu dipanggil dari dalam event loop yang sudah
+    berjalan (lifespan FastAPI), dan `asyncio.run()` menolak di kondisi itu.
+    Kegagalannya tertelan `contextlib.suppress`, jadi yang tersisa hanya
+    RuntimeWarning "coroutine was never awaited" dan socket menggantung
+    sampai proses benar-benar mati.
+    """
+
+    async def test_shutdown_async_menutup_koneksi(self) -> None:
+        from app import dependencies
+        from app.services.generation.generator import LLMChain
+
+        settings = Settings(ollama_base_url="http://provider.test/v1", llm_model="m")
+        provider = OllamaProvider(settings)
+        client = await provider._client_async(5.0)
+        assert client.is_closed is False
+
+        # Tiru kondisi nyata: chain terpasang, shutdown dipanggil dari dalam
+        # event loop yang sedang berjalan.
+        dependencies._chain = LLMChain([provider])  # noqa: SLF001
+        try:
+            await dependencies.shutdown_services_async()
+        finally:
+            dependencies._chain = None  # noqa: SLF001
+
+        assert client.is_closed is True, (
+            "koneksi HTTP provider harus tertutup setelah shutdown"
+        )
+
+    async def test_shutdown_sync_tidak_melempar_di_dalam_loop(self) -> None:
+        """Versi sinkron tetap aman dipanggil dari dalam event loop.
+
+        Dipakai skrip CLI dan fixture test. Kalau ada loop yang berjalan,
+        penutupannya dijalankan di thread terpisah; yang penting tidak
+        melempar dan tidak menggantung.
+        """
+        from app import dependencies
+        from app.services.generation.generator import LLMChain
+
+        settings = Settings(ollama_base_url="http://provider.test/v1", llm_model="m")
+        provider = OllamaProvider(settings)
+        client = await provider._client_async(5.0)
+
+        dependencies._chain = LLMChain([provider])  # noqa: SLF001
+        try:
+            dependencies.shutdown_services()
+        finally:
+            dependencies._chain = None  # noqa: SLF001
+
+        assert client.is_closed is True
+
+
 class TestProviderKonfigurasi:
     def test_groq_tanpa_api_key_tidak_terkonfigurasi(self) -> None:
         settings = Settings(groq_api_key=None)

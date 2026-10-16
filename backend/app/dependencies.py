@@ -8,8 +8,8 @@ wajib terjadi di lifespan, bukan di dalam handler.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
+import threading
 
 from app.core.config import Settings, get_settings
 from app.providers.embedding import build_embedding_provider
@@ -133,29 +133,121 @@ def _index_entries(repository: MetadataRepository) -> list:
 
 
 def shutdown_services() -> None:
-    """Kosongkan referensi service. Dipanggil saat aplikasi berhenti."""
+    """Kosongkan referensi service. Dipakai dari konteks sinkron.
+
+    Untuk jalur async (lifespan FastAPI), pakai ``shutdown_services_async``:
+    versi itu bisa benar-benar menunggu penutupan koneksi HTTP provider.
+    """
+    _flush_tracer()
+    _close_providers_sync()
+    _reset_references()
+
+
+async def shutdown_services_async() -> None:
+    """Sama seperti ``shutdown_services``, tapi menunggu koneksi ditutup.
+
+    Ini yang dipakai lifespan FastAPI. Versi sinkron sebelumnya memanggil
+    ``asyncio.run()`` untuk menutup koneksi, dan itu tidak pernah berhasil
+    karena ``shutdown_services`` selalu dipanggil dari dalam event loop yang
+    sudah berjalan; ``asyncio.run()`` menolak di kondisi itu. Kegagalannya
+    tertelan ``contextlib.suppress``, sehingga koneksi tidak pernah ditutup
+    dan yang tersisa hanya RuntimeWarning "coroutine was never awaited".
+    """
+    _flush_tracer()
+    await _close_providers()
+    _reset_references()
+
+
+def _flush_tracer() -> None:
+    """Kirim sisa antrean Langfuse sebelum referensinya hilang.
+
+    Tanpa ini, jejak dari beberapa query terakhir tidak pernah sampai ke
+    server.
+    """
+    if _tracer is None:
+        return
+    try:
+        _tracer.flush()
+    except Exception:  # noqa: BLE001
+        logger.exception("Gagal flush tracer saat shutdown")
+
+
+async def _close_providers() -> None:
+    """Tutup koneksi HTTP semua provider, satu per satu.
+
+    Kliennya dipakai bersama antar request, jadi proses yang berhenti
+    tanpanya meninggalkan socket terbuka sampai OS membersihkannya. Satu
+    provider yang gagal ditutup tidak menghalangi yang lain.
+    """
+    if _chain is None:
+        return
+    for provider in _chain.providers:
+        closer = getattr(provider, "aclose", None)
+        if closer is None:
+            continue
+        try:
+            await closer()
+        except Exception:  # noqa: BLE001
+            logger.debug("Gagal menutup koneksi provider", exc_info=True)
+
+
+def _close_providers_sync() -> None:
+    """Tutup koneksi provider dari konteks sinkron.
+
+    Dipakai skrip CLI dan fixture test. Kalau tidak ada event loop yang
+    berjalan, ``asyncio.run`` langsung dipakai. Kalau ada, penutupannya
+    dijalankan di thread terpisah karena thread itu tidak punya loop.
+    """
+    if _chain is None:
+        return
+
+    pending = [
+        closer
+        for provider in _chain.providers
+        if (closer := getattr(provider, "aclose", None)) is not None
+    ]
+    if not pending:
+        return
+
+    async def _run_all() -> None:
+        for closer in pending:
+            try:
+                await closer()
+            except Exception:  # noqa: BLE001
+                logger.debug("Gagal menutup koneksi provider", exc_info=True)
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        try:
+            asyncio.run(_run_all())
+        except Exception:  # noqa: BLE001
+            logger.debug("Gagal menutup koneksi provider", exc_info=True)
+        return
+
+    def _worker() -> None:
+        try:
+            asyncio.run(_run_all())
+        except Exception:  # noqa: BLE001
+            logger.debug("Gagal menutup koneksi provider di thread", exc_info=True)
+
+    thread = threading.Thread(target=_worker, name="close-providers", daemon=True)
+    thread.start()
+    # Ditunggu sebentar, bukan selamanya: shutdown tidak boleh menggantung
+    # hanya karena satu provider tidak menjawab.
+    thread.join(timeout=5.0)
+    if thread.is_alive():
+        logger.warning(
+            "Penutupan koneksi provider belum selesai setelah 5 detik. "
+            "Dibiarkan berjalan di latar; OS akan membersihkan socket saat "
+            "proses benar-benar berhenti."
+        )
+
+
+def _reset_references() -> None:
+    """Lepas semua referensi service supaya bisa dibangun ulang."""
     global _settings, _repository, _memory, _store, _retriever
     global _ingestion, _rag, _chain, _limiter, _tracer
-
-    # Flush antrean Langfuse sebelum referensinya hilang. Tanpa ini, jejak
-    # dari beberapa query terakhir tidak pernah sampai ke server.
-    if _tracer is not None:
-        try:
-            _tracer.flush()
-        except Exception:  # noqa: BLE001
-            logger.exception("Gagal flush tracer saat shutdown")
-
-    # Tutup koneksi HTTP provider. Kliennya dipakai bersama antar request,
-    # jadi proses yang berhenti tanpanya meninggalkan socket terbuka sampai
-    # OS membersihkannya.
-    if _chain is not None:
-        for provider in _chain.providers:
-            closer = getattr(provider, "aclose", None)
-            if closer is None:
-                continue
-            # Kegagalan menutup koneksi tidak boleh menggagalkan shutdown.
-            with contextlib.suppress(Exception):
-                asyncio.run(closer())
 
     _settings = None
     _repository = None
@@ -233,4 +325,5 @@ __all__ = [
     "get_tracer",
     "init_services",
     "shutdown_services",
+    "shutdown_services_async",
 ]

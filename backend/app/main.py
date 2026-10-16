@@ -34,7 +34,7 @@ from app.dependencies import (
     get_ingestion,
     get_repository,
     init_services,
-    shutdown_services,
+    shutdown_services_async,
 )
 
 logging.basicConfig(
@@ -101,7 +101,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         ingestion = getattr(app.state, "ingestion", None)
         if ingestion is not None:
             await ingestion.wait_pending()
-        shutdown_services()
+        # Versi async dipakai di sini supaya penutupan koneksi HTTP provider
+        # benar-benar ditunggu. Versi sinkron memanggil `asyncio.run()`, dan
+        # itu tidak pernah berhasil dari dalam event loop yang sudah jalan.
+        await shutdown_services_async()
         logger.info("Layanan dilepas.")
 
 
