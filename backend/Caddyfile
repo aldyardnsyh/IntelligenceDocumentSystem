@@ -11,8 +11,20 @@
 # penerbitan TLS selalu gagal: `example.com` milik IANA, tidak akan pernah
 # mendapat sertifikat, dan Caddy keluar dengan error ACME.
 #
-# Sebelum `docker compose up`:
-#   docker compose run --rm caddy sed -i 's/example\.com/domain-anda/g' /etc/caddy/Caddyfile
+# Sebelum `docker compose up`, jalankan dua perintah ini dari direktori
+# `backend/`. Keduanya menunjuk pola, bukan mengganti semua kemunculan
+# `example.com`, karena kata itu juga ada di komentar dan di alamat email.
+# Mengganti semuanya membuat komentarnya berbunyi salah.
+#
+#   sed -i 's/^example\.com {/nama-anda.duckdns.org {/' Caddyfile
+#   sed -i 's/^\(\s*email\s*\)admin@example\.com/\1email-anda@example.com/' Caddyfile
+#
+# Perintah pertama mengubah alamat situs, yang kedua mengubah alamat email
+# untuk pemberitahuan kedaluwarsa sertifikat. Email boleh dibiarkan apa
+# adanya kalau Anda tidak ingin memberi tahu siapa pun.
+#
+# Verifikasi hasilnya sebelum menjalankan container:
+#   docker compose run --rm caddy caddy validate --config /etc/caddy/Caddyfile
 #
 # Uji coba lokal tanpa TLS: `caddy run --config Caddyfile --adapter caddyfile`
 # dengan baris `localhost` di bawah diganti `http://localhost`.
@@ -25,8 +37,8 @@
 	#
 	# Opsi global `ocsp_stapling` hanya menerima `off`. Nilai seperti `on`
 	# ditolak parser saat Caddy mengadopsi konfigurasi ini, dan karena
-	# adaptasi happens sebelum server listen, container langsung keluar dengan
-	# crash-loop -- satu baris salah mematikan seluruh ingress.
+	# adaptasi terjadi sebelum server listen, container langsung keluar
+	# dengan crash-loop, satu baris salah mematikan seluruh ingress.
 	#
 	# Verifikasi sebelum deploy: `docker compose run --rm caddy caddy validate
 	# --config /etc/caddy/Caddyfile`
