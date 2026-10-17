@@ -86,10 +86,17 @@ apa adanya sebagai pesan di UI.
 | 413 | `file_too_large` | Berkas melewati 10 MB |
 | 422 | `unprocessable` | Validasi field gagal |
 | 429 | `rate_limited` | Rate limit kena. Wajib mengirim header `Retry-After` |
+| 507 | `insufficient_storage` | Kuota dokumen habis: batas jumlah atau total ukuran |
 | 5xx | `internal` | Gangguan server, layak dicoba ulang |
 
 Frontend hanya melakukan retry otomatis untuk 408, 5xx, dan kegagalan
 jaringan. 404 atau 422 tidak akan membaik dengan dicoba ulang.
+
+**507 dikecualikan dari retry** walaupun berawalan 5. Kuota penyimpanan yang
+penuh tidak berubah karena dicoba lagi, jadi percobaan ulang hanya membuat
+pengguna menunggu lebih lama sebelum melihat pesan yang sama. Pesannya
+ditampilkan apa adanya, karena backend sudah menyebut angka batas dan
+tindakan yang harus diambil (hapus dokumen lama di halaman Dokumen).
 
 ### Dokumentasi interaktif
 
@@ -501,6 +508,30 @@ Field `fallback` memberi tahu mode apa yang sedang aktif, bukan sekadar
 "sehat atau tidak". `mode: "reduced"` berarti salah satu komponen berjalan
 dalam mode fallback (misalnya vector store in-memory yang hilang saat
 restart), dan operator tidak boleh mengira data sudah persisten padahal belum.
+
+### `fallback.embedding_mismatch`
+
+Field ini **hanya ada kalau ada masalah**, dan isinya pesan siap tampil:
+
+```json
+{
+  "embedding_mismatch": "Koleksi 'chunks' diindeks dengan 'sentence-transformers:model-a', sedangkan yang aktif sekarang 'sentence-transformers:model-b'. Vektor dari model berbeda tidak bisa dibandingkan, jadi hasil pencarian akan ngawur. Jalankan `python -m scripts.reindex`, atau kembalikan EMBEDDING_MODEL ke nilai sebelumnya lalu unggah ulang dokumen."
+}
+```
+
+Kapan muncul: saat model embedding yang dipakai saat indexing berbeda dari
+yang aktif sekarang. Ini terjadi kalau `EMBEDDING_MODEL` diganti, atau kalau
+`USE_LOCAL_EMBEDDING` diubah.
+
+Kenapa penting: vektor dari model berbeda tidak bisa dibandingkan, dan
+Chroma tidak tahu itu. Retrieval tetap berjalan tanpa error, tapi jawabannya
+ngawur atau selalu "tidak ditemukan". Tanpa field ini, satu-satunya petunjuk
+ada di log server, dan gejalanya mudah disalahartikan sebagai "dokumennya
+aneh".
+
+`status` ikut menjadi `degraded` saat field ini ada. Frontend menampilkannya
+di header dengan gaya bahaya, bukan peringatan biasa, karena akibatnya lebih
+serius daripada mode terbatas.
 
 **Isinya sengaja terbatas.** Endpoint ini publik, dipanggil healthcheck dan
 halaman login sebelum sesi ada. Yang dikirim hanya yang benar-benar dipakai

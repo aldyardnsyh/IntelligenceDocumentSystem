@@ -431,6 +431,9 @@ Yang sudah ditangani, dan alasannya:
 | Prompt injection | Isi dokumen diberi penanda batas, dan prompt sistem menyatakan bahwa konteks adalah data, bukan instruksi |
 | PDF berbahaya | Batas 10 MB, batas 3000 halaman, dan batas waktu 120 detik per dokumen |
 | Ukuran unggahan | Dibatasi tiga lapis: 16 MB di Caddy, `Content-Length` di route, lalu pembacaan bertahap |
+| Kuota penyimpanan | Maksimal 200 dokumen dan 1 GB total. Ditolak dengan 507 dan pesan yang menyebut tindakannya |
+| Kuota permintaan | Dikunci ke identitas stabil (hash passcode), bukan token sesi, supaya login ulang tidak mereset kuota |
+| Indeks tidak cocok | Model embedding dicatat saat indexing. Kalau berbeda saat start, status `degraded` dan pesannya menyebut perintah perbaikan |
 | Open redirect | `?next=` divalidasi dengan daftar karakter yang diizinkan, lalu dicek lagi hasil resolusi URL-nya |
 | Clickjacking | `X-Frame-Options: SAMEORIGIN` dan `frame-ancestors 'self'`. SAMEORIGIN, bukan DENY, karena pratinjau PDF memakai iframe same-origin |
 | Dokumentasi API | `/docs`, `/redoc`, dan `/openapi.json` mati secara default, dinyalakan bersama lewat `API_DOCS_ENABLED=1` |
@@ -481,6 +484,9 @@ Sebelum menaruh aplikasi ini di internet, periksa daftar berikut:
 | Scope dokumen disimpan di sesi | Sesi yang dibuka ulang mencari di tempat yang sama tanpa perlu diingat frontend |
 | Ambang dinilai pada bukti mentah, bukan skor gabungan | Skor gabungan selalu punya nilai tertinggi 1.0, sehingga ambang tidak akan pernah menolak apa pun |
 | Proxy same-origin, bukan CORS | Cookie login hilang kalau browser dan backend berada di origin berbeda |
+| Reranking mati secara default | Mengukur dulu sebelum menyalakan: ketepatan posisi pertama naik 4/11 ke 7/11, tapi menambah 80 MB model dan latensi. Dipakai kalau kualitas lebih penting daripada kecepatan |
+| Heading digabung dengan paragraf berikutnya | Chunk yang isinya hanya judul tidak bisa menjawab apa pun, dan paragraf di bawahnya kehilangan konteks |
+| Kunci kuota dari hash passcode, bukan token | Token berganti setiap login, jadi bucket ikut baru dan kuota bisa direset dengan login ulang |
 
 Alasan lengkap setiap keputusan ditulis di komentar kode, tepat di tempat
 keputusan itu dipakai.
