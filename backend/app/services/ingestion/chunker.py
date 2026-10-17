@@ -193,10 +193,58 @@ def chunk_text(
         return []
 
     spans: list[TextSpan] = []
-    for paragraph, start in _paragraphs(normalized):
+    paragraf = list(_paragraphs(normalized))
+
+    indeks = 0
+    while indeks < len(paragraf):
+        paragraph, start = paragraf[indeks]
         if _HEADING_RE.match(paragraph):
-            # Heading selalu jadi awal chunk sendiri supaya konteksnya utuh
-            # dan tidak menempel ke paragraf sebelumnya.
+            # Heading digabung dengan paragraf berikutnya, BUKAN jadi chunk
+            # sendiri.
+            #
+            # Versi sebelumnya menjadikan heading chunk terpisah, dan itu
+            # menimbulkan dua masalah sekaligus: chunk heading tidak berisi
+            # apa pun yang bisa dijawab (hanya judul), dan paragraf di
+            # bawahnya kehilangan konteksnya. Akibatnya pertanyaan seperti
+            # "bagaimana cara mengajukan permintaan informasi" berskor di
+            # bawah ambang karena chunk "5.1 Cara Mengajukan" tidak memuat
+            # isi klausulnya, padahal jawabannya ada di sana.
+            #
+            # Offset tetap dipertahankan: heading dan paragraf berikutnya
+            # berurutan di dokumen, jadi satu rentang dari awal heading
+            # sampai akhir paragraf berikutnya adalah potongan bersambung.
+            # Sitasi masih bisa menyorot teks yang tepat.
+            if indeks + 1 < len(paragraf):
+                berikut, _ = paragraf[indeks + 1]
+                gabungan = f"{paragraph}\n\n{berikut}"
+                akhir = start + len(gabungan)
+                if len(gabungan) <= size:
+                    spans.append(
+                        TextSpan(
+                            content=gabungan,
+                            char_start=start,
+                            char_end=akhir,
+                            page_number=page_number,
+                        )
+                    )
+                    indeks += 2
+                    continue
+                # Terlalu panjang untuk satu chunk: heading tetap membuka
+                # chunk pertama, lalu paragrafnya dipecah seperti biasa.
+                for span in _split_long_paragraph(gabungan, start, size, overlap):
+                    spans.append(
+                        TextSpan(
+                            content=span.content,
+                            char_start=span.char_start,
+                            char_end=span.char_end,
+                            page_number=page_number,
+                        )
+                    )
+                indeks += 2
+                continue
+
+            # Heading di akhir dokumen tanpa paragraf setelahnya. Tetap
+            # disimpan supaya isinya tidak hilang dari indeks.
             spans.append(
                 TextSpan(
                     content=paragraph,
@@ -205,7 +253,9 @@ def chunk_text(
                     page_number=page_number,
                 )
             )
+            indeks += 1
             continue
+
         for span in _split_long_paragraph(paragraph, start, size, overlap):
             spans.append(
                 TextSpan(
@@ -215,5 +265,6 @@ def chunk_text(
                     page_number=page_number,
                 )
             )
+        indeks += 1
 
     return spans

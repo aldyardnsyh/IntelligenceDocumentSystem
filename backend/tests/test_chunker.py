@@ -42,10 +42,70 @@ class TestChunkText:
         for chunk in chunks:
             assert chunk.content.strip()
 
-    def test_heading_markdown_jadi_chunk_tersendiri(self) -> None:
+    def test_heading_di_akhir_dokumen_tetap_disimpan(self) -> None:
+        """Heading tanpa paragraf setelahnya tidak boleh hilang dari indeks."""
         text = "Paragraf pembuka yang cukup panjang untuk diuji. " * 10 + "\n\n## Judul Bagian"
         chunks = chunk_text(text, 500, 50)
         assert any(chunk.content.startswith("## ") for chunk in chunks)
+
+    def test_heading_digabung_dengan_paragraf_berikutnya(self) -> None:
+        """Heading dan isinya harus berada di chunk yang sama.
+
+        Versi sebelumnya menjadikan heading chunk terpisah, sehingga chunk
+        heading tidak berisi apa pun yang bisa dijawab dan paragraf di
+        bawahnya kehilangan konteks. Akibatnya pertanyaan tentang isi klausul
+        berskor di bawah ambang, padahal jawabannya ada di sana.
+        """
+        text = (
+            "## 5.1 Cara Mengajukan\n\n"
+            "Pemohon menyerahkan formulir ke loket layanan pada hari kerja."
+        )
+        chunks = chunk_text(text, 500, 50)
+
+        assert len(chunks) == 1, "heading dan isinya harus satu chunk"
+        assert chunks[0].content.startswith("## 5.1 Cara Mengajukan")
+        assert "formulir" in chunks[0].content
+
+    def test_heading_tidak_jadi_chunk_kosong(self) -> None:
+        """Tidak boleh ada chunk yang isinya hanya heading."""
+        text = (
+            "## Bagian Satu\n\n"
+            "Isi bagian satu yang menjelaskan sesuatu dengan cukup panjang.\n\n"
+            "## Bagian Dua\n\n"
+            "Isi bagian dua juga menjelaskan hal lain."
+        )
+        chunks = chunk_text(text, 500, 50)
+
+        for chunk in chunks:
+            assert "\n\n" in chunk.content, (
+                f"chunk hanya berisi heading: {chunk.content!r}"
+            )
+
+    def test_gabungan_heading_tetap_dalam_batas_ukuran(self) -> None:
+        """Menggabungkan heading tidak boleh melewati batas chunk."""
+        text = "## Judul\n\n" + "Kalimat isi yang cukup panjang. " * 40
+        chunks = chunk_text(text, 500, 50)
+
+        assert all(len(chunk.content) <= 500 for chunk in chunks)
+
+    def test_heading_panjang_tetap_membuka_chunk_pertama(self) -> None:
+        """Kalau gabungan terlalu panjang, heading tetap di awal chunk."""
+        text = "## Judul\n\n" + "Kalimat isi yang cukup panjang. " * 60
+        chunks = chunk_text(text, 300, 30)
+
+        assert len(chunks) > 1
+        assert chunks[0].content.startswith("## Judul")
+
+    def test_offset_gabungan_tetap_konsisten(self) -> None:
+        """Offset harus tetap menunjuk teks yang benar setelah digabung.
+
+        Ini yang menjaga Citation Card menyorot potongan yang tepat.
+        """
+        text = "## Judul\n\nIsi paragraf setelah judul."
+        chunks = chunk_text(text, 500, 50)
+
+        for chunk in chunks:
+            assert text[chunk.char_start : chunk.char_end] == chunk.content
 
     def test_overlap_membawa_ekor_ke_chunk_berikutnya(self) -> None:
         text = "Kalimat pertama yang panjang sekali. " * 20
