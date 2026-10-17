@@ -1461,3 +1461,62 @@ async def _wait_ready(client: AsyncClient, document_id: str, attempts: int = 20)
         if status_value in ("ready", "failed"):
             return
         await asyncio.sleep(0.1)
+
+
+class TestKuotaTidakBisaDiresetDenganLoginUlang:
+    """Rate limit harus bertahan lintas login.
+
+    Kunci bucket dulu memakai token sesi. Token berubah setiap login, jadi
+    bucket ikut baru, dan kuota Groq bisa dipakai tanpa batas hanya dengan
+    logout lalu masuk lagi.
+
+    Yang diuji di sini adalah pemisahan dua identitas itu: token untuk
+    kepemilikan sesi, dan kunci stabil untuk rate limit. Keduanya harus
+    berbeda, dan kunci stabil tidak boleh bergantung pada token.
+    """
+
+    async def test_kunci_rate_limit_bukan_token(self, api_app) -> None:
+        transport = ASGITransport(app=api_app)
+        async with AsyncClient(transport=transport, base_url="http://testserver") as http:
+            login = await http.post(
+                "/api/v1/auth/verify", json={"passcode": TEST_PASSCODE}
+            )
+            assert login.status_code == 200
+            token = http.cookies.get("ida_session")
+            assert token, "login harus menerbitkan cookie sesi"
+
+        from app.dependencies import get_app_settings
+
+        identitas = get_app_settings().rate_limit_identity()
+        assert identitas != token, "identitas rate limit tidak boleh token sesi"
+        assert token not in identitas, "token tidak boleh jadi bagian kunci kuota"
+
+    async def test_dua_token_berbeda_punya_kunci_rate_limit_sama(
+        self, api_app
+    ) -> None:
+        """Login dua kali menghasilkan token berbeda, kunci kuota sama."""
+        transport = ASGITransport(app=api_app)
+
+        async with AsyncClient(transport=transport, base_url="http://testserver") as http:
+            pertama = await http.post(
+                "/api/v1/auth/verify", json={"passcode": TEST_PASSCODE}
+            )
+            token_pertama = http.cookies.get("ida_session")
+            assert pertama.status_code == 200
+
+            kedua = await http.post(
+                "/api/v1/auth/verify", json={"passcode": TEST_PASSCODE}
+            )
+            token_kedua = http.cookies.get("ida_session")
+            assert kedua.status_code == 200
+
+        assert token_pertama != token_kedua, (
+            "login ulang harus memberi token baru; kalau tidak, test ini "
+            "tidak membuktikan apa pun"
+        )
+
+        from app.dependencies import get_app_settings
+
+        identitas = get_app_settings().rate_limit_identity()
+        assert token_pertama not in identitas
+        assert token_kedua not in identitas

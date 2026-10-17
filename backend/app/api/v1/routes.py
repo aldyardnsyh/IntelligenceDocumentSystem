@@ -32,7 +32,6 @@ from app.core.config import Settings
 from app.core.security import (
     SESSION_COOKIE_NAME,
     SlidingWindowLimiter,
-    owner_of_token,
     verify_passcode,
 )
 from app.dependencies import (
@@ -118,7 +117,6 @@ async def require_session(request: Request, config: SettingsDep) -> None:
     JavaScript. Frontend juga menyimpan gate-nya sendiri; cookie ini adalah
     lapisan kedua di sisi API.
     """
-    del config  # Dependency hanya untuk memicu inisialisasi service.
     token = request.cookies.get(SESSION_COOKIE_NAME)
     if not token or not request.app.state.session_store.is_valid(token):
         raise HTTPException(
@@ -126,9 +124,24 @@ async def require_session(request: Request, config: SettingsDep) -> None:
             detail="Sesi berakhir. Masuk kembali dengan passcode.",
         )
     # Identitas pemilik disimpan di state request. Handler memakainya untuk
-    # rate limit dan pengecekan kepemilikan sesi, sehingga tidak ada satu pun
-    # endpoint yang pakai nilai yang dikirim klien sebagai identitas.
+    # pengecekan kepemilikan sesi, sehingga tidak ada satu pun endpoint yang
+    # pakai nilai yang dikirim klien sebagai identitas.
+    #
+    # Yang disimpan adalah token, bukan identitas stabil, karena pengecekan
+    # kepemilikan perlu tahu apakah token ini masih hidup. Untuk rate limit
+    # dipakai ``request.state.rate_key``, lihat di bawah.
     request.state.auth_owner = token
+    # Kunci rate limit yang bertahan lintas login.
+    #
+    # Kalau bucket di-key dari token, logout lalu login lagi menghasilkan
+    # token baru, jadi bucket baru, dan kuota bisa dilewati hanya dengan
+    # login ulang. Untuk aplikasi satu-passcode, semua sesi sah berasal dari
+    # passcode yang sama, sehingga hash passcode adalah identitas yang stabil
+    # tanpa perlu tabel pengguna.
+    #
+    # Nilainya hash, bukan passcode, supaya kunci ini aman kalau ikut
+    # tercatat di log atau di store.
+    request.state.rate_key = config.rate_limit_identity()
 
 
 def client_ip(request: Request, config: Settings) -> str:
@@ -582,14 +595,21 @@ async def chat_query(
 ) -> StreamingResponse:
     """Tanya pertanyaan, jawaban di-stream sebagai SSE.
 
-    Rate limit melindungi kuota free tier. Kunci bucket diambil dari identitas
-    akses yang sudah diverifikasi, bukan dari ``session_id`` di body: kalau
-    kuncinya dari klien, setiap request dengan id acak mendapat bucket baru
-    dan kuota tidak pernah tercapai. Sesi baru dari pengguna berbeda juga
-    tidak lagi berbagi satu bucket bersama.
+    Rate limit melindungi kuota free tier. Kunci bucket diambil dari
+    identitas yang sudah diverifikasi, bukan dari ``session_id`` di body:
+    kalau kuncinya dari klien, setiap request dengan id acak mendapat bucket
+    baru dan kuota tidak pernah tercapai.
+
+    Yang dipakai adalah ``rate_key``, yaitu identitas stabil lintas login,
+    bukan token sesi. Versi sebelumnya memakai token, dan itu bisa dilewati:
+    logout lalu login lagi menghasilkan token baru, jadi bucket baru, dan
+    kuota kembali penuh tanpa menunggu jendela waktu habis.
     """
+    rate_key: str = request.state.rate_key
+    # Token tetap dipakai untuk kepemilikan sesi, karena store perlu tahu
+    # apakah klaim atas sesi ini masih hidup.
     owner: str = request.state.auth_owner
-    allowed, retry_after = await limiter.check(f"chat:{owner_of_token(owner)}")
+    allowed, retry_after = await limiter.check(f"chat:{rate_key}")
     if not allowed:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -1115,13 +1135,38 @@ async def health(
     # ikut menentukan `mode`, jadi operator tetap bisa melihatnya dari luar.
     embedding_is_fallback = getattr(ingestion.embedding, "name", "") == "hashing-fallback"
 
+    # Indeks lama yang dibangun dengan model lain tidak bisa dipakai. Retrieval
+    # tetap berjalan, tapi hasilnya ngawur, jadi statusnya harus terlihat
+    # degraded, bukan ok.
+    signature_mismatch = getattr(ingestion.store, "signature_mismatch", None)
+
     components_ok = (
         llm_status == "ok"
         and memory_ok
         and repository_ok
         and vector_ok
         and not embedding_is_fallback
+        and not signature_mismatch
     )
+
+    fallback: dict[str, str | bool] = {
+        "vector_store": ingestion.store.name,
+        "vector_store_persistent": ingestion.store.persistent,
+        "mode": (
+            "full"
+            if components_ok and ingestion.store.persistent and not llm_is_mock
+            else "reduced"
+        ),
+        # Penanda proses ini. Berubah setiap kali backend dijalankan ulang.
+        # Frontend memakainya untuk membuang state browser yang tersisa
+        # dari proses sebelumnya: sesi akses dan riwayat percakapan hidup
+        # di memori, jadi setelah restart semuanya sudah tidak berlaku.
+        "boot_id": getattr(request.app.state, "boot_id", ""),
+    }
+    if signature_mismatch:
+        # Pesannya menyebut perintah yang harus dijalankan, karena tanpa itu
+        # operator hanya tahu ada yang salah tanpa tahu harus apa.
+        fallback["embedding_mismatch"] = signature_mismatch
 
     return HealthResponse(
         # Store in-memory memang tidak persisten, dan itu dilaporkan lewat
@@ -1142,26 +1187,14 @@ async def health(
         # - `mode` dan `vector_store_persistent` untuk peringatan "mode
         #   terbatas" di header.
         # - `boot_id` untuk mendeteksi backend yang dijalankan ulang.
+        # - `embedding_mismatch`, hanya saat ada, berisi instruksi perbaikan.
         #
         # Yang TIDAK dikirim: nama repository, nama memory store, nama
         # provider LLM, dan nama model embedding. Sebelumnya semuanya ikut,
         # dan itu memberi penyerang peta komponen internal tanpa satu pun
         # dipakai UI. Informasi itu tetap ada di log server saat startup,
         # tempat yang memang hanya bisa dibaca operator.
-        fallback={
-            "vector_store": ingestion.store.name,
-            "vector_store_persistent": ingestion.store.persistent,
-            "mode": (
-                "full"
-                if components_ok and ingestion.store.persistent and not llm_is_mock
-                else "reduced"
-            ),
-            # Penanda proses ini. Berubah setiap kali backend dijalankan ulang.
-            # Frontend memakainya untuk membuang state browser yang tersisa
-            # dari proses sebelumnya: sesi akses dan riwayat percakapan hidup
-            # di memori, jadi setelah restart semuanya sudah tidak berlaku.
-            "boot_id": getattr(request.app.state, "boot_id", ""),
-        },
+        fallback=fallback,
     )
 
 

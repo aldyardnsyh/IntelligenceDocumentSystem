@@ -278,6 +278,28 @@ class Settings(BaseSettings):
         """True kalau tidak ada Redis/Upstash, lalu pakai dict in-process."""
         return not (self.redis_url or self.upstash_redis_url)
 
+    def rate_limit_identity(self) -> str:
+        """Identitas stabil untuk kunci rate limit.
+
+        Kenapa bukan token sesi: token berubah setiap kali pengguna login
+        ulang, sehingga bucket ikut baru dan kuota bisa dilewati hanya
+        dengan logout lalu masuk lagi.
+
+        Kenapa hash passcode: aplikasi ini memakai satu passcode, jadi semua
+        sesi sah berasal dari kredensial yang sama. Hash-nya stabil lintas
+        login, dan karena yang dipakai hash, nilainya aman kalau ikut
+        tercatat di log atau di store.
+
+        Kalau nanti ada multi-pengguna, fungsi ini yang diganti: kembalikan
+        id pengguna, bukan hash passcode.
+        """
+        if not self.access_passcode_sha256:
+            # Tidak mungkin terjadi pada request yang lolos ``require_session``,
+            # karena tanpa passcode tidak ada sesi yang bisa diterbitkan.
+            # Nilai cadangan ini menjaga fungsi tetap deterministik.
+            return "tanpa-passcode"
+        return self.access_passcode_sha256
+
     @property
     def effective_fallback_chain(self) -> list[str]:
         """Rantai provider yang benar-benar akan dicoba.
