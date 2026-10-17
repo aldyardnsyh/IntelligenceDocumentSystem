@@ -21,7 +21,18 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: ida-backend:latest
+    # Nama image bisa diganti lewat environment variable, supaya `docker
+    # compose pull` bisa mengambil hasil build dari CI alih-alih membangun
+    # ulang di server.
+    #
+    # Default-nya nama lokal, jadi `docker compose up -d --build` tetap
+    # bekerja seperti biasa tanpa menyentuh registry. Di server, isi
+    # IDA_API_IMAGE dengan alamat image di ghcr.io, lalu:
+    #
+    #   docker compose pull && docker compose up -d
+    #
+    # Lihat backend/README.md bagian "Deploy memakai image dari CI".
+    image: ${IDA_API_IMAGE:-ida-backend:latest}
     restart: unless-stopped
     env_file:
       - .env
@@ -94,7 +105,8 @@ services:
         NEXT_PUBLIC_REPO_URL: "${NEXT_PUBLIC_REPO_URL:-}"
         NEXT_PUBLIC_API_DOCS_URL: "${NEXT_PUBLIC_API_DOCS_URL:-}"
         NEXT_PUBLIC_LANGFUSE_URL: "${NEXT_PUBLIC_LANGFUSE_URL:-}"
-    image: ida-frontend:latest
+    # Sama seperti backend: bisa diarahkan ke image dari registry.
+    image: ${IDA_WEB_IMAGE:-ida-frontend:latest}
     restart: unless-stopped
     environment:
       # Next.js standalone membaca PORT sendiri dari image; menyetelnya di sini

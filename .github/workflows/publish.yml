@@ -1,0 +1,135 @@
+# Membangun image Docker dan mengirimnya ke GitHub Container Registry.
+#
+# Kenapa ini terpisah dari CI: CI memeriksa kode, job ini menghasilkan
+# artefak. Kalau digabung, satu kegagalan pada build image akan membuat
+# hasil pemeriksaan kode ikut terlihat gagal, padahal kodenya lulus.
+#
+# Manfaatnya untuk VPS: build torch dan Next.js terjadi di mesin GitHub
+# yang lebih kuat, bukan di VPS 2 GB. Deploy jadi:
+#
+#     docker compose pull && docker compose up -d
+#
+# sekitar satu sampai dua menit, bukan lima belas.
+#
+# Kapan berjalan:
+# - Setiap push ke master, tapi HANYA kalau CI lulus. Tujuannya supaya
+#   image yang rusak tidak pernah sampai ke registry.
+# - Manual lewat tab Actions, untuk membangun ulang tanpa mengubah kode.
+
+name: Publish image
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  # Nama image mengikuti nama repo, dihuruf-kecilkan karena ghcr
+  # mewajibkan huruf kecil.
+  IMAGE_API: ${{ github.repository }}-api
+  IMAGE_WEB: ${{ github.repository }}-web
+
+jobs:
+  publish:
+    name: Build dan push
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    # Hanya lanjut kalau CI berhasil, atau kalau dijalankan manual.
+    # `workflow_run` sendiri tidak bisa memakai `if` di level `on`, jadi
+    # pemeriksaannya di sini.
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Nama repo di GitHub bisa memuat huruf besar, sedangkan ghcr
+      # menolaknya. Diubah di satu tempat supaya tidak diulang di setiap
+      # langkah.
+      - name: Siapkan nama image
+        id: nama
+        run: |
+          repo=$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
+          echo "api=${REGISTRY}/${repo}-api" >> "$GITHUB_OUTPUT"
+          echo "web=${REGISTRY}/${repo}-web" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Masuk ke registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # --- backend
+      - name: Build dan push backend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          # Hanya amd64. VPS Tencent dan EC2 yang dipakai berdua amd64, dan
+          # build multi-arsitektur butuh emulasi yang memperlambat dua kali.
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.nama.outputs.api }}:latest
+            ${{ steps.nama.outputs.api }}:${{ github.sha }}
+          # Cache disimpan di registry, jadi build berikutnya tidak
+          # mengunduh torch dari awal.
+          cache-from: type=registry,ref=${{ steps.nama.outputs.api }}:buildcache
+          cache-to: type=registry,ref=${{ steps.nama.outputs.api }}:buildcache,mode=max
+
+      # --- frontend
+      - name: Build dan push frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          platforms: linux/amd64
+          push: true
+          # Build-argumen ini harus sama dengan yang ada di
+          # docker-compose.yml. `NEXT_PUBLIC_*` di-inline saat build, jadi
+          # nilai yang salah di sini menghasilkan frontend yang memanggil
+          # alamat yang salah, dan gejalanya baru muncul di browser.
+          build-args: |
+            BACKEND_ORIGIN=http://api:8000
+            NEXT_PUBLIC_USE_BACKEND=1
+            NEXT_PUBLIC_API_BASE_URL=
+          tags: |
+            ${{ steps.nama.outputs.web }}:latest
+            ${{ steps.nama.outputs.web }}:${{ github.sha }}
+          cache-from: type=registry,ref=${{ steps.nama.outputs.web }}:buildcache
+          cache-to: type=registry,ref=${{ steps.nama.outputs.web }}:buildcache,mode=max
+
+      - name: Ringkasan
+        run: |
+          {
+            echo "### Image siap dipakai"
+            echo
+            echo "| Komponen | Tag |"
+            echo "|---|---|"
+            echo "| Backend | \`${{ steps.nama.outputs.api }}:${{ github.sha }}\` |"
+            echo "| Frontend | \`${{ steps.nama.outputs.web }}:${{ github.sha }}\` |"
+            echo
+            echo "Di VPS, jalankan:"
+            echo
+            echo '```bash'
+            echo "cd /opt/ida/backend"
+            echo "docker compose pull"
+            echo "docker compose up -d"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

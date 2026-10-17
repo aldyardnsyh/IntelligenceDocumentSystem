@@ -456,6 +456,103 @@ docker compose up -d --force-recreate api
 
 ---
 
+## CI dan CD
+
+Dua workflow, dengan pembagian tugas yang sengaja dipisah supaya kegagalan
+satu tidak mengaburkan yang lain.
+
+### `ci.yml`: memeriksa kode
+
+Berjalan pada setiap push ke `master` dan setiap pull request. Isinya:
+
+| Job | Langkah | Yang dicek |
+|---|---|---|
+| Backend | `ruff check` | Gaya kode dan kesalahan statis |
+| Backend | `pytest` | 434 test, dengan gerbang coverage 70% |
+| Frontend | `next typegen` | Tipe route `PageProps` dan `LayoutProps` |
+| Frontend | `tsc --noEmit` | Tipe TypeScript |
+| Frontend | `eslint` | Aturan lint Next.js |
+| Frontend | `next build` | Build produksi benar-benar berhasil |
+
+Yang **tidak** dijalankan, dan itu disengaja: tidak ada torch, tidak ada
+unduhan model 470 MB, tidak ada panggilan ke Groq, dan tidak ada koneksi
+keluar. Test memakai stub embedding, provider mock, dan `httpx.MockTransport`,
+jadi hasilnya cepat dan tidak bergantung pada layanan luar.
+
+Kalau job ini merah, jangan merge. Ada yang rusak.
+
+### `publish.yml`: membangun image
+
+Berjalan **hanya kalau CI lulus**, atau kalau dijalankan manual dari tab
+Actions. Tugasnya satu: membangun image backend dan frontend, lalu
+mengirimnya ke GitHub Container Registry.
+
+Manfaatnya: build torch dan Next.js terjadi di mesin GitHub, bukan di VPS
+2 GB. Deploy jadi satu sampai dua menit, bukan lima belas.
+
+Image yang dihasilkan diberi dua tag:
+
+- `:latest` untuk pemakaian biasa
+- `:<commit-sha>` untuk rollback ke versi tertentu
+
+### Deploy memakai image dari CI
+
+Tambahkan dua baris ini ke `backend/.env`:
+
+```ini
+IDA_API_IMAGE=ghcr.io/aldyardnsyh/intelligencedocumentsystem-api:latest
+IDA_WEB_IMAGE=ghcr.io/aldyardnsyh/intelligencedocumentsystem-web:latest
+```
+
+Lalu di server:
+
+```bash
+cd /opt/ida/backend
+docker compose pull
+docker compose up -d
+```
+
+Tanpa dua baris itu, `docker compose` kembali memakai image lokal dan
+`--build` bekerja seperti biasa. Jadi memakai registry bersifat pilihan,
+bukan keharusan.
+
+> Kalau registry-nya privat, jalankan `docker login ghcr.io` sekali di
+> server memakai Personal Access Token dengan scope `read:packages`. Untuk
+> repo publik, image-nya juga publik dan langkah ini tidak perlu.
+
+### Rollback
+
+Karena setiap build diberi tag commit, kembali ke versi sebelumnya tidak
+perlu membangun ulang:
+
+```bash
+cd /opt/ida/backend
+sed -i 's|:latest|:<commit-sha-lama>|' .env
+docker compose pull && docker compose up -d
+```
+
+### Kalau workflow gagal
+
+Penyebab yang paling sering, dan cara memeriksanya:
+
+| Gejala di log | Penyebab | Solusi |
+|---|---|---|
+| `Cannot find name 'PageProps'` | `next typegen` dilewati | Workflow sudah menjalankannya. Kalau diubah, jangan hapus langkah itu |
+| `npm ci` gagal dengan `ERESOLVE` | Flag `--legacy-peer-deps` hilang | Flag itu wajib, sama seperti di Dockerfile |
+| `ModuleNotFoundError: reportlab` | Dependency test tidak terpasang | Pastikan `reportlab` ada di daftar pip di workflow |
+| `denied: permission_denied` saat push | `permissions: packages: write` hilang | Kembalikan blok permission di `publish.yml` |
+| `coverage ... not reached` | Coverage turun di bawah 70% | Tambah test, atau turunkan gerbangnya dengan sadar |
+
+Semua perintah di kedua workflow sudah dijalankan di environment bersih
+sebelum di-commit, jadi kesalahan sintaks dan dependency sudah tersaring.
+Yang tersisa biasanya soal izin atau konfigurasi repo.
+
+> Build image pertama kali di GitHub Actions memakan sekitar 10 sampai 15
+> menit karena mengunduh torch. Build berikutnya jauh lebih cepat karena
+> memakai cache registry.
+
+---
+
 ## Yang perlu dipelihara
 
 Hampir tidak ada. Yang perlu Anda ingat cuma satu:

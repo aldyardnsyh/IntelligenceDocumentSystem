@@ -1,0 +1,118 @@
+# Pemeriksaan wajib: dijalankan setiap push dan setiap pull request.
+#
+# Yang diperiksa di sini adalah hal yang bisa dicek tanpa server, tanpa
+# jaringan, dan tanpa API key. Semua dependensi berat ditiadakan dengan
+# sengaja supaya hasilnya cepat dan tidak bergantung pada layanan luar:
+#
+# - Embedding memakai stub hashing (USE_LOCAL_EMBEDDING=0), jadi torch dan
+#   model 470 MB tidak diunduh.
+# - LLM memakai provider mock, jadi tidak ada panggilan ke Groq.
+# - Test provider memakai httpx.MockTransport, jadi tidak ada koneksi keluar.
+#
+# Kalau salah satu pemeriksaan ini gagal, jangan merge. Itu artinya ada yang
+# rusak, dan lebih murah diperbaiki di sini daripada di server.
+
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  # Bisa dijalankan manual dari tab Actions kalau perlu memeriksa ulang
+  # tanpa mengubah kode.
+  workflow_dispatch:
+
+# Batalkan pemeriksaan lama kalau ada push baru ke branch yang sama.
+# Tanpa ini, push beruntun menumpuk dan menghabiskan waktu menunggu
+# hasil yang sudah tidak relevan.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend (ruff dan pytest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Pasang dependency
+        # torch sengaja tidak dipasang. Test memakai stub embedding, dan
+        # paket itu sendiri 200 MB lebih. Kalau nanti ada test yang benar
+        # benar membutuhkannya, pasang di sini dengan index CPU.
+        run: |
+          python -m pip install --upgrade pip
+          pip install fastapi "uvicorn[standard]" pydantic pydantic-settings \
+            python-multipart httpx numpy chromadb pypdf redis \
+            pytest pytest-asyncio pytest-cov ruff "reportlab>=4.0"
+
+      - name: Lint (ruff)
+        run: python -m ruff check app tests scripts
+
+      - name: Test (pytest)
+        # Environment sengaja tidak diisi dari .env. conftest.py menyiapkan
+        # semua variabel yang dibutuhkan, termasuk passcode uji, provider
+        # mock, dan stub embedding.
+        run: python -m pytest
+
+  frontend:
+    name: Frontend (typegen, tsc, eslint, build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Pasang dependency
+        # `--legacy-peer-deps` wajib, sama seperti di Dockerfile. Tanpa flag
+        # ini npm 10 menolak pohon dependensi yang sebenarnya valid, dan
+        # langkah ini gagal sebelum sempat memeriksa apa pun.
+        run: npm ci --legacy-peer-deps --no-audit --no-fund
+
+      - name: Generate tipe route Next.js
+        # WAJIB sebelum tsc. Next.js 16 menghasilkan tipe `PageProps` dan
+        # `LayoutProps` yang dipakai halaman, dan tipe itu belum ada di
+        # checkout bersih. Tanpa langkah ini, tsc gagal dengan
+        # "Cannot find name 'PageProps'".
+        run: npx next typegen
+
+      - name: Periksa tipe (tsc)
+        run: npx tsc --noEmit
+
+      - name: Lint (eslint)
+        run: npx eslint .
+
+      - name: Build
+        # Variabel di bawah adalah build-argumen yang sama dengan yang
+        # dipakai docker-compose.yml. `NEXT_PUBLIC_*` di-inline saat build,
+        # jadi nilainya harus ada di sini, bukan saat runtime.
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+          BACKEND_ORIGIN: http://api:8000
+          NEXT_PUBLIC_USE_BACKEND: "1"
+          NEXT_PUBLIC_API_BASE_URL: ""
+        run: npx next build

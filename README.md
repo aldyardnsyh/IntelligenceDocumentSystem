@@ -14,7 +14,9 @@
 [![Ollama](https://img.shields.io/badge/Ollama-fallback-000000?logo=ollama&logoColor=white)](https://ollama.com)
 
 <!-- Status kualitas. Angkanya berasal dari perintah di bagian verifikasi,
-     bukan klaim. -->
+     bukan klaim. Badge CI diambil langsung dari hasil GitHub Actions, jadi
+     kalau ada yang rusak, badge-nya merah. -->
+[![CI](https://github.com/aldyardnsyh/IntelligenceDocumentSystem/actions/workflows/ci.yml/badge.svg)](https://github.com/aldyardnsyh/IntelligenceDocumentSystem/actions/workflows/ci.yml)
 [![pytest](https://img.shields.io/badge/pytest-434_passed-0A9EDC?logo=pytest&logoColor=white)](#verifikasi-dan-pengujian)
 [![Playwright](https://img.shields.io/badge/Playwright-46_specs-2EAD33?logo=playwright&logoColor=white)](#verifikasi-dan-pengujian)
 [![coverage](https://img.shields.io/badge/coverage-83%25-4C1)](#verifikasi-dan-pengujian)
@@ -400,10 +402,13 @@ Angka di badge atas bukan klaim, tapi hasil perintah berikut:
 |---|---|---|
 | Test backend | `python -m pytest` | 434 test, coverage 83% |
 | Lint backend | `python -m ruff check app tests scripts` | Bersih |
-| Tipe dan lint frontend | `npx tsc --noEmit; npm run lint` | Bersih |
+| Tipe dan lint frontend | `npx next typegen; npx tsc --noEmit; npm run lint` | Bersih |
 | Build frontend | `npm run build` | Sukses |
 | Uji browser | `npx playwright test` | 46 skenario |
 | Uji ujung ke ujung | `python -m scripts.e2e_check` | 21 pemeriksaan |
+
+Empat baris pertama juga dijalankan otomatis oleh GitHub Actions pada
+setiap push, jadi angkanya tidak bisa basi tanpa badge CI ikut merah.
 
 Cara menjalankan semuanya ada di bagian
 [Verifikasi dan pengujian](#verifikasi-dan-pengujian).
