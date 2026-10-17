@@ -7,6 +7,16 @@ export const metadata: Metadata = {
   description: "Tanya dokumen Anda dan baca jawaban beserta sumbernya.",
 };
 
+/**
+ * Halaman ini membaca `searchParams` (`?doc=<id>`), jadi dirender per
+ * permintaan.
+ *
+ * Penanda ini menyatakan maksud kode, bukan tambalan untuk kegagalan build:
+ * halaman yang isinya bergantung pada `?doc=` tidak bisa dibekukan saat
+ * build, karena nilai itu belum ada pada waktu itu.
+ */
+export const dynamic = "force-dynamic";
+
 export default async function ChatPage({
   searchParams,
 }: {

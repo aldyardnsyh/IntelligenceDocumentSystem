@@ -16,8 +16,6 @@ contoh dan model asli.
 
 from __future__ import annotations
 
-import pytest
-
 from app.models.domain import Chunk, RetrievedChunk
 from app.services.retrieval.reranker import (
     NoopReranker,

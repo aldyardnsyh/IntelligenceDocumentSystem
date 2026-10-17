@@ -9,6 +9,15 @@ export const metadata: Metadata = {
   description: "Masukkan passcode untuk membuka workspace dokumen.",
 };
 
+/**
+ * Halaman ini membaca `searchParams`, jadi dirender per permintaan.
+ *
+ * Penanda ini menyatakan maksud kode, bukan tambalan untuk kegagalan build:
+ * halaman yang isinya bergantung pada `?next=` tidak bisa dibekukan saat
+ * build, karena nilai itu belum ada pada waktu itu.
+ */
+export const dynamic = "force-dynamic";
+
 export default async function LoginPage({
   searchParams,
 }: {
