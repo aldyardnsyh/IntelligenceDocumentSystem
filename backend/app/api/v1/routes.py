@@ -79,7 +79,7 @@ from app.services.evaluation import (
     load_dataset,
 )
 from app.services.ingestion.parser import ParseError, sanitize_filename, validate_extension
-from app.services.ingestion.service import IngestionService
+from app.services.ingestion.service import DocumentQuotaError, IngestionService
 from app.services.memory.rate_limit import RateLimiter
 from app.services.rag_service import RagService
 
@@ -351,7 +351,17 @@ async def upload_document(
         )
 
     data = await _read_limited(file, config.max_file_size_bytes)
-    document = await ingestion.register(filename, data)
+    try:
+        document = await ingestion.register(filename, data)
+    except DocumentQuotaError as exc:
+        # 507 Insufficient Storage: berkasnya sah, yang tidak cukup adalah
+        # ruang penyimpanan. Status berbeda dari 400 supaya klien bisa
+        # membedakan "berkas salah" dari "kuota habis", dan pesannya sudah
+        # menyebut tindakan yang harus diambil.
+        raise HTTPException(
+            status_code=status.HTTP_507_INSUFFICIENT_STORAGE,
+            detail=str(exc),
+        ) from exc
 
     # `register` sudah mem-parse berkas sebelum mengembalikan dokumen. Kalau
     # parsing gagal, jawabannya bukan "sedang diproses" melainkan "gagal":

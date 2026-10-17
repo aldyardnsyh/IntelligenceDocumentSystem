@@ -159,6 +159,25 @@ class Settings(BaseSettings):
     accepted_extensions: list[str] = Field(
         default_factory=lambda: [".pdf", ".txt", ".md", ".markdown"]
     )
+    """Batas jumlah dokumen yang bisa disimpan sekaligus.
+
+    Batas per berkas (10 MB) tidak menutup apa pun kalau jumlah berkasnya
+    tidak dibatasi. Satu pengguna bisa mengunggah ratusan berkas sampai disk
+    server penuh, dan itu terjadi setelah deployment, bukan saat
+    pengembangan.
+
+    200 dokumen terasa longgar untuk pemakaian nyata, dan cukup kecil untuk
+    tidak menghabiskan disk 20 GB. Naikkan kalau memang perlu; angkanya
+    sengaja di satu tempat supaya tidak tersebar.
+    """
+    max_documents: int = 200
+    """Batas total ukuran seluruh dokumen yang disimpan, dalam byte.
+
+    Batas jumlah saja belum cukup: 200 berkas berukuran 10 MB berarti 2 GB.
+    Batas ini menjaga pemakaian disk tetap terprediksi, termasuk untuk
+    berkas asli yang disimpan demi pratinjau PDF. Default 1 GB.
+    """
+    max_total_document_bytes: int = 1024 * 1024 * 1024
     """Berkas golden dataset untuk evaluasi retrieval dari UI.
 
     Dipakai endpoint ``POST /analytics/evaluate``. Path relatif dihitung dari

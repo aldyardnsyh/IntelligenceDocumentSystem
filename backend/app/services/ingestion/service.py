@@ -26,6 +26,16 @@ from app.services.storage import OriginalFileStore
 logger = logging.getLogger(__name__)
 
 
+class DocumentQuotaError(RuntimeError):
+    """Kuota dokumen habis, jadi unggahan ditolak.
+
+    Dipisah dari ``ParseError`` karena artinya berbeda: berkasnya sendiri
+    sah, yang tidak cukup adalah ruang penyimpanan. Pemanggil perlu bisa
+    membedakannya untuk memberi pesan yang tepat, dan pesannya harus menyebut
+    apa yang harus dilakukan (hapus dokumen lama), bukan hanya "gagal".
+    """
+
+
 class IngestionService:
     """Menjalankan pipeline ingestion lengkap."""
 
@@ -84,6 +94,49 @@ class IngestionService:
     def embedding(self) -> EmbeddingProvider:
         return self._embedding
 
+    def assert_quota_available(self, incoming_bytes: int = 0) -> None:
+        """Pastikan kuota masih cukup untuk satu berkas baru.
+
+        Diperiksa sebelum parsing, bukan sesudah, supaya berkas besar tidak
+        memakai waktu CPU lebih dulu hanya untuk ditolak di akhir.
+
+        Dua batas, karena satu batas tidak cukup:
+
+        - **Jumlah dokumen.** Tanpa ini, 10 MB per berkas tidak membatasi apa
+          pun kalau berkasnya boleh berapa saja.
+        - **Total byte.** Tanpa ini, 200 dokumen berukuran 10 MB berarti 2 GB,
+          dan disk 20 GB bisa penuh setelah deployment, bukan saat
+          pengembangan.
+
+        Yang dihitung adalah dokumen yang benar-benar tersimpan, termasuk yang
+        sedang diproses. Dokumen gagal tidak dihitung, karena berkasnya tidak
+        disimpan.
+
+        Raises:
+            DocumentQuotaError: Kalau salah satu batas akan terlampaui.
+            Pesannya menyebut angka dan tindakan yang bisa diambil.
+        """
+        documents = self._repository.list_documents()
+        jumlah = len(documents)
+
+        if jumlah >= self._settings.max_documents:
+            raise DocumentQuotaError(
+                f"Jumlah dokumen sudah mencapai batas {self._settings.max_documents}. "
+                "Hapus dokumen yang tidak dipakai lagi di halaman Dokumen, "
+                "lalu unggah ulang berkas ini."
+            )
+
+        terpakai = sum(document.size_bytes for document in documents)
+        batas = self._settings.max_total_document_bytes
+        if terpakai + incoming_bytes > batas:
+            raise DocumentQuotaError(
+                "Ruang penyimpanan dokumen hampir penuh "
+                f"({terpakai / (1024 * 1024):.0f} MB dari "
+                f"{batas / (1024 * 1024):.0f} MB terpakai). "
+                "Hapus dokumen yang tidak dipakai lagi di halaman Dokumen, "
+                "lalu unggah ulang berkas ini."
+            )
+
     async def register(self, filename: str, data: bytes) -> Document:
         """Daftarkan dokumen baru dengan status ``processing``.
 
@@ -97,7 +150,15 @@ class IngestionService:
         Parsing dan penulisan metadata tetap dijalankan di thread agar event
         loop tidak terblokir, tapi penjadwalan task dilakukan di sini, di atas
         loop.
+
+        Raises:
+            DocumentQuotaError: Kuota jumlah atau total ukuran habis.
         """
+        # Kuota diperiksa sebelum berkas diproses. Kalau diperiksa setelah
+        # parsing, berkas besar sudah memakai waktu CPU dan memori lebih dulu
+        # hanya untuk ditolak di akhir.
+        await asyncio.to_thread(self.assert_quota_available, len(data))
+
         document_id = new_id("doc")
 
         try:
