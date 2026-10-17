@@ -95,6 +95,7 @@ class MetadataRepository(Protocol):
     def list_logs(self, page: int, page_size: int) -> tuple[list[QueryLog], int]: ...
     def latency_by_day(self, days: int) -> list[dict[str, object]]: ...
     def tokens_by_day(self, days: int) -> list[dict[str, object]]: ...
+    def delete_logs_before(self, cutoff_iso: str) -> int: ...
 
     # eval
     def latest_eval(self) -> dict[str, object] | None: ...
@@ -450,6 +451,23 @@ class SqliteRepository:
                 (page_size, (page - 1) * page_size),
             ).fetchall()
         return [_row_to_log(row) for row in rows], int(total)
+
+    def delete_logs_before(self, cutoff_iso: str) -> int:
+        """Hapus log query yang lebih tua dari batas waktu. Kembalikan jumlahnya.
+
+        Tanpa pembersihan, tabel ini tumbuh terus dan dashboard mulai
+        memotong data lama secara diam-diam: angka latency dan token hanya
+        mencerminkan sebagian riwayat, tanpa tanda apa pun bahwa itu terjadi.
+
+        Perbandingan memakai string ISO 8601, yang urut secara leksikografis
+        untuk zona waktu yang sama. Semua waktu di proyek ini UTC, jadi
+        perbandingan string aman dan tidak butuh parsing tanggal.
+        """
+        with self._lock, self._connect() as connection:
+            cursor = connection.execute(
+                "DELETE FROM query_logs WHERE created_at < ?", (cutoff_iso,)
+            )
+            return int(cursor.rowcount or 0)
 
     def latency_by_day(self, days: int) -> list[dict[str, object]]:
         """Agregasi latensi per hari dari log yang benar-benar tercatat.

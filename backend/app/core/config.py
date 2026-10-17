@@ -153,6 +153,17 @@ class Settings(BaseSettings):
     """Rate limit query per sesi, untuk melindungi kuota free tier."""
     query_max_per_session: int = 20
     query_window_seconds: int = 60
+    """Berapa hari log query disimpan sebelum dibersihkan.
+
+    Tanpa ini, tabel ``query_logs`` tumbuh terus dan dashboard mulai
+    memotong data lama secara diam-diam: angka latency dan token hanya
+    mencerminkan sebagian riwayat, tanpa tanda apa pun bahwa itu terjadi.
+
+    Dibersihkan saat startup, bukan lewat cron, karena satu instance dengan
+    satu kali jalan per deploy sudah cukup untuk menjaga tabelnya wajar.
+    Set 0 untuk mematikan pembersihan dan menyimpan log selamanya.
+    """
+    query_log_retention_days: int = 90
 
     # ------------------------------------------------------------- documents
     max_file_size_bytes: int = 10 * 1024 * 1024

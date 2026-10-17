@@ -19,6 +19,7 @@ import time
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -88,6 +89,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "hanya menghasilkan riwayat yang tidak bisa dibuka.",
             purged,
         )
+
+    # Log query lama dibersihkan sesuai retensi. Tanpa ini, tabel tumbuh terus
+    # dan dashboard mulai memotong data lama secara diam-diam: angka latency
+    # dan token hanya mencerminkan sebagian riwayat tanpa tanda apa pun.
+    if settings.query_log_retention_days > 0:
+        cutoff = (
+            datetime.now(UTC) - timedelta(days=settings.query_log_retention_days)
+        ).isoformat()
+        dihapus = await asyncio.to_thread(
+            get_repository().delete_logs_before, cutoff
+        )
+        if dihapus:
+            logger.info(
+                "Log query lebih tua dari %d hari dibersihkan: %d baris.",
+                settings.query_log_retention_days,
+                dihapus,
+            )
 
     # Disimpan di state supaya shutdown bisa menunggu ingestion yang sedang
     # berjalan, bukan hanya service-nya yang dilepas.
