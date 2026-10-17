@@ -240,14 +240,44 @@ tahun dan sudah cukup.
 artinya `nama-anda.duckdns.org` dianggap domain sendiri oleh Let's Encrypt,
 jadi Caddy bisa menerbitkan sertifikat untuk itu tanpa biaya.
 
-1. Buka <https://www.duckdns.org>, masuk dengan akun Google atau GitHub.
-2. Buat subdomain, misalnya `ida-rag`. Hasilnya `ida-rag.duckdns.org`.
-3. Isi kolom `current ip` dengan IP publik server Anda, lalu **update**.
-4. Cek dari komputer sendiri: `nslookup ida-rag.duckdns.org` harus
-   menampilkan IP server.
+Langkahnya:
 
-Kalau IP server berubah (misalnya setelah stop lalu start di AWS), DuckDNS
-harus diperbarui manual. Itu kelemahan yang perlu diketahui.
+1. Buka <https://www.duckdns.org>, masuk dengan akun Google, GitHub, atau
+   Twitter. Tidak perlu membuat akun baru.
+2. Di kotak **sub domain**, ketik nama pilihan Anda, misalnya
+   `intelligencedocumentassistant`. Alamat akhirnya menjadi
+   `intelligencedocumentassistant.duckdns.org`. Hanya huruf kecil, angka,
+   dan tanda hubung.
+3. Klik **add domain**.
+4. Di baris domain yang baru muncul, isi kolom **current ip** dengan IP
+   publik server Anda, lalu klik **update ip**.
+5. Salin **token** di bagian atas halaman. Simpan, karena dipakai kalau
+   nanti perlu memperbarui IP tanpa membuka situsnya.
+6. Cek dari komputer sendiri:
+
+   ```bash
+   nslookup intelligencedocumentassistant.duckdns.org
+   ```
+
+   Harus menampilkan IP server Anda. Kalau belum, tunggu satu atau dua
+   menit, DNS butuh waktu menyebar.
+
+> Nama subdomain DuckDNS dibatasi satu label, jadi tidak bisa memakai titik
+> di dalamnya. `intelligencedocumentassistant` (29 karakter) termasuk
+> panjang tapi masih dalam batas satu label DNS, yaitu 63 karakter. Kalau
+> DuckDNS menolak nama itu, pakai bentuk yang lebih pendek seperti `ida-rag`
+> atau `ida-docs`.
+
+**Kalau IP server berubah**, DuckDNS harus diperbarui atau situs menjadi
+tidak bisa dibuka. Ini bisa dilakukan tanpa membuka situsnya:
+
+```bash
+# Ganti <token> dengan token dari halaman duckdns.org.
+curl -s "https://www.duckdns.org/update?domains=intelligencedocumentassistant&token=<token>&ip="
+```
+
+Jawaban `OK` berarti berhasil. Perintah yang sama bisa dimasukkan ke cron
+kalau Anda ingin memperbaruinya otomatis.
 
 ### 4. Siapkan server
 

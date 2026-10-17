@@ -266,10 +266,10 @@ if [ "$SKIP_CONFIG" -eq 0 ]; then
     # --- domain
     printf '\n'
     info "Domain yang menunjuk ke server ini."
-    info "Kalau belum punya domain, buat gratis di https://www.duckdns.org"
-    info "dan isi kolom 'current ip' dengan IP publik server ini."
+    info "Nama bebas, asalkan domainnya sudah mengarah ke IP publik server ini."
+    info "DuckDNS gratis di https://www.duckdns.org, isi kolom 'current ip'."
     while [ -z "$DOMAIN" ]; do
-        read -r -p "    Domain (contoh: ida-rag.duckdns.org): " DOMAIN
+        read -r -p "    Domain: " DOMAIN
         DOMAIN=$(printf '%s' "$DOMAIN" | tr -d '[:space:]' | sed 's|https\?://||; s|/$||')
         if ! printf '%s' "$DOMAIN" | grep -qE '^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$'; then
             warn "Format domain tidak valid: '${DOMAIN}'. Coba lagi."
@@ -455,3 +455,15 @@ printf '  %sYang tidak boleh dilakukan:%s\n' "$BOLD" "$RESET"
 printf '    Jangan hapus volume ida_ida-data, isinya seluruh dokumen Anda.\n'
 printf '    Jangan pakai docker system prune --volumes, flag itu menghapusnya.\n'
 printf '\n'
+# Kalau memakai DuckDNS, alamatnya bergantung pada IP yang tercatat di sana.
+# Kalau IP server berubah, situs mati sampai DuckDNS diperbarui.
+case "${DOMAIN:-}" in
+    *.duckdns.org)
+        SUBDOMAIN="${DOMAIN%%.duckdns.org}"
+        printf '  %sCatatan untuk DuckDNS:%s\n' "$BOLD" "$RESET"
+        printf '    Kalau IP server ini berubah, perbarui DuckDNS dengan:\n'
+        printf '    curl -s "https://www.duckdns.org/update?domains=%s&token=<token>&ip="\n' "$SUBDOMAIN"
+        printf '    Token ada di halaman utama duckdns.org setelah masuk.\n'
+        printf '\n'
+        ;;
+esac

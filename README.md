@@ -341,6 +341,11 @@ mengerjakan sisanya: swap, Docker, konfigurasi, build, dan verifikasi.
 Aman dijalankan ulang, dan konfigurasi yang sudah ada tidak ditimpa tanpa
 bertanya.
 
+Domain boleh nama apa saja, asalkan sudah mengarah ke IP server. Kalau belum
+punya, <https://www.duckdns.org> memberi subdomain gratis, misalnya
+`intelligencedocumentassistant.duckdns.org`. Cukup isi kolom `current ip`
+dengan IP server lalu klik **update ip**.
+
 Satu hal yang **harus** Anda lakukan sendiri di panel penyedia: **buka port
 80 dan 443 di firewall**. Skrip tidak bisa menutupnya karena firewall-nya
 ada di luar server, dan ini penyebab kegagalan yang paling sering.
@@ -351,7 +356,7 @@ ada di luar server, dan ini penyebab kegagalan yang paling sering.
 |---|---|
 | 1 | Siapkan server, Ubuntu 24.04 |
 | 2 | Buka firewall: hanya port 80 dan 443 |
-| 3 | Siapkan domain. Bisa domain sendiri, atau DuckDNS gratis |
+| 3 | Siapkan domain. Bisa domain sendiri, atau DuckDNS gratis. Nama bebas |
 | 4 | Swap (wajib kalau RAM 1 GB), pasang Docker, buat passcode, isi `.env` |
 | 5 | Ganti domain di `backend/Caddyfile` |
 | 6 | `docker compose up -d --build`, tunggu 5 sampai 15 menit |
