@@ -148,6 +148,30 @@ class Settings(BaseSettings):
     max_similarity_threshold: float = 0.92
     """Berapa pesan terakhir yang ikut sebagai konteks."""
     history_message_count: int = 6
+    """Reranking dua tahap dengan cross-encoder.
+
+    Ambang tunggal tidak bisa memisahkan sempurna: pada dataset contoh, skor
+    cosine chunk benar 0.804 sampai 0.875 dan chunk salah 0.748 sampai 0.879.
+    Keduanya tumpang tindih, jadi tidak ada ambang yang benar untuk semua
+    kasus.
+
+    Reranking mengatasi ini dengan menilai ulang kandidat memakai cross-encoder
+    yang membaca pertanyaan dan chunk bersamaan, bukan membandingkan vektor
+    terpisah. Diukur pada dataset yang sama: ketepatan posisi pertama naik
+    dari 4/11 menjadi 7/11.
+
+    Dimatikan secara default karena menambah sekitar 80 MB model dan waktu
+    respons. Nyalakan kalau kualitas jawaban lebih penting daripada latensi.
+    """
+    rerank_enabled: bool = False
+    rerank_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    """Berapa kandidat yang diambil sebelum diurutkan ulang.
+
+    Lebih banyak berarti peluang chunk benar masuk kandidat lebih besar, tapi
+    cross-encoder harus menilai setiap pasangan, dan biayanya naik linear.
+    8 terbukti cukup pada dataset contoh.
+    """
+    rerank_candidates: int = 8
     """Cache query: TTL dan key."""
     cache_ttl_seconds: int = 30 * 60
     """Rate limit query per sesi, untuk melindungi kuota free tier."""

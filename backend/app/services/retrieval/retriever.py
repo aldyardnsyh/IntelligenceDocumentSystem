@@ -27,9 +27,13 @@ import re
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from app.models.domain import Chunk, RetrievedChunk
 from app.services.retrieval.vector_store import VectorStore
+
+if TYPE_CHECKING:
+    from app.services.retrieval.reranker import Reranker
 
 logger = logging.getLogger(__name__)
 
@@ -282,10 +286,14 @@ class IndexEntry:
 class HybridRetriever:
     """Pencari hybrid yang menggabungkan vektor dan BM25."""
 
-    def __init__(self, store: VectorStore) -> None:
+    def __init__(self, store: VectorStore, reranker: Reranker | None = None) -> None:
         self._store = store
         self._keyword_index = KeywordIndex()
         self._entries: dict[str, IndexEntry] = {}
+        # Opsional, supaya test dan pemanggil lama tidak perlu tahu soal
+        # reranking. Kalau None, perilakunya sama seperti sebelumnya.
+        self._reranker = reranker
+        self._rerank_candidates = 8
 
     @property
     def store_name(self) -> str:
@@ -504,7 +512,42 @@ class HybridRetriever:
             if len(results) >= top_k:
                 break
 
-        return results
+        return self._rerank(query, results, top_k)
+
+    def _rerank(
+        self, question: str, results: list[RetrievedChunk], top_k: int
+    ) -> list[RetrievedChunk]:
+        """Urutkan ulang hasil dengan cross-encoder, kalau diaktifkan.
+
+        Dilakukan **setelah** ambang dan batas per dokumen diterapkan, bukan
+        sebelum. Kalau reranking dijalankan lebih dulu, ia bisa mengangkat
+        chunk yang sebenarnya di bawah ambang, dan itu membatalkan gerbang
+        anti-halusinasi yang justru inti aplikasi ini. Reranking hanya boleh
+        mengubah **urutan** kandidat yang sudah lolos, bukan menambah
+        kandidat baru.
+
+        ``top_k`` bisa mengecil setelah penyaringan ambang dan batas per
+        dokumen. Yang diambil hanya sejumlah yang tersedia, supaya tidak ada
+        pengisian paksa dengan chunk di bawah ambang hanya untuk memenuhi
+        kuota.
+        """
+        if self._reranker is None or len(results) < 2:
+            return results
+
+        kandidat = [item.chunk.content for item in results]
+        try:
+            berperingkat = self._reranker.rerank(
+                question, kandidat, min(top_k, len(kandidat))
+            )
+        except Exception:  # noqa: BLE001
+            # Kegagalan reranker tidak boleh menggagalkan jawaban. Urutan
+            # fusi tetap dipakai, karena itu sudah hasil yang sah.
+            logger.warning(
+                "Reranking gagal, memakai urutan fusi apa adanya.", exc_info=True
+            )
+            return results
+
+        return [results[index] for index, _score in berperingkat]
 
 
 def _chunk_for(

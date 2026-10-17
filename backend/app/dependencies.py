@@ -19,6 +19,7 @@ from app.services.ingestion.service import IngestionService
 from app.services.memory.rate_limit import RateLimiter
 from app.services.memory.store import MemoryStore, build_memory_store
 from app.services.rag_service import RagService
+from app.services.retrieval.reranker import build_reranker
 from app.services.retrieval.retriever import HybridRetriever
 from app.services.retrieval.vector_store import VectorStore, build_vector_store
 from app.services.tracing import Tracer
@@ -53,7 +54,12 @@ def init_services(app_settings: Settings | None = None) -> None:
 
     _memory = build_memory_store(_settings)
     _store = build_vector_store(_settings)
-    _retriever = HybridRetriever(_store)
+    # Reranking opsional. Kalau dimatikan, objeknya NoopReranker sehingga
+    # jalur kode di retriever tetap sama; kalau gagal dimuat, ia jatuh ke
+    # no-op dengan peringatan dan aplikasi tetap jalan.
+    reranker = build_reranker(_settings.rerank_enabled, _settings.rerank_model)
+    _retriever = HybridRetriever(_store, reranker)
+    _retriever._rerank_candidates = _settings.rerank_candidates  # noqa: SLF001
 
     embedding = build_embedding_provider(_settings)
     # Memory store diteruskan supaya penghapusan dokumen bisa ikut membersihkan
