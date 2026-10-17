@@ -37,6 +37,16 @@ export function SiteHeader() {
     && health.data
     && (health.data.status === "degraded" || health.data.fallback?.mode === "reduced");
 
+  /**
+   * Indeks dibangun dengan model embedding yang berbeda dari yang aktif.
+   *
+   * Ditampilkan lebih dulu daripada peringatan mode terbatas, karena
+   * akibatnya lebih serius: retrieval tetap berjalan tanpa error, tapi
+   * jawabannya ngawur. Tanpa penanda ini, satu-satunya petunjuk ada di log
+   * server, dan gejalanya mudah disalahartikan sebagai "dokumennya aneh".
+   */
+  const embeddingMismatch = !isMockMode ? health.data?.fallback?.embedding_mismatch : undefined;
+
   return (
     // Blur dipakai di sini dan di sticky input chat, dua elemen yang memang
     // menumpuk di atas konten yang bergulir. Tujuannya biar teks di bawahnya
@@ -96,6 +106,15 @@ export function SiteHeader() {
           <code className="mx-1 font-mono">NEXT_PUBLIC_USE_BACKEND=1</code>
           di <code className="font-mono">frontend/.env.local</code>, lalu restart
           dev server, untuk menghubungkan backend FastAPI.
+        </p>
+      ) : null}
+      {embeddingMismatch ? (
+        <p
+          role="alert"
+          className="border-t border-destructive/30 bg-destructive/10 px-4 py-2 text-center text-[12px] leading-relaxed text-destructive"
+        >
+          <span className="font-medium">Indeks dokumen tidak cocok dengan model embedding yang aktif.</span>{" "}
+          {embeddingMismatch}
         </p>
       ) : null}
       {degraded ? (

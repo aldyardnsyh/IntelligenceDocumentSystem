@@ -33,9 +33,29 @@ export class ApiError extends Error {
     return this.status === 404;
   }
 
-  /** 5xx dan timeout: layak dicoba ulang. */
+  /**
+   * 5xx dan timeout: layak dicoba ulang.
+   *
+   * 507 dikecualikan walaupun berawalan 5. Kuota penyimpanan yang penuh tidak
+   * akan berubah karena dicoba ulang; mencoba tiga kali hanya membuat
+   * pengguna menunggu lebih lama sebelum melihat pesan yang sama, dan
+   * menambah beban server yang sudah bermasalah.
+   */
   get isTransient() {
+    if (this.status === 507) return false;
     return this.status >= 500 || this.status === 408;
+  }
+
+  /**
+   * Kuota penyimpanan habis (507).
+   *
+   * Dipisah dari error lain karena tindakan yang benar berbeda: mencoba
+   * ulang tidak akan menolong, yang perlu dilakukan adalah menghapus dokumen
+   * lama. Backend mengirim pesan yang sudah menyebut angka batas dan
+   * tindakannya, jadi pesan itu yang ditampilkan apa adanya.
+   */
+  get isQuotaExceeded() {
+    return this.status === 507;
   }
 }
 
@@ -52,6 +72,7 @@ const FALLBACK: Record<number, string> = {
   502: "Layanan upstream tidak merespons. Coba lagi sebentar lagi.",
   503: "Layanan sedang tidak tersedia. Coba lagi sebentar lagi.",
   504: "Permintaan terlalu lama diproses. Coba lagi sebentar lagi.",
+  507: "Penyimpanan dokumen penuh. Hapus dokumen lama di halaman Dokumen.",
 };
 
 export function messageForStatus(status: number, fallback?: string) {

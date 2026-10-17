@@ -210,6 +210,12 @@ export interface HealthStatus {
      * proses sebelumnya (sesi memori tidak bertahan melewati restart).
      */
     boot_id?: string;
+    /**
+     * Ada hanya kalau indeks dibangun dengan model embedding yang berbeda
+     * dari yang aktif sekarang. Isinya pesan siap tampil, termasuk perintah
+     * yang harus dijalankan, jadi frontend tidak perlu menyusun sendiri.
+     */
+    embedding_mismatch?: string;
   } | null;
 }
 
