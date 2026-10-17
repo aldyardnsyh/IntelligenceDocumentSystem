@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Inter, JetBrains_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import { Toaster } from "@/components/ui/sonner";
 import { Providers } from "./providers";
 import "./globals.css";
@@ -11,18 +11,31 @@ import "./globals.css";
  * konsol. JetBrains Mono disimpan khusus untuk data yang dihasilkan mesin
  * (id chunk, id dokumen, skor) supaya kolom angka sejajar dan terbaca sebagai
  * data, bukan prosa.
+ *
+ * Berkasnya disimpan di `./fonts` dan dimuat dengan `next/font/local`, bukan
+ * `next/font/google`. Alasannya bukan selera: `next/font/google` mengunduh
+ * berkas dari fonts.googleapis.com pada saat build. Build yang bergantung pada
+ * internet akan gagal di lingkungan yang membatasi akses keluar, dan kegagalan
+ * itu muncul sebagai pesan yang menyesatkan, "next/font/google queries have
+ * exactly one entry", bukan sebagai error jaringan. Dengan berkas lokal, build
+ * selalu bisa dijalankan tanpa jaringan, dan versi font yang terpasang tidak
+ * berubah diam-diam saat Google memperbarui berkasnya.
+ *
+ * Kedua berkas adalah font variabel subset latin, jadi tidak perlu menyebut
+ * daftar weight: satu berkas sudah mencakup seluruh rentang berat.
  */
-const inter = Inter({
-  subsets: ["latin"],
+const inter = localFont({
+  src: "./fonts/inter-latin.woff2",
   variable: "--font-inter",
   display: "swap",
+  fallback: ["system-ui", "arial"],
 });
 
-const jetbrains = JetBrains_Mono({
-  subsets: ["latin"],
+const jetbrains = localFont({
+  src: "./fonts/jetbrains-mono-latin.woff2",
   variable: "--font-jetbrains",
-  weight: ["400", "500"],
   display: "swap",
+  fallback: ["ui-monospace", "monospace"],
 });
 
 export const metadata: Metadata = {
