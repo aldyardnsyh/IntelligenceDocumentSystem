@@ -72,6 +72,29 @@ class VectorStore(Protocol):
         ...
 
 
+def embedding_signature(settings: Settings) -> str:
+    """Identitas model embedding yang sedang aktif.
+
+    Disimpan di metadata koleksi supaya ketidakcocokan bisa dideteksi.
+
+    Kenapa perlu: vektor dari model berbeda tidak bisa dibandingkan, dan
+    Chroma tidak tahu itu. Setelah ``EMBEDDING_MODEL`` diganti, atau setelah
+    ``USE_LOCAL_EMBEDDING`` diubah, koleksi lama tetap ada dan retrieval
+    mengembalikan hasil acak tanpa satu pun error. Gejalanya menyesatkan:
+    dokumen berstatus ``ready``, pertanyaan wajar, tapi jawabannya ngawur
+    atau selalu "tidak ditemukan".
+
+    Bentuknya sengaja pendek dan stabil: provider ditambah nama model.
+    Versi library tidak ikut, karena pergantiannya tidak mengubah ruang
+    vektor.
+    """
+    if not settings.use_local_embedding:
+        # Stub hashing. Dimensi ikut dicatat karena dimensi berbeda berarti
+        # ruang vektor berbeda.
+        return f"hashing-fallback:{settings.embedding_dimension}"
+    return f"sentence-transformers:{settings.embedding_model}"
+
+
 def cosine_similarity(left: list[float], right: list[float]) -> float:
     """Cosine similarity dua vektor.
 
@@ -100,11 +123,15 @@ def cosine_similarity(left: list[float], right: list[float]) -> float:
 class InMemoryVectorStore:
     """Vector store in-process.
 
-    Cocok untuk test dan demo sekali jalan. Data hilang saat proses berhenti.
+    Cocok untuk test dan demo sekali jalan. Data hilang saat proses berhenti,
+    jadi tidak pernah ada indeks lama yang tidak kompatibel. ``signature_mismatch``
+    tetap disediakan supaya antarmukanya sama dengan Chroma dan health
+    endpoint tidak perlu membedakan keduanya.
     """
 
     name = "in-memory"
     persistent = False
+    signature_mismatch: str | None = None
 
     def __init__(self) -> None:
         self._data: dict[str, dict[str, VectorRecord]] = {}
@@ -184,6 +211,19 @@ class ChromaVectorStore:
     name = "chroma"
     persistent = True
 
+    #: Awalan id dokumen penanda di dalam koleksi. Dipakai untuk menyimpan
+    #: tanda tangan model embedding tanpa menyentuh metadata koleksi.
+    #:
+    #: Kenapa bukan metadata koleksi: `Collection.modify` di Chroma menolak
+    #: metadata yang memuat `hnsw:space` ("Changing the distance function of
+    #: a collection once it is created is not supported"), dan kalau kunci
+    #: itu dibuang, Chroma justru MENGHAPUS nilainya sehingga koleksi
+    #: kembali ke jarak default L2. Itu membuat skor similarity salah tanpa
+    #: error. Menyimpan penanda sebagai satu baris di dalam koleksi
+    #: menghindari kedua masalah itu.
+    SIGNATURE_ID = "__meta__embedding_signature"
+    SIGNATURE_KEY = "embedding_signature"
+
     def __init__(self, settings: Settings) -> None:
         import chromadb
         from chromadb.config import Settings as ChromaSettings
@@ -192,7 +232,12 @@ class ChromaVectorStore:
             path=settings.chroma_persist_dir,
             settings=ChromaSettings(anonymized_telemetry=False),
         )
+        self._signature = embedding_signature(settings)
+        #: Ketidakcocokan yang terdeteksi saat start. Dibaca health endpoint
+        #: supaya bisa dilaporkan, bukan hanya masuk log.
+        self.signature_mismatch: str | None = None
         self._lock = threading.Lock()
+        self.check_signature()
 
     def _collection(self, collection: str):  # noqa: ANN202 - tipe internal dari Chroma
         return self._client.get_or_create_collection(
@@ -200,11 +245,104 @@ class ChromaVectorStore:
             metadata={"hnsw:space": "cosine"},
         )
 
+    def check_signature(self) -> bool:
+        """Bandingkan tanda tangan model di semua koleksi yang ada.
+
+        True kalau cocok atau koleksinya masih kosong. Kalau berbeda, hasilnya
+        dicatat di ``signature_mismatch`` dan di log, lalu retrieval tetap
+        dijalankan, karena menolak start akan membuat aplikasi mati hanya
+        karena operator mengganti satu env var.
+
+        Yang dilakukan saat tidak cocok: peringatan keras, dan health
+        melaporkan status ``degraded``. Perbaikan sebenarnya adalah menjalankan
+        ``python -m scripts.reindex``, dan pesan log menyebutkannya.
+        """
+        self.signature_mismatch = None
+        try:
+            koleksi = self._client.list_collections()
+        except Exception:  # noqa: BLE001
+            logger.debug("Daftar koleksi belum bisa dibaca", exc_info=True)
+            return True
+
+        for item in koleksi:
+            # Chroma mengembalikan objek dengan atribut `name` di versi baru,
+            # dan dict di sebagian versi lama. Keduanya ditangani supaya
+            # tidak rapuh terhadap versi.
+            nama = getattr(item, "name", None)
+            if nama is None and isinstance(item, dict):
+                nama = item.get("name")
+            if not nama:
+                continue
+
+            tersimpan = self._baca_tanda_tangan(nama)
+            if tersimpan is None or tersimpan == self._signature:
+                continue
+
+            self.signature_mismatch = (
+                f"Koleksi '{nama}' diindeks dengan '{tersimpan}', sedangkan "
+                f"yang aktif sekarang '{self._signature}'. Vektor dari model "
+                "berbeda tidak bisa dibandingkan, jadi hasil pencarian akan "
+                "ngawur. Jalankan `python -m scripts.reindex`, atau kembalikan "
+                "EMBEDDING_MODEL ke nilai sebelumnya lalu unggah ulang dokumen."
+            )
+            logger.error(
+                "Model embedding berubah: %s. Indeks lama tidak kompatibel. "
+                "Jalankan `python -m scripts.reindex`.",
+                self.signature_mismatch,
+            )
+            return False
+
+        return True
+
+    def _baca_tanda_tangan(self, collection: str) -> str | None:
+        """Baca tanda tangan dari dokumen penanda. None kalau belum ada."""
+        try:
+            handle = self._collection(collection)
+            hasil = handle.get(ids=[self.SIGNATURE_ID], include=["metadatas"])
+        except Exception:  # noqa: BLE001
+            return None
+
+        metadatas = (hasil or {}).get("metadatas") or []
+        if not metadatas or not metadatas[0]:
+            return None
+        nilai = metadatas[0].get(self.SIGNATURE_KEY)
+        return str(nilai) if nilai is not None else None
+
+    def _tandai_koleksi(self, collection: str, dimensi: int) -> None:
+        """Catat tanda tangan model sebagai satu baris penanda di koleksi.
+
+        Dilakukan saat upsert pertama, bukan saat koleksi dibuat, supaya
+        koleksi kosong tidak pernah mengunci tanda tangan model yang salah.
+
+        ``dimensi`` diambil dari vektor yang sedang ditulis, bukan ditebak.
+        Chroma menolak baris dengan dimensi berbeda dari koleksinya
+        ("Collection expecting embedding with dimension of 384, got 8"), jadi
+        panjang vektor penanda harus mengikuti data yang ada.
+
+        Baris penanda tidak pernah ikut hasil pencarian: ``query`` menyaring
+        id-nya, dan ``count`` menguranginya.
+        """
+        if self._baca_tanda_tangan(collection) == self._signature:
+            return
+        try:
+            handle = self._collection(collection)
+            handle.upsert(
+                ids=[self.SIGNATURE_ID],
+                embeddings=[[0.0] * dimensi],
+                documents=["penanda model embedding"],
+                metadatas=[{self.SIGNATURE_KEY: self._signature}],
+            )
+        except Exception:  # noqa: BLE001
+            # Kegagalan mencatat tanda tangan tidak boleh menggagalkan
+            # ingestion. Yang hilang hanya deteksi dini, bukan datanya.
+            logger.debug("Gagal mencatat tanda tangan koleksi", exc_info=True)
+
     def upsert(self, records: Iterable[VectorRecord], collection: str) -> None:
         batch = list(records)
         if not batch:
             return
         with self._lock:
+            self._tandai_koleksi(collection, len(batch[0].embedding))
             handle = self._collection(collection)
             handle.upsert(
                 ids=[record.id for record in batch],
@@ -220,15 +358,20 @@ class ChromaVectorStore:
         top_k: int,
         where: dict[str, object] | None = None,
     ) -> list[tuple[str, float, dict[str, object]]]:
+        # PENTING: hitungan mentah dibaca langsung, bukan lewat `self.count()`.
+        # `self.count()` juga mengambil `self._lock`, dan `threading.Lock`
+        # tidak bisa diambil dua kali oleh thread yang sama. Memanggilnya dari
+        # dalam blok `with self._lock` membuat proses menggantung selamanya
+        # tanpa pesan apa pun, dan itu yang pernah terjadi di sini.
         with self._lock:
             handle = self._collection(collection)
             if handle.count() == 0:
                 return []
-            # Chroma mengembalikan jarak, bukan kemiripan. Cosine distance 0
-            # berarti identik, jadi similarity = 1 - distance.
+            # Ambil satu kandidat lebih banyak dari yang diminta, karena baris
+            # penanda bisa ikut muncul di hasil dan akan disaring di bawah.
             result = handle.query(
                 query_embeddings=[embedding],
-                n_results=top_k,
+                n_results=top_k + 1,
                 where=where or None,
                 include=["metadatas", "distances"],
             )
@@ -239,10 +382,14 @@ class ChromaVectorStore:
 
         rows: list[tuple[str, float, dict[str, object]]] = []
         for index, identifier in enumerate(ids):
+            # Baris penanda model bukan isi dokumen, jadi tidak boleh ikut
+            # hasil pencarian.
+            if identifier == self.SIGNATURE_ID:
+                continue
             distance = float(distances[index]) if index < len(distances) else 1.0
             metadata = metadatas[index] if index < len(metadatas) else {}
             rows.append((identifier, max(0.0, 1.0 - distance), dict(metadata or {})))
-        return rows
+        return rows[:top_k]
 
     def delete_document(self, document_id: str, collection: str) -> int:
         with self._lock:
@@ -266,11 +413,21 @@ class ChromaVectorStore:
                 logger.debug("Koleksi %s belum ada saat dihapus.", collection)
 
     def count(self, collection: str) -> int:
+        """Jumlah vektor isi dokumen, tanpa baris penanda model.
+
+        Baris penanda ikut tersimpan di koleksi yang sama, jadi angka mentah
+        dari Chroma selalu lebih satu. Angka ini dipakai untuk memutuskan
+        "koleksi masih kosong", dan selisih satu di situ membuat query
+        berjalan pada koleksi yang sebenarnya kosong.
+        """
         with self._lock:
             try:
-                return self._collection(collection).count()
+                total = self._collection(collection).count()
             except Exception:  # noqa: BLE001
                 return 0
+        if total == 0:
+            return 0
+        return total - 1 if self._baca_tanda_tangan(collection) is not None else total
 
     def ping(self) -> bool:
         """Cek koneksi ke Chroma tanpa membuat koleksi apa pun.
