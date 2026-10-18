@@ -281,40 +281,49 @@ jobs:
 
       - name: Periksa kesehatan layanan
         # Gagal cepat dengan pesan jelas. Tanpa langkah ini, konfigurasi yang
-        # salah (passcode tidak cocok, proxy tidak meneruskan `/api/v1`,
-        # backend tidak bisa menulis berkas) muncul sebagai puluhan test yang
-        # gagal serentak dengan gejala "element not found", dan penyebabnya
-        # harus ditebak dari log browser.
+        # salah muncul sebagai puluhan test gagal serentak dengan gejala
+        # "element not found", dan penyebabnya harus ditebak dari log browser.
+        #
+        # Yang diperiksa di sini hanya yang bisa diperiksa tanpa browser.
+        # Login lewat UI menguji Server Action Next.js, yang tidak bisa
+        # dipanggil dengan curl; itu tugas Playwright.
         run: |
           set -o pipefail
+
           echo "== backend langsung"
           curl -fsS http://127.0.0.1:8000/api/v1/health | head -c 300; echo
 
-          echo "== login lewat proxy frontend"
-          LOGIN=$(curl -sS -o /dev/null -w '%{http_code}' \
-            -X POST http://127.0.0.1:3000/api/v1/auth/verify \
-            -H 'content-type: application/json' \
-            -d "{\"passcode\": \"$E2E_PASSCODE\"}")
-          echo "status login: $LOGIN"
-          if [ "$LOGIN" != "200" ]; then
-            echo "Login lewat proxy gagal. Log backend dan frontend:" >&2
-            tail -n 40 "$RUNNER_TEMP/api.log" >&2 || true
+          echo "== proxy /api/v1/health"
+          PROXY=$(curl -sS -o /tmp/health.json -w '%{http_code}' \
+            http://127.0.0.1:3000/api/v1/health)
+          echo "status $PROXY"
+          head -c 300 /tmp/health.json; echo
+          if [ "$PROXY" != "200" ]; then
+            echo "Proxy tidak meneruskan /api/v1 ke backend." >&2
             tail -n 40 "$RUNNER_TEMP/web.log" >&2 || true
             exit 1
           fi
 
-          echo "== unggah satu berkas lewat proxy"
-          UPLOAD=$(curl -sS -o /tmp/unggah.json -w '%{http_code}' \
-            -c /tmp/cookies.txt -b /tmp/cookies.txt \
-            -X POST http://127.0.0.1:3000/api/v1/documents/upload \
-            -F "file=@backend/samples/kebijakan-cuti.txt;type=text/plain")
-          echo "status unggah: $UPLOAD"
-          head -c 300 /tmp/unggah.json; echo
-          if [ "$UPLOAD" != "200" ] && [ "$UPLOAD" != "202" ]; then
-            echo "Unggah lewat proxy gagal. Log backend:" >&2
-            tail -n 60 "$RUNNER_TEMP/api.log" >&2 || true
+          # Kalau proxy salah arah, yang muncul adalah HTML halaman Next.js.
+          # Itu penyebab "fetch gagal parse JSON" yang pernah terjadi, dan
+          # gejalanya tidak menyebut proxy sama sekali.
+          if ! grep -q '"status"' /tmp/health.json; then
+            echo "Balasan proxy bukan JSON dari backend:" >&2
+            head -c 500 /tmp/health.json >&2; echo >&2
             exit 1
           fi
+
+          echo "== endpoint terlindungi menolak tanpa sesi"
+          ANON=$(curl -sS -o /dev/null -w '%{http_code}' \
+            http://127.0.0.1:3000/api/v1/documents)
+          echo "status tanpa sesi: $ANON"
+          if [ "$ANON" != "401" ]; then
+            echo "Endpoint terlindungi tidak menolak tanpa sesi (dapat $ANON)." >&2
+            tail -n 40 "$RUNNER_TEMP/api.log" >&2 || true
+            exit 1
+          fi
+
+          echo "Pemeriksaan layanan lulus."
 
       - name: Jalankan E2E
         working-directory: frontend

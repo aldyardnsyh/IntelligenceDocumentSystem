@@ -174,7 +174,11 @@ export async function submitPasscode(
     let path = "/";
     let httpOnly = true;
     let sameSite: "lax" | "strict" | "none" = "lax";
-    let secure = process.env.NODE_ENV === "production";
+    // Bukan `NODE_ENV`. Backend sudah memutuskan berdasarkan skema request
+    // lewat `_is_https_request`. Memaksa `Secure` di sini membuat cookie
+    // dibuang browser saat aplikasi produksi diakses lewat HTTP, dan
+    // gejalanya hanya "session_expired" pada setiap request berikutnya.
+    let secure = origin.startsWith("https://");
     for (const attr of attrParts) {
       const [k, v] = attr.split("=").map((s) => s.trim());
       const key = k.toLowerCase();
