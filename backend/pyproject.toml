@@ -35,9 +35,16 @@ dependencies = [
 observability = [
     "langfuse>=3.0",
 ]
+# Versi dipin, bukan rentang terbuka. RAGAS 0.4.x gagal diimpor dengan
+# "ModuleNotFoundError: langchain_community.chat_models.vertexai": modul itu
+# sudah dihapus dari langchain-community sementara RAGAS masih mengimpornya.
+# Rentang terbuka membuat `pip install -e .[evaluation]` memasang paket yang
+# tidak bisa dipakai, dan kegagalannya baru terlihat saat evaluasi dijalankan.
 evaluation = [
-    "ragas>=0.2",
-    "datasets>=3.0",
+    "ragas==0.2.15",
+    "langchain<0.4",
+    "langchain-community<0.4",
+    "datasets>=3.0,<4",
 ]
 dev = [
     "pytest>=8.3",

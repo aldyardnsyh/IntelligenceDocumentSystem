@@ -298,20 +298,59 @@ Actions.
 
 ## Evaluasi dengan RAGAS
 
-Skor RAGAS butuh model penilai tambahan dan API key dari penyedia model
-(misalnya `OPENAI_API_KEY`).
-
-```powershell
-cd backend
-pip install -e ".[evaluation]"
-python -m scripts.seed_demo
-python -m scripts.evaluate_ragas --dataset evaluation/dataset.json
-```
-
 Dataset berisi 11 pertanyaan: 8 harus terjawab benar, 3 **harus** dijawab
 "tidak ditemukan". Kelompok kedua itu yang paling penting, karena di situlah
 diukur apakah sistem mengarang saat tidak tahu. Kalau ada pertanyaan yang
 seharusnya ditolak tapi justru dijawab, skrip keluar dengan kode error.
+
+```powershell
+cd backend
+python -m scripts.seed_demo
+python -m scripts.evaluate_ragas --dataset evaluation/dataset.json
+```
+
+### Mode offline tanpa API key
+
+Skor RAGAS yang sesungguhnya butuh model penilai tambahan dan API key
+(misalnya `OPENAI_API_KEY`). Untuk memeriksa bahwa pipa evaluasinya sendiri
+sehat, ada mode offline yang memakai penilai tiruan deterministik:
+
+```powershell
+pip install -e ".[evaluation]"
+python -m scripts.evaluate_ragas --offline
+```
+
+Mode ini tidak memanggil jaringan dan tidak memerlukan kredensial. Skornya
+**bukan** ukuran kualitas jawaban, karena yang dihitung hanya kesesuaian
+bentuk teks, dan karena itu skornya tidak disimpan ke tabel `eval_runs`.
+Manfaatnya: kalau ada yang rusak di pemetaan kolom, nama metrik, atau cara
+skor dibaca kembali, kerusakannya kelihatan di sini, bukan baru ketahuan saat
+seseorang membayar token.
+
+Mode ini sudah membuktikan dirinya. Sebelum dipakai, lima bug di jalur RAGAS
+tidak pernah terlihat karena jalurnya tidak pernah dijalankan:
+
+| Gejala | Sebab |
+| --- | --- |
+| `AttributeError: ... 'set_run_config'` | Penilai kurang method yang dituntut RAGAS |
+| `AttributeError: ... 'generate'` | RAGAS memanggil dua nama method berbeda |
+| `TypeError: object LLMResult can't be used in 'await'` | `generate` harus async |
+| `RagasOutputParserException` | JSON harus mengikuti skema `PydanticPrompt` |
+| Skor selalu kosong | `EvaluationResult` bukan dict, `.get()` selalu `None` |
+
+Baris terakhir yang paling berbahaya: evaluasi selesai tanpa error, tetapi
+halaman analitik tetap berkata "belum ada data evaluasi" selamanya.
+
+### Catatan versi
+
+Pasang `ragas==0.2.15`. Versi 0.4.x yang terbaru gagal diimpor dengan
+`ModuleNotFoundError: langchain_community.chat_models.vertexai`, karena modul
+itu sudah dihapus dari `langchain-community` sementara RAGAS masih
+mengimpornya. Kombinasi yang terbukti jalan:
+
+```powershell
+pip install "ragas==0.2.15" "langchain<0.4" "langchain-community<0.4" "datasets>=3,<4"
+```
 
 ## Deployment ke server
 

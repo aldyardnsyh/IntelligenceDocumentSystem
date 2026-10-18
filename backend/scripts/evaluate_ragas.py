@@ -33,6 +33,7 @@ from app.core.config import get_settings
 from app.dependencies import _index_entries
 from app.providers.base import build_fallback_chain
 from app.repositories.sqlite_repo import SqliteRepository, new_id, utc_now
+from app.services.evaluation_evaluator import OfflineEvaluator
 from app.services.generation.generator import LLMChain
 from app.services.ingestion.service import IngestionService, build_ingestion_service
 from app.services.memory.store import InMemoryStore
@@ -157,7 +158,9 @@ def report_refusal(rows: list[dict[str, Any]]) -> dict[str, int]:
     return summary
 
 
-def score_with_ragas(rows: list[dict[str, Any]]) -> dict[str, float | None]:
+def score_with_ragas(
+    rows: list[dict[str, Any]], *, offline: bool = False
+) -> dict[str, float | None]:
     """Hitung metric RAGAS.
 
     Ragas dan dependensinya bersifat opsional (`pip install -e ".[evaluation]"`).
@@ -216,10 +219,22 @@ def score_with_ragas(rows: list[dict[str, Any]]) -> dict[str, float | None]:
         ]
     )
 
+    # Mode offline memakai penilai tiruan yang deterministik. Tujuannya bukan
+    # mengukur kualitas jawaban, melainkan membuktikan seluruh pipa RAGAS
+    # berjalan tanpa API key: dataset terbentuk, metrik dihitung, dan skor
+    # terbaca kembali. Tanpa mode ini, jalur tersebut tidak pernah dijalankan
+    # sampai ada orang yang membayar token.
+    penilai = OfflineEvaluator() if offline else None
+    opsi: dict[str, Any] = {}
+    if penilai is not None:
+        opsi["llm"] = penilai
+        opsi["embeddings"] = penilai
+
     try:
         result = evaluate(
             dataset,
             metrics=[faithfulness, context_precision, answer_relevancy],
+            **opsi,
         )
     except Exception:  # noqa: BLE001
         # Kegagalan di dalam Ragas (LLM evaluator tidak dikonfigurasi,
@@ -234,17 +249,55 @@ def score_with_ragas(rows: list[dict[str, Any]]) -> dict[str, float | None]:
         )
         return {"faithfulness": None, "precision": None, "answer_relevance": None}
 
-    def _value(metric_name: str) -> float | None:
-        item = result.get(metric_name) if hasattr(result, "get") else None
-        if item is None:
+    def _rata_rata(nilai: list[float]) -> float | None:
+        # NaN muncul saat RAGAS tidak punya cukup bahan menilai satu baris.
+        # NaN bukan skor: menyimpannya membuat kolom terisi angka yang tidak
+        # bisa dibandingkan, jadi baris seperti itu dibuang.
+        bersih = [item for item in nilai if item == item]
+        if not bersih:
             return None
-        # Ragas >= 0.2 membalikkan dict per metrik dengan kunci `score`;
-        # versi lama mengembalikan float biasa.
-        raw = item.get("score") if isinstance(item, dict) else item
+        return round(sum(bersih) / len(bersih), 4)
+
+    def _dari_scores(metric_name: str) -> list[float]:
+        """Ambil nilai satu metrik dari `result.scores`.
+
+        `scores` adalah daftar dict, satu per baris dataset. Nilai `None` dan
+        `NaN` (baris yang gagal dinilai) dilewati, bukan dihitung sebagai nol:
+        nol berarti "skornya nol", yang berbeda dari "tidak bisa dinilai".
+        """
+        kumpulan: list[float] = []
+        scores = getattr(result, "scores", None) or []
+        for baris in scores:
+            if not isinstance(baris, dict):
+                continue
+            nilai = baris.get(metric_name)
+            try:
+                kumpulan.append(float(nilai))
+            except (TypeError, ValueError):
+                continue
+        return kumpulan
+
+    def _dari_pandas(metric_name: str) -> list[float]:
+        """Cadangan: baca dari DataFrame bila `scores` tidak tersedia."""
+        kumpulan: list[float] = []
         try:
-            return float(raw)
-        except (TypeError, ValueError):
-            return None
+            tabel = result.to_pandas()
+        except Exception:  # noqa: BLE001
+            return kumpulan
+        if metric_name not in tabel.columns:
+            return kumpulan
+        for nilai in tabel[metric_name].tolist():
+            try:
+                kumpulan.append(float(nilai))
+            except (TypeError, ValueError):
+                continue
+        return kumpulan
+
+    def _value(metric_name: str) -> float | None:
+        nilai = _dari_scores(metric_name)
+        if not nilai:
+            nilai = _dari_pandas(metric_name)
+        return _rata_rata(nilai)
 
     return {
         "faithfulness": _value("faithfulness"),
@@ -289,7 +342,7 @@ def _rebuild_index(ingestion: IngestionService, repository: SqliteRepository) ->
     return ingestion.retriever.rebuild(_index_entries(repository))
 
 
-async def run(dataset_path: Path, *, dry_run: bool) -> int:
+async def run(dataset_path: Path, *, dry_run: bool, offline: bool = False) -> int:
     settings = get_settings()
 
     # Evaluasi memakai salinan database, bukan database yang sedang dipakai
@@ -341,9 +394,15 @@ async def run(dataset_path: Path, *, dry_run: bool) -> int:
         print(json.dumps(rows, ensure_ascii=False, indent=2))
         return 0
 
-    scores = score_with_ragas(rows)
+    scores = score_with_ragas(rows, offline=offline)
 
-    if any(value is not None for value in scores.values()):
+    if offline and any(value is not None for value in scores.values()):
+        # Skor offline mengukur kesamaan kata, bukan kesetiaan jawaban pada
+        # konteks. Menyimpannya ke `eval_runs` akan membuat halaman analitik
+        # menampilkan angka yang terlihat seperti hasil pengukuran, padahal
+        # bukan. Jadi dicetak saja.
+        print(f"Skor mode offline (bukan ukuran kualitas): {scores}")
+    elif any(value is not None for value in scores.values()):
         repository.add_eval_run(
             {
                 "id": new_id("eval"),
@@ -383,6 +442,15 @@ def main() -> int:
         action="store_true",
         help="Tampilkan jawaban dan konteks tanpa menghitung atau menyimpan skor.",
     )
+    parser.add_argument(
+        "--offline",
+        action="store_true",
+        help=(
+            "Hitung skor dengan penilai tiruan, tanpa API key dan tanpa jaringan. "
+            "Berguna untuk memeriksa bahwa pipa evaluasi berjalan. Skornya BUKAN "
+            "ukuran kualitas jawaban, dan tidak disimpan ke database."
+        ),
+    )
     args = parser.parse_args()
 
     if not args.dataset.exists():
@@ -392,7 +460,7 @@ def main() -> int:
     logging.basicConfig(
         level=logging.INFO, format="%(levelname)-8s %(message)s"
     )
-    return asyncio.run(run(args.dataset, dry_run=args.dry_run))
+    return asyncio.run(run(args.dataset, dry_run=args.dry_run, offline=args.offline))
 
 
 if __name__ == "__main__":
