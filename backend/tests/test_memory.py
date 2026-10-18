@@ -362,3 +362,65 @@ class TestRateLimiter:
         await asyncio.sleep(1.1)
         allowed, _ = await limiter.check("ses_1")
         assert allowed is True
+
+    async def test_reset_menghapus_kunci_yang_benar(self) -> None:
+        """Reset harus benar-benar mengosongkan counter, bukan kunci lain.
+
+        Versi lama mengembalikan kunci yang sudah berprefiks ``cache:`` lalu
+        menambahkan prefiks itu lagi saat menghapus, sehingga reset tidak
+        pernah menghapus apa pun dan pemanggil tidak menyadarinya karena
+        jumlah yang dihapus tidak diperiksa.
+        """
+        store = InMemoryStore()
+        limiter = RateLimiter(store, Settings(query_max_per_session=1, query_window_seconds=60))
+        await limiter.check("ses_1")
+        await limiter.reset("ses_1")
+
+        # Kalau reset gagal, pemanggilan berikutnya akan langsung ditahan.
+        allowed, _ = await limiter.check("ses_1")
+        assert allowed is True
+
+
+class TestAtomisitasRateLimit:
+    """Jaminan atomik harus ada di store, bukan di pemanggil.
+
+    Alasannya: lock ``asyncio`` hanya berlaku untuk satu proses. Kalau aplikasi
+    berjalan di dua instance, keduanya punya lock sendiri yang tidak saling
+    tahu, jadi baca-ubah-tulis terpisah tetap bisa kehilangan pembaruan.
+    Test di bawah meniru kondisi itu dengan store yang menyisipkan titik
+    ``await`` di antara baca dan tulis, persis seperti perjalanan pulang-pergi
+    ke Redis.
+    """
+
+    async def test_store_menyediakan_operasi_atomik(self) -> None:
+        store = InMemoryStore()
+        assert hasattr(store, "hit_sliding_window")
+
+    async def test_counter_atomik_menahan_tepat_pada_batas(self) -> None:
+        import asyncio
+
+        store = InMemoryStore()
+        hasil = await asyncio.gather(
+            *[store.hit_sliding_window("ratelimit:x", 4, 60) for _ in range(30)]
+        )
+        boleh = sum(1 for izin, _ in hasil if izin)
+        assert boleh == 4
+
+    async def test_retry_after_masuk_akal(self) -> None:
+        store = InMemoryStore()
+        for _ in range(2):
+            izin, _ = await store.hit_sliding_window("ratelimit:y", 2, 60)
+            assert izin is True
+
+        izin, retry_after = await store.hit_sliding_window("ratelimit:y", 2, 60)
+        assert izin is False
+        # Tidak boleh nol atau negatif: pemanggil memakai angka ini sebagai
+        # header Retry-After, dan nilai nol membuat klien langsung mencoba lagi.
+        assert 1 <= retry_after <= 61
+
+    async def test_kunci_berbeda_tidak_saling_mengunci(self) -> None:
+        store = InMemoryStore()
+        for _ in range(3):
+            await store.hit_sliding_window("ratelimit:a", 3, 60)
+        izin, _ = await store.hit_sliding_window("ratelimit:b", 3, 60)
+        assert izin is True

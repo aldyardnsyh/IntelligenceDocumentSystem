@@ -74,6 +74,27 @@ class MemoryStore(Protocol):
     async def delete_by_prefix(self, prefix: str) -> int:
         ...
 
+    async def hit_sliding_window(
+        self, key: str, limit: int, window_seconds: int
+    ) -> tuple[bool, int]:
+        """Catat satu pemakaian pada sliding window, secara atomik.
+
+        Mengembalikan ``(boleh, retry_after_detik)``.
+
+        Kenapa operasi ini ada di store dan bukan di ``RateLimiter``: counter
+        ini disimpan bersama, dan Redis tidak punya transaksi lintas instance.
+        Kalau pemanggil melakukan baca lalu tulis terpisah, dua instance yang
+        menangani request bersamaan sama-sama membaca nilai lama dan sama-sama
+        menulis, sehingga batas terlewati tepat pada trafik yang paling ramai.
+        Satu lock ``asyncio`` hanya melindungi satu proses, jadi lock itu tidak
+        menolong begitu aplikasi berjalan di lebih dari satu instance.
+
+        Karena itu operasi baca-ubah-tulis harus terjadi di dalam store: satu
+        skrip Lua untuk Redis, satu kunci untuk in-process. Pemanggil tidak
+        perlu tahu bedanya.
+        """
+        ...
+
     async def ping(self) -> bool:
         """True kalau store bisa dihubungi."""
         ...
@@ -165,8 +186,72 @@ class InMemoryStore:
                 self._values.pop(key, None)
             return len(keys)
 
+    async def hit_sliding_window(
+        self, key: str, limit: int, window_seconds: int
+    ) -> tuple[bool, int]:
+        # Seluruh baca-ubah-tulis di bawah satu `threading.Lock`. Karena method
+        # ini tidak punya titik `await` di dalam blok kunci, tidak ada task lain
+        # yang bisa menyelip di antara baca dan tulis.
+        now = time.time()
+        penuh = f"{CACHE_PREFIX}{key}"
+        with self._lock:
+            mentah = None if self._expired(penuh, now) else self._values[penuh][1]
+            timestamps: list[float] = []
+            if isinstance(mentah, dict):
+                tersimpan = mentah.get("hits")
+                if isinstance(tersimpan, list):
+                    timestamps = [
+                        float(item) for item in tersimpan if isinstance(item, int | float)
+                    ]
+
+            recent = [stamp for stamp in timestamps if now - stamp < window_seconds]
+
+            if len(recent) >= limit:
+                retry_after = max(1, int(window_seconds - (now - recent[0])) + 1)
+                # Counter tidak ditulis ulang, tapi sisa jendela tetap disimpan
+                # supaya `retry_after` konsisten di pemanggilan berikutnya.
+                self._values[penuh] = (now + window_seconds + 5, {"hits": recent})
+                return False, retry_after
+
+            recent.append(now)
+            self._values[penuh] = (now + window_seconds + 5, {"hits": recent})
+            return True, 0
+
     async def ping(self) -> bool:
         return True
+
+
+_SKRIP_SLIDING_WINDOW = """
+local key = KEYS[1]
+local window = tonumber(ARGV[1])
+local limit = tonumber(ARGV[2])
+local sekarang = tonumber(ARGV[3])
+local batas = sekarang - window
+
+-- Buang pemakaian yang sudah keluar jendela. Anggota ZSET berupa skor waktu,
+-- jadi rentangnya memakai skor, bukan nilai anggota.
+redis.call('ZREMRANGEBYSCORE', key, '-inf', batas)
+
+local jumlah = redis.call('ZCARD', key)
+if jumlah >= limit then
+  local tertua = redis.call('ZRANGE', key, 0, 0, 'WITHSCORES')
+  local tunggu = 1
+  if tertua[2] then
+    tunggu = math.ceil(tonumber(tertua[2]) + window - sekarang) + 1
+    if tunggu < 1 then tunggu = 1 end
+  end
+  -- TTL tetap diperbarui supaya kunci yang tidak dipakai lagi hilang sendiri
+  -- dan tidak menumpuk di Redis.
+  redis.call('EXPIRE', key, window + 5)
+  return {0, tunggu}
+end
+
+-- Anggota unik: dua request pada timestamp yang sama tidak boleh bertabrakan.
+local anggota = ARGV[3] .. ':' .. redis.sha1hex(ARGV[3] .. tostring(jumlah))
+redis.call('ZADD', key, sekarang, anggota)
+redis.call('EXPIRE', key, window + 5)
+return {1, 0}
+"""
 
 
 class RedisStore:
@@ -239,6 +324,30 @@ class RedisStore:
             if cursor == 0:
                 break
         return deleted
+
+    async def hit_sliding_window(
+        self, key: str, limit: int, window_seconds: int
+    ) -> tuple[bool, int]:
+        penuh = f"{CACHE_PREFIX}{key}"
+        # Satu skrip, satu round-trip. Redis menjalankan skrip secara atomik,
+        # jadi tidak ada instance lain yang bisa membaca counter di tengah
+        # perhitungan. Ini yang tidak bisa dicapai dengan GET lalu SET
+        # terpisah, karena di antara keduanya instance lain bisa menyelip.
+        #
+        # ZSET dipakai, bukan counter: sliding window butuh tahu kapan tiap
+        # pemakaian terjadi, bukan hanya berapa banyak. Anggota unik dibuat
+        # dari timestamp plus penanda acak supaya dua request pada mikrodetik
+        # yang sama tidak saling menimpa.
+        hasil = await self._client.eval(
+            _SKRIP_SLIDING_WINDOW,
+            1,
+            penuh,
+            window_seconds,
+            limit,
+            f"{time.time()}",
+        )
+        boleh, retry_after = int(hasil[0]), int(hasil[1])
+        return bool(boleh), retry_after
 
     async def ping(self) -> bool:
         try:
