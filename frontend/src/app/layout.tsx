@@ -5,12 +5,12 @@ import { Providers } from "./providers";
 import "./globals.css";
 
 /**
- * Inter dipakai karena produk ini membaca teks panjang (isi dokumen, kutipan
- * chunk, log query) di layar 14px. Metrik hurufnya netral dan legibilitasnya
- * konsisten lintas platform, berbeda dari Geist yang lebih cocok untuk UI
- * konsol. JetBrains Mono disimpan khusus untuk data yang dihasilkan mesin
- * (id chunk, id dokumen, skor) supaya kolom angka sejajar dan terbaca sebagai
- * data, bukan prosa.
+ * Plus Jakarta Sans dipakai karena produk ini membaca teks panjang (isi
+ * dokumen, kutipan chunk, log query) di layar 14px. Hurufnya punya tinggi x
+ * yang besar dan terminal yang terbuka, sehingga tetap terbaca di ukuran
+ * kecil tanpa perlu menebalkan seluruh antarmuka. JetBrains Mono disimpan
+ * khusus untuk data yang dihasilkan mesin (id chunk, id dokumen, skor) supaya
+ * kolom angka sejajar dan terbaca sebagai data, bukan prosa.
  *
  * Berkasnya disimpan di `./fonts` dan dimuat dengan `next/font/local`, bukan
  * `next/font/google`. Alasannya bukan selera: `next/font/google` mengunduh
@@ -22,11 +22,12 @@ import "./globals.css";
  * berubah diam-diam saat Google memperbarui berkasnya.
  *
  * Kedua berkas adalah font variabel subset latin, jadi tidak perlu menyebut
- * daftar weight: satu berkas sudah mencakup seluruh rentang berat.
+ * daftar weight: satu berkas sudah mencakup seluruh rentang berat. Untuk Plus
+ * Jakarta Sans rentangnya 200 sampai 800, dan JetBrains Mono 100 sampai 800.
  */
-const inter = localFont({
-  src: "./fonts/inter-latin.woff2",
-  variable: "--font-inter",
+const jakarta = localFont({
+  src: "./fonts/plus-jakarta-sans-latin.woff2",
+  variable: "--font-jakarta",
   display: "swap",
   fallback: ["system-ui", "arial"],
 });
@@ -50,7 +51,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="id" className={`${inter.variable} ${jetbrains.variable} h-full`}>
+    <html lang="id" className={`${jakarta.variable} ${jetbrains.variable} h-full`}>
       <body className="flex min-h-full flex-col antialiased">
         <Providers>
           {children}

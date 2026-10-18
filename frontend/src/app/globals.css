@@ -52,9 +52,13 @@
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
 
-  --font-sans: var(--font-inter);
+  /* Ketiga variabel ini merujuk ke nama yang dibuat `next/font/local` di
+     layout.tsx. Nama itu sengaja tidak sama dengan `--font-sans`: kalau sama,
+     definisi ini menunjuk ke dirinya sendiri dan font hasil muat tidak pernah
+     terpakai, sehingga browser diam-diam jatuh ke fallback. */
+  --font-sans: var(--font-jakarta);
   --font-mono: var(--font-jetbrains);
-  --font-heading: var(--font-inter);
+  --font-heading: var(--font-jakarta);
 
   /* Radius scale: 8px card/button, 12px chat bubble.
      Buttons and cards share 8px on purpose so they read as one family. */
