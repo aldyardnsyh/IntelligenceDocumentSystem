@@ -1,13 +1,18 @@
 # Pemeriksaan wajib: dijalankan setiap push dan setiap pull request.
 #
-# Yang diperiksa di sini adalah hal yang bisa dicek tanpa server, tanpa
-# jaringan, dan tanpa API key. Semua dependensi berat ditiadakan dengan
-# sengaja supaya hasilnya cepat dan tidak bergantung pada layanan luar:
+# Ada tiga job:
 #
-# - Embedding memakai stub hashing (USE_LOCAL_EMBEDDING=0), jadi torch dan
-#   model 470 MB tidak diunduh.
-# - LLM memakai provider mock, jadi tidak ada panggilan ke Groq.
-# - Test provider memakai httpx.MockTransport, jadi tidak ada koneksi keluar.
+# 1. `backend`  pemeriksaan statis dan test Python, tanpa server dan tanpa
+#               jaringan. Semua dependensi berat ditiadakan dengan sengaja
+#               supaya hasilnya cepat dan tidak bergantung pada layanan luar:
+#               embedding memakai stub hashing (USE_LOCAL_EMBEDDING=0) sehingga
+#               torch dan model 470 MB tidak diunduh, LLM memakai provider
+#               mock sehingga tidak ada panggilan ke Groq, dan test provider
+#               memakai httpx.MockTransport sehingga tidak ada koneksi keluar.
+# 2. `frontend` typegen, tsc, eslint, dan build produksi.
+# 3. `e2e`      backend dan frontend sungguhan plus browser. Lihat komentar di
+#               job itu untuk alasan kenapa pemeriksaan ini perlu walaupun dua
+#               job sebelumnya sudah hijau.
 #
 # Kalau salah satu pemeriksaan ini gagal, jangan merge. Itu artinya ada yang
 # rusak, dan lebih murah diperbaiki di sini daripada di server.
@@ -116,3 +121,153 @@ jobs:
           NEXT_PUBLIC_USE_BACKEND: "1"
           NEXT_PUBLIC_API_BASE_URL: ""
         run: npx next build
+
+  e2e:
+    name: End-to-end (Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: [backend]
+
+    # Test ini menyalakan backend dan frontend sungguhan, lalu menggerakkan
+    # browser. Itu memang lebih mahal daripada dua job di atas, jadi alasannya
+    # perlu ditulis: dua job lain memeriksa bagian secara terpisah, dan
+    # keduanya bisa hijau sementara sambungannya putus. Yang pernah terjadi
+    # dan hanya tertangkap di sini adalah halaman yang terbuka karena ada
+    # penanda cookie, tapi setiap panggilan API kena 401 sehingga pengguna
+    # melihat "sesi berakhir" di mana-mana, dan proxy `/api/v1/*` yang jatuh ke
+    # halaman HTML Next.js alih-alih ke FastAPI.
+    #
+    # Tidak ada layanan eksternal yang dipanggil. LLM memakai provider mock
+    # dan embedding memakai stub hashing, jadi tidak ada API key, tidak ada
+    # biaya, dan tidak ada model 470 MB yang diunduh. Yang diuji tetap
+    # pipeline utuh dari unggah berkas sampai streaming jawaban.
+
+    env:
+      # Passcode uji. Hash dihitung dari nilai ini, bukan ditulis terpisah,
+      # supaya tidak ada dua sumber kebenaran yang bisa berbeda.
+      E2E_PASSCODE: "uji-e2e-playwright-ci"
+      LLM_PROVIDER: mock
+      LLM_FALLBACK_CHAIN: ""
+      USE_LOCAL_EMBEDDING: "0"
+      REDIS_URL: ""
+      SUPABASE_URL: ""
+      SUPABASE_SERVICE_KEY: ""
+      GROQ_API_KEY: ""
+      DEBUG: "true"
+      CORS_ORIGINS: "http://localhost:3000,http://127.0.0.1:3000"
+      CHROMA_PERSIST_DIR: ${{ github.workspace }}/e2e-data/chroma
+      SQLITE_FALLBACK_PATH: ${{ github.workspace }}/e2e-data/metadata.db
+      BACKEND_ORIGIN: http://127.0.0.1:8000
+      NEXT_PUBLIC_USE_BACKEND: "1"
+      NEXT_PUBLIC_API_BASE_URL: ""
+      NEXT_TELEMETRY_DISABLED: "1"
+      E2E_BASE_URL: http://127.0.0.1:3000
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      # Dependency backend sengaja sama dengan job `backend`. Kalau daftar ini
+      # berbeda, E2E bisa gagal karena paket yang tidak terpasang, bukan karena
+      # ada yang rusak di aplikasi.
+      - name: Pasang dependency backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install fastapi "uvicorn[standard]" pydantic pydantic-settings \
+            python-multipart httpx numpy chromadb pypdf redis \
+            pytest pytest-asyncio pytest-cov ruff "reportlab>=4.0"
+
+      - name: Siapkan konfigurasi E2E
+        working-directory: backend
+        # Hash dibuat dari `E2E_PASSCODE` oleh fungsi yang sama dengan yang
+        # dipakai aplikasi dan skrip `make_passcode`, jadi tidak mungkin
+        # berbeda dari yang diverifikasi saat login.
+        run: |
+          mkdir -p "$CHROMA_PERSIST_DIR" "$(dirname "$SQLITE_FALLBACK_PATH")"
+          HASH=$(python -c "from app.core.security import hash_passcode; import os; print(hash_passcode(os.environ['E2E_PASSCODE']))")
+          {
+            echo "ACCESS_PASSCODE_SHA256=$HASH"
+            echo "DEBUG=$DEBUG"
+            echo "CORS_ORIGINS=$CORS_ORIGINS"
+            echo "LLM_PROVIDER=$LLM_PROVIDER"
+            echo "USE_LOCAL_EMBEDDING=$USE_LOCAL_EMBEDDING"
+            echo "CHROMA_PERSIST_DIR=$CHROMA_PERSIST_DIR"
+            echo "SQLITE_FALLBACK_PATH=$SQLITE_FALLBACK_PATH"
+          } > .env
+          echo "Konfigurasi E2E ditulis ke backend/.env"
+
+      - name: Nyalakan backend
+        working-directory: backend
+        run: |
+          nohup python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 \
+            > "$RUNNER_TEMP/api.log" 2>&1 &
+          # Tunggu sampai benar-benar siap, bukan sekadar `sleep` dengan angka
+          # yang ditebak. Kalau 60 detik habis, log ikut dicetak supaya
+          # penyebabnya terlihat tanpa perlu membuka artefak.
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8000/api/v1/health > /dev/null 2>&1; then
+              echo "Backend siap setelah ${i} detik"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Backend tidak siap dalam 60 detik. Log terakhir:" >&2
+          tail -n 40 "$RUNNER_TEMP/api.log" >&2
+          exit 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Pasang dependency frontend
+        working-directory: frontend
+        run: npm ci --legacy-peer-deps --no-audit --no-fund
+
+      - name: Pasang browser Playwright
+        working-directory: frontend
+        # Hanya chromium: spec memakai project chromium saja, dan mengunduh
+        # firefox serta webkit berarti ratusan MB untuk browser yang tidak
+        # pernah dipakai.
+        run: npx playwright install --with-deps chromium
+
+      - name: Nyalakan frontend
+        working-directory: frontend
+        # `next dev` dipakai, bukan `next start`, karena E2E memeriksa perilaku
+        # aplikasi apa adanya dan build produksi sudah diperiksa job frontend.
+        run: |
+          nohup npx next dev --port 3000 > "$RUNNER_TEMP/web.log" 2>&1 &
+          for i in $(seq 1 90); do
+            if curl -fsS http://127.0.0.1:3000/login > /dev/null 2>&1; then
+              echo "Frontend siap setelah ${i} detik"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Frontend tidak siap dalam 90 detik. Log terakhir:" >&2
+          tail -n 40 "$RUNNER_TEMP/web.log" >&2
+          exit 1
+
+      - name: Jalankan E2E
+        working-directory: frontend
+        # Retry 1 kali karena test ini menyentuh browser dan proses jaringan;
+        # kegagalan yang tidak konsisten bukan bugs aplikasi. Kegagalan yang
+        # konsisten tetap muncul sebagai merah.
+        run: npx playwright test --retries=1
+
+      - name: Unggah artefak kegagalan
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            frontend/test-results
+            frontend/playwright-report
+          retention-days: 7
+          if-no-files-found: ignore

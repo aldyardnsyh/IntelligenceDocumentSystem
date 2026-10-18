@@ -17,7 +17,7 @@
      bukan klaim. Badge CI diambil langsung dari hasil GitHub Actions, jadi
      kalau ada yang rusak, badge-nya merah. -->
 [![CI](https://github.com/aldyardnsyh/IntelligenceDocumentSystem/actions/workflows/ci.yml/badge.svg)](https://github.com/aldyardnsyh/IntelligenceDocumentSystem/actions/workflows/ci.yml)
-[![pytest](https://img.shields.io/badge/pytest-434_passed-0A9EDC?logo=pytest&logoColor=white)](#verifikasi-dan-pengujian)
+[![pytest](https://img.shields.io/badge/pytest-502_passed-0A9EDC?logo=pytest&logoColor=white)](#verifikasi-dan-pengujian)
 [![Playwright](https://img.shields.io/badge/Playwright-46_specs-2EAD33?logo=playwright&logoColor=white)](#verifikasi-dan-pengujian)
 [![coverage](https://img.shields.io/badge/coverage-83%25-4C1)](#verifikasi-dan-pengujian)
 [![Lisensi](https://img.shields.io/badge/lisensi-PSHT-blue)](LICENSE.md)
@@ -249,7 +249,7 @@ Evaluasi ini tidak memerlukan API key tambahan. Untuk skor RAGAS lengkap
 
 ```powershell
 cd backend
-python -m pytest                 # 434 test, coverage gate 70%
+python -m pytest                 # 502 test, coverage gate 70%
 python -m ruff check app tests scripts
 ```
 
@@ -284,8 +284,17 @@ cd frontend
 npx playwright test
 ```
 
-Playwright sengaja tidak menyalakan server sendiri. Jalankan backend dan
-frontend lebih dulu di dua terminal terpisah.
+Saat dijalankan di komputer sendiri, Playwright sengaja tidak menyalakan
+server. Jalankan backend dan frontend lebih dulu di dua terminal terpisah,
+supaya log server tetap terbaca dan bisa dibedakan dari log test.
+
+Di CI, rangkaian yang sama dijalankan otomatis pada setiap push lewat job
+`End-to-end (Playwright)`. Job itu menyalakan backend dan frontend sendiri
+dengan provider LLM `mock` dan embedding stub, jadi tidak ada API key, tidak
+ada biaya, dan tidak ada model berukuran besar yang diunduh. Kalau job itu
+gagal, laporan Playwright beserta tangkapan layar dan rekaman langkahnya
+diunggah sebagai artefak `playwright-report` dan bisa diunduh dari tab
+Actions.
 
 ## Evaluasi dengan RAGAS
 
