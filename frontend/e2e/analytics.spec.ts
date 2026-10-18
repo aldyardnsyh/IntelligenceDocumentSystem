@@ -14,7 +14,12 @@ test.describe("evaluasi & observability", () => {
   test("halaman analytics menjelaskan isinya", async ({ page }) => {
     await login(page);
     await page.goto("/analytics");
-    await expect(page.getByRole("heading", { name: /evaluasi/i })).toBeVisible();
+    // `level: 1` wajib. Tanpa itu, judul halaman dan subjudul "Belum ada data
+    // evaluasi" sama-sama cocok, dan Playwright menolak memilih di antara
+    // keduanya (strict mode). Yang dimaksud test ini adalah judul halaman.
+    await expect(
+      page.getByRole("heading", { level: 1, name: /evaluasi/i }),
+    ).toBeVisible();
     // Penjelasan apa yang diukur harus ada, bukan sekadar judul.
     await expect(page.getByText(/precision|latensi|log query/i).first()).toBeVisible();
   });

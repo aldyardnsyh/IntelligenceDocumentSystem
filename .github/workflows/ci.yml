@@ -279,6 +279,43 @@ jobs:
           tail -n 40 "$RUNNER_TEMP/web.log" >&2
           exit 1
 
+      - name: Periksa kesehatan layanan
+        # Gagal cepat dengan pesan jelas. Tanpa langkah ini, konfigurasi yang
+        # salah (passcode tidak cocok, proxy tidak meneruskan `/api/v1`,
+        # backend tidak bisa menulis berkas) muncul sebagai puluhan test yang
+        # gagal serentak dengan gejala "element not found", dan penyebabnya
+        # harus ditebak dari log browser.
+        run: |
+          set -o pipefail
+          echo "== backend langsung"
+          curl -fsS http://127.0.0.1:8000/api/v1/health | head -c 300; echo
+
+          echo "== login lewat proxy frontend"
+          LOGIN=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -X POST http://127.0.0.1:3000/api/v1/auth/verify \
+            -H 'content-type: application/json' \
+            -d "{\"passcode\": \"$E2E_PASSCODE\"}")
+          echo "status login: $LOGIN"
+          if [ "$LOGIN" != "200" ]; then
+            echo "Login lewat proxy gagal. Log backend dan frontend:" >&2
+            tail -n 40 "$RUNNER_TEMP/api.log" >&2 || true
+            tail -n 40 "$RUNNER_TEMP/web.log" >&2 || true
+            exit 1
+          fi
+
+          echo "== unggah satu berkas lewat proxy"
+          UPLOAD=$(curl -sS -o /tmp/unggah.json -w '%{http_code}' \
+            -c /tmp/cookies.txt -b /tmp/cookies.txt \
+            -X POST http://127.0.0.1:3000/api/v1/documents/upload \
+            -F "file=@backend/samples/kebijakan-cuti.txt;type=text/plain")
+          echo "status unggah: $UPLOAD"
+          head -c 300 /tmp/unggah.json; echo
+          if [ "$UPLOAD" != "200" ] && [ "$UPLOAD" != "202" ]; then
+            echo "Unggah lewat proxy gagal. Log backend:" >&2
+            tail -n 60 "$RUNNER_TEMP/api.log" >&2 || true
+            exit 1
+          fi
+
       - name: Jalankan E2E
         working-directory: frontend
         # Retry 1 kali karena test ini menyentuh browser dan proses jaringan;
@@ -297,5 +334,7 @@ jobs:
           path: |
             frontend/test-results
             frontend/playwright-report
+            ${{ runner.temp }}/api.log
+            ${{ runner.temp }}/web.log
           retention-days: 7
           if-no-files-found: ignore

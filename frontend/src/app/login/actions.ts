@@ -137,14 +137,24 @@ export async function submitPasscode(
 
   if (isMockMode) clearAttempts(ip);
 
+  // Skema request menentukan apakah cookie harus `Secure`.
+  const origin = resolveRequestOrigin(await headers());
+
   const jar = await cookies();
 
   // Cookie ini hanya penanda "sudah lewat gerbang" untuk proxy.ts, bukan
   // kredensial. Penegakan sesungguhnya ada di backend.
+  //
+  // `secure` mengikuti skema request, BUKAN `NODE_ENV`. Versi sebelumnya
+  // memakai `NODE_ENV === "production"`, dan itu membuat login tidak pernah
+  // bertahan saat aplikasi produksi diakses lewat HTTP (localhost untuk
+  // memeriksa hasil build, IP LAN, atau CI): browser membuang cookie
+  // `Secure` yang dikirim lewat HTTP, proxy tidak melihat sesi, dan setiap
+  // perpindahan halaman memantul ke /login tanpa pesan apa pun.
   jar.set(SESSION_COOKIE, "1", {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: origin.startsWith("https://"),
     path: "/",
     maxAge: SESSION_TTL_SECONDS,
   });

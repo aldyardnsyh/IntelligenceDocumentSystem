@@ -18,7 +18,10 @@ test.describe("gerbang akses", () => {
     await page.goto("/login");
     await page.getByLabel("Passcode akses").fill("passcode-yang-salah");
     await page.getByRole("button", { name: "Masuk" }).click();
-    await expect(page.getByRole("alert")).toContainText(/salah/i);
+    // Alert milik form passcode, bukan `#__next-route-announcer__` yang
+    // selalu ada di setiap halaman Next.js dan teksnya kosong. Tanpa
+    // pembedaan ini, asersinya memeriksa elemen yang salah.
+    await expect(page.locator("#passcode-feedback")).toContainText(/salah/i);
     await expect(page).toHaveURL(/\/login/);
   });
 

@@ -40,7 +40,12 @@ test.describe("halaman lain", () => {
     for (const path of ["/", "/about", "/analytics"]) {
       await page.goto(path);
       await expect(page).not.toHaveURL(/\/login/);
-      await expect(page.getByRole("alert")).toHaveCount(0);
+      // Route announcer Next.js selalu punya role alert, jadi menghitung
+      // seluruh alert akan selalu gagal. Yang diperiksa adalah pesan error
+      // yang benar-benar ditampilkan aplikasi.
+      await expect(
+        page.locator('[role="alert"]:not(#__next-route-announcer__)'),
+      ).toHaveCount(0);
     }
   });
 
