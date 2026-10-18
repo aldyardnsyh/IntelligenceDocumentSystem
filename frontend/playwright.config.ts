@@ -16,6 +16,12 @@ export default defineConfig({
   testDir: "./e2e",
   timeout: 60_000,
   expect: { timeout: 15_000 },
+  // Sengaja berurutan, satu worker. Banyak test mengunggah berkas yang sama
+  // (groundedness dan preview-toast paling sering), dan `waitForDocumentReady`
+  // mencocokkan baris tabel lewat nama berkas. Kalau dua test berjalan
+  // bersamaan, nama itu muncul di dua baris dan pencocokannya gagal secara
+  // acak. Karena itu waktu tambahan di CI diterima lewat batas waktu job,
+  // bukan lewat paralel.
   fullyParallel: false,
   workers: 1,
   retries: 0,

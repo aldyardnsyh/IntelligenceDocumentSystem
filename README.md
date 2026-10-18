@@ -296,6 +296,17 @@ gagal, laporan Playwright beserta tangkapan layar dan rekaman langkahnya
 diunggah sebagai artefak `playwright-report` dan bisa diunduh dari tab
 Actions.
 
+Dua hal yang perlu diketahui tentang job ini:
+
+- **Batas waktunya 60 menit**, jauh lebih longgar dari dua job lain. Test-nya
+  mengunggah berkas sungguhan dan menunggu proses indeks selesai untuk setiap
+  berkas, jadi totalnya memang lama.
+- **Test sengaja berjalan satu per satu.** Banyak skenario mengunggah berkas
+  dengan nama yang sama, dan pemeriksaan status mencocokkan baris tabel lewat
+  nama berkas. Kalau dua skenario berjalan bersamaan, nama itu muncul di dua
+  baris dan pemeriksaannya gagal secara acak. Test yang gagal acak lebih buruk
+  daripada test yang lambat, karena hasilnya tidak bisa dipercaya.
+
 ## Evaluasi dengan RAGAS
 
 Dataset berisi 11 pertanyaan: 8 harus terjawab benar, 3 **harus** dijawab

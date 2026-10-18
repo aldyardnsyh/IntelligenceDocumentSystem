@@ -125,7 +125,18 @@ jobs:
   e2e:
     name: End-to-end (Playwright)
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # 60 menit, bukan 25. Run pertama terpotong di batas 25 menit setelah 24
+    # menit terpakai dan belum selesai, jadi 40 menit pun masih tipis. Kalau
+    # nanti masih terpotong, yang perlu diperiksa bukan angka ini melainkan
+    # test mana yang menghabiskan waktu, dan itu terlihat dari laporan per
+    # test. Menaikkan angka tanpa mengukur hanya memindahkan masalah.
+    #
+    # Test sengaja TIDAK dijalankan paralel. Banyak test mengunggah berkas
+    # yang sama, dan `waitForDocumentReady` mencocokkan baris tabel lewat nama
+    # berkas; dengan dua test berjalan bersamaan, nama itu muncul di dua baris
+    # dan test gagal secara acak. Test yang gagal acak lebih buruk daripada
+    # test yang lambat.
+    timeout-minutes: 60
     needs: [backend]
 
     # Test ini menyalakan backend dan frontend sungguhan, lalu menggerakkan
@@ -259,7 +270,10 @@ jobs:
         # Retry 1 kali karena test ini menyentuh browser dan proses jaringan;
         # kegagalan yang tidak konsisten bukan bugs aplikasi. Kegagalan yang
         # konsisten tetap muncul sebagai merah.
-        run: npx playwright test --retries=1
+        #
+        # `line` dipakai, bukan `html`, karena laporan HTML butuh server untuk
+        # dibuka. Kegagalan yang butuh konteks visual diambil dari artefak.
+        run: npx playwright test --retries=1 --reporter=line
 
       - name: Unggah artefak kegagalan
         if: failure()
