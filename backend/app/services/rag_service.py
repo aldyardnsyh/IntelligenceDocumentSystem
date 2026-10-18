@@ -275,6 +275,7 @@ class RagService:
                 from_cache=True,
                 trace_id=trace.trace_id,
                 document_id=document_id,
+                document_ids=document_ids,
             )
             if self._tracer is not None:
                 await asyncio.to_thread(
@@ -323,6 +324,7 @@ class RagService:
                 question=question,
                 session_id=session_id,
                 document_id=document_id,
+                document_ids=document_ids,
                 started=started,
                 trace=trace,
                 history=await self._load_history(session_id),
@@ -388,6 +390,7 @@ class RagService:
                     from_cache=False,
                     trace_id=trace.trace_id,
                     document_id=document_id,
+                    document_ids=document_ids,
                     ungrounded=True,
                 )
                 yield StreamEvent(type="done", response_time_ms=elapsed)
@@ -442,6 +445,7 @@ class RagService:
                         from_cache=False,
                         trace_id=trace.trace_id,
                         document_id=document_id,
+                        document_ids=document_ids,
                     )
                     yield StreamEvent(type="done", response_time_ms=elapsed)
                     return
@@ -456,6 +460,7 @@ class RagService:
                     from_cache=False,
                     trace_id=trace.trace_id,
                     document_id=document_id,
+                    document_ids=document_ids,
                 )
                 yield StreamEvent(type="done", response_time_ms=elapsed)
                 return
@@ -476,6 +481,7 @@ class RagService:
                 from_cache=False,
                 trace_id=trace.trace_id,
                 document_id=document_id,
+                document_ids=document_ids,
             )
             if self._tracer is not None:
                 await asyncio.to_thread(
@@ -574,6 +580,7 @@ class RagService:
             from_cache=False,
             trace_id=trace.trace_id,
             document_id=document_id,
+            document_ids=document_ids,
         )
         if self._tracer is not None:
             # Nama provider tidak tersedia di sini (chain hanya mengembalikan
@@ -597,6 +604,7 @@ class RagService:
         question: str,
         session_id: str,
         document_id: str | None,
+        document_ids: list[str] | None = None,
         started: float,
         trace: TraceContext,
         history: list[tuple[str, str]],
@@ -615,9 +623,14 @@ class RagService:
         documents = await asyncio.to_thread(self._repository.list_documents)
 
         # Scope sesi tetap dihormati: sesi privat satu dokumen tidak boleh
-        # tiba-tiba menjawab tentang seluruh koleksi.
+        # tiba-tiba menjawab tentang seluruh koleksi. Bentuk jamaknya juga,
+        # kalau tidak sesi multi-dokumen akan menjawab dengan daftar seluruh
+        # koleksi dan pengguna mengira pilihan scope-nya tidak berlaku.
         if document_id:
             documents = [item for item in documents if item.id == document_id]
+        elif document_ids:
+            dizinkan = set(document_ids)
+            documents = [item for item in documents if item.id in dizinkan]
 
         ready = [item for item in documents if item.status is DocumentStatus.READY]
         terms = topic_terms(question)
@@ -677,6 +690,7 @@ class RagService:
             from_cache=False,
             trace_id=trace.trace_id,
             document_id=document_id,
+            document_ids=document_ids,
         )
         yield StreamEvent(type="done", response_time_ms=elapsed)
 
@@ -700,6 +714,7 @@ class RagService:
         from_cache: bool,
         trace_id: str | None = None,
         document_id: str | None = None,
+        document_ids: list[str] | None = None,
         ungrounded: bool = False,
     ) -> None:
         """Simpan ke memori sesi, metadata sesi, cache, dan log."""
@@ -748,6 +763,7 @@ class RagService:
                 last_active_at=now,
                 message_count=0,
                 document_id=document_id,
+                document_ids=document_ids,
             )
         session.last_active_at = now
         session.message_count = len(existing)

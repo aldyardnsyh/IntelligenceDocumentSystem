@@ -130,6 +130,16 @@ class ChatSession:
     hanya boleh memakai dokumen itu. Sesi global (``None``) boleh memakai
     semua dokumen. Inilah yang membuat "chat privat" per dokumen mungkin tanpa
     harus menyalin dokumen atau menyetel filter di setiap request.
+
+    ``document_ids`` adalah bentuk jamak dari scope yang sama: sesi boleh
+    dibatasi ke beberapa dokumen sekaligus. Dua field ini sengaja tidak
+    digabung menjadi satu, karena bedanya bermakna. ``document_id`` berarti
+    "sesi ini milik satu dokumen" dan dipakai UI untuk menampilkan badge
+    scope serta tautan ke dokumen itu. ``document_ids`` berarti "sesi ini
+    mencari di beberapa dokumen" dan tidak punya satu dokumen utama.
+
+    Kalau keduanya terisi, ``document_id`` yang menang, karena itu scope yang
+    lebih sempit dan permintaan pengguna yang paling spesifik.
     """
 
     id: str
@@ -138,6 +148,21 @@ class ChatSession:
     last_active_at: str
     message_count: int = 0
     document_id: str | None = None
+    document_ids: list[str] | None = None
+
+    def scope_ids(self) -> list[str] | None:
+        """Dokumen yang boleh dicari sesi ini, atau ``None`` untuk semua.
+
+        Dipakai agar pemanggil tidak perlu tahu aturan prioritas antara
+        ``document_id`` dan ``document_ids``. Kalau aturan itu ditulis ulang
+        di setiap tempat pemakaian, cepat atau lambat ada satu tempat yang
+        lupa dan scope-nya bocor.
+        """
+        if self.document_id:
+            return [self.document_id]
+        if self.document_ids:
+            return list(self.document_ids)
+        return None
 
 
 @dataclass(slots=True)

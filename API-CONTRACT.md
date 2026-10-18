@@ -260,6 +260,7 @@ sesi aktif yang menunjuk dokumen itu, hapus juga sitasinya dari riwayat.
   "session_id": "ses_..." | null,
   "question": "apa isi klausul 14?",
   "document_id": "doc_..." | null,
+  "document_ids": ["doc_...", "doc_..."] | null,
   "allow_ungrounded": false
 }
 ```
@@ -269,6 +270,7 @@ sesi aktif yang menunjuk dokumen itu, hapus juga sitasinya dari riwayat.
 | `session_id` | tidak | `null` = sesi baru; server yang membuat id-nya |
 | `question` | ya | 1-8000 karakter, tidak boleh kosong |
 | `document_id` | tidak | **scope dokumen**: kalau diisi, retrieval hanya mencari di dokumen itu (chat privat per dokumen). `404` kalau dokumen tidak ada, `409` kalau belum `ready` |
+| `document_ids` | tidak | **scope beberapa dokumen**, maksimal 20. Kalau diisi, retrieval hanya mencari di dokumen-dokumen itu. `404` kalau ada id yang tidak dikenal (pesan menyebut id mana), `409` kalau ada yang belum `ready`. Kalau `document_id` juga diisi, `document_id` yang dipakai karena itu scope yang lebih sempit |
 | `allow_ungrounded` | tidak | `true` = kalau tidak ada konteks, LLM menjawab dari pengetahuan umum dengan label; `false` = mode ketat ("tidak ditemukan") |
 
 Jawaban berupa SSE. Setiap event dipisahkan baris kosong ganda, dan payload

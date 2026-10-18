@@ -39,6 +39,15 @@ export interface ChatController {
    * bisa jatuh menjadi null dan pertanyaan mencari di seluruh dokumen.
    */
   sessionDocumentId: string | null;
+  /**
+   * Scope beberapa dokumen, dibaca dari data sesi yang tersimpan.
+   *
+   * Dipisah dari sessionDocumentId karena artinya berbeda: sesi satu
+   * dokumen menampilkan nama berkasnya, sedangkan sesi multi-dokumen hanya
+   * menampilkan jumlah. Menggabungkan keduanya membuat UI harus menebak mana
+   * yang sedang berlaku.
+   */
+  sessionDocumentIds: string[];
   /** Judul sesi, setelah diubah manual kalau sempat diubah. */
   sessionTitle: string;
   isLoadingHistory: boolean;
@@ -67,6 +76,8 @@ export function useChat(
   options: {
     /** Scope dokumen untuk sesi baru (chat privat per dokumen). */
     documentId?: string | null;
+    /** Scope beberapa dokumen untuk sesi baru. */
+    documentIds?: string[];
     /** Izinkan LLM menjawab dari pengetahuan umum saat konteks kosong. */
     allowUngrounded?: boolean;
   } = {},
@@ -78,6 +89,9 @@ export function useChat(
   // Scope sesi yang sedang dibuka. Diisi dari riwayat sesi (server), bukan
   // dari daftar sesi yang bisa belum termuat.
   const [sessionDocumentId, setSessionDocumentId] = useState<string | null>(null);
+  // Scope jamak sesi yang sedang dibuka. Diisi dari riwayat sesi, sama
+  // seperti scope tunggal, supaya pertanyaan lanjutan tidak melebar.
+  const [sessionDocumentIds, setSessionDocumentIds] = useState<string[]>([]);
   const [sessionTitle, setSessionTitle] = useState(initialTitle);
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(Boolean(initialSessionId));
@@ -106,6 +120,7 @@ export function useChat(
         // lanjutan memakai dokumen yang sama tanpa bergantung pada daftar
         // sesi yang mungkin belum termuat.
         setSessionDocumentId(history.session.document_id ?? null);
+        setSessionDocumentIds(history.session.document_ids ?? []);
         setMessages(
           history.messages.map((message) => ({
             id: message.id,
@@ -282,11 +297,18 @@ export function useChat(
         const scopeForRequest = activeSessionId
           ? sessionDocumentId
           : (options.documentId ?? null);
+        // Scope jamak hanya berlaku untuk sesi baru. Untuk sesi yang sudah
+        // berjalan, scope-nya diambil dari riwayat di server, supaya klien
+        // yang lupa mengirimnya tidak memperlebar pencarian.
+        const scopeIdsForRequest = activeSessionId
+          ? sessionDocumentIds
+          : (options.documentIds ?? []);
         await askQuestion(
           {
             sessionId: activeSessionId,
             question,
             documentId: scopeForRequest,
+            documentIds: scopeIdsForRequest,
             allowUngrounded: options.allowUngrounded ?? false,
           },
           { onEvent: applyEvent, signal: controller.signal },
@@ -311,7 +333,9 @@ export function useChat(
       settleAssistant,
       startCooldown,
       sessionDocumentId,
+      sessionDocumentIds,
       options.documentId,
+      options.documentIds,
       options.allowUngrounded,
     ],
   );
@@ -357,6 +381,7 @@ const startNewSession = useCallback(() => {
     // sebelumnya, pengguna mengira mulai dari nol, tapi pertanyaannya
     // masih terkunci ke dokumen lama.
     setSessionDocumentId(null);
+    setSessionDocumentIds([]);
     setSessionTitle("");
     setMessages([]);
     setLastQuestion(null);
@@ -376,6 +401,7 @@ const startNewSession = useCallback(() => {
     messages,
     sessionId,
     sessionDocumentId,
+    sessionDocumentIds,
     sessionTitle,
     isLoadingHistory,
     isSending,

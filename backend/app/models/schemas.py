@@ -171,6 +171,9 @@ class ChatSessionResponse(BaseModel):
     message_count: int
     #: Dokumen yang mengikat sesi ini, atau ``None`` untuk sesi global.
     document_id: str | None = None
+    #: Beberapa dokumen sekaligus sebagai scope sesi. Kosong berarti scope-nya
+    #: ditentukan `document_id`, atau sesi ini global.
+    document_ids: list[str] = Field(default_factory=list)
 
 
 class ChatMessageResponse(BaseModel):
@@ -388,6 +391,7 @@ def session_to_response(session: ChatSession) -> ChatSessionResponse:
         last_active_at=session.last_active_at,
         message_count=session.message_count,
         document_id=session.document_id,
+        document_ids=list(session.document_ids or []),
     )
 
 

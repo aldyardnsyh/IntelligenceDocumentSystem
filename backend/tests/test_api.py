@@ -1166,6 +1166,201 @@ class TestChatScopeDokumen:
         assert session["document_id"] != second_id
 
 
+class TestChatScopeBeberapaDokumen:
+    """Scope sesi boleh terdiri dari beberapa dokumen.
+
+    Alur "chat privat per dokumen" hanya membutuhkan satu dokumen, jadi
+    `document_ids` lama tidak dipakai UI. Begitu pemilih multi-dokumen ada di
+    UI, scope ini harus tunduk pada aturan yang sama dengan scope tunggal:
+    divalidasi, diikat ke sesi, dan tidak bisa diperlebar oleh request
+    berikutnya.
+    """
+
+    async def test_dokumen_tidak_dikenal_ditolak(self, client: AsyncClient) -> None:
+        response = await client.post(
+            "/api/v1/chat/query",
+            json={"question": "apa isinya?", "document_ids": ["doc_tidak_ada"]},
+        )
+        assert response.status_code == 404
+        detail = response.json()["detail"].lower()
+        assert "tidak ditemukan" in detail
+        # Pesan harus menyebut id yang salah, supaya pengguna tahu mana yang
+        # perlu dihapus dari pilihannya.
+        assert "doc_tidak_ada" in detail
+
+    async def test_sesi_menyimpan_scope_jamak(self, client: AsyncClient) -> None:
+        pertama = await client.post(
+            "/api/v1/documents/upload",
+            files={
+                "file": (
+                    "multi-a.md",
+                    b"SLA penyelesaian permintaan adalah dua hari kerja.\n",
+                    "text/markdown",
+                )
+            },
+        )
+        a_id = pertama.json()["id"]
+        await _wait_ready(client, a_id)
+
+        kedua = await client.post(
+            "/api/v1/documents/upload",
+            files={
+                "file": (
+                    "multi-b.md",
+                    b"Panduan pemasangan server produksi memakai container docker.\n",
+                    "text/markdown",
+                )
+            },
+        )
+        b_id = kedua.json()["id"]
+        await _wait_ready(client, b_id)
+
+        response = await client.post(
+            "/api/v1/chat/query",
+            json={
+                "question": "berapa hari SLA penyelesaian permintaan?",
+                "document_ids": [a_id, b_id],
+            },
+        )
+        assert response.status_code == 200, response.text
+        session_id = next(
+            event["session_id"]
+            for event in parse_sse(response.text)
+            if event["type"] == "session"
+        )
+
+        history = (await client.get(f"/api/v1/chat/{session_id}/history")).json()
+        assert sorted(history["session"]["document_ids"]) == sorted([a_id, b_id])
+        # Sesi jamak tidak punya satu dokumen utama.
+        assert history["session"]["document_id"] is None
+
+        # Pertanyaan lanjutan tanpa mengirim scope lagi harus memakai scope
+        # yang tersimpan, bukan mencari di seluruh koleksi.
+        lanjutan = await client.post(
+            "/api/v1/chat/query",
+            json={"question": "berapa hari lagi batas waktunya?", "session_id": session_id},
+        )
+        assert lanjutan.status_code == 200, lanjutan.text
+        citations = next(
+            (
+                event["value"]
+                for event in parse_sse(lanjutan.text)
+                if event["type"] == "citations"
+            ),
+            [],
+        )
+        dizinkan = {a_id, b_id}
+        for citation in citations:
+            assert citation["document_id"] in dizinkan, (
+                "sesi multi-dokumen menemukan sumber dari luar dokumen yang dipilih"
+            )
+
+    async def test_scope_tunggal_menang_atas_scope_jamak(
+        self, client: AsyncClient
+    ) -> None:
+        """Kalau keduanya dikirim, `document_id` yang dipakai.
+
+        Itu scope yang lebih sempit, dan menggabungkan keduanya akan membuat
+        pencarian lebih luas daripada yang diminta pengguna.
+        """
+        satu = await client.post(
+            "/api/v1/documents/upload",
+            files={
+                "file": (
+                    "tunggal-x.md",
+                    b"SLA penyelesaian permintaan adalah dua hari kerja.\n",
+                    "text/markdown",
+                )
+            },
+        )
+        x_id = satu.json()["id"]
+        await _wait_ready(client, x_id)
+
+        dua = await client.post(
+            "/api/v1/documents/upload",
+            files={
+                "file": (
+                    "tunggal-y.md",
+                    b"Panduan pemasangan server produksi memakai container docker.\n",
+                    "text/markdown",
+                )
+            },
+        )
+        y_id = dua.json()["id"]
+        await _wait_ready(client, y_id)
+
+        response = await client.post(
+            "/api/v1/chat/query",
+            json={
+                "question": "berapa hari SLA penyelesaian permintaan?",
+                "document_id": x_id,
+                "document_ids": [y_id],
+            },
+        )
+        assert response.status_code == 200, response.text
+        session_id = next(
+            event["session_id"]
+            for event in parse_sse(response.text)
+            if event["type"] == "session"
+        )
+
+        history = (await client.get(f"/api/v1/chat/{session_id}/history")).json()
+        assert history["session"]["document_id"] == x_id
+        assert history["session"]["document_ids"] == []
+
+    async def test_pertanyaan_koleksi_menghormati_scope_jamak(
+        self, client: AsyncClient
+    ) -> None:
+        """Daftar dokumen yang dijawab tidak boleh melebar dari scope sesi.
+
+        Tanpa ini, sesi multi-dokumen menjawab "dokumen apa saja tersedia"
+        dengan seluruh koleksi, dan pengguna mengira pilihannya tidak berlaku.
+        """
+        pilih = await client.post(
+            "/api/v1/documents/upload",
+            files={
+                "file": (
+                    "koleksi-dipilih.md",
+                    b"SLA penyelesaian permintaan adalah dua hari kerja.\n",
+                    "text/markdown",
+                )
+            },
+        )
+        dipilih_id = pilih.json()["id"]
+        await _wait_ready(client, dipilih_id)
+
+        lain = await client.post(
+            "/api/v1/documents/upload",
+            files={
+                "file": (
+                    "koleksi-lain.md",
+                    b"Panduan pemasangan server produksi memakai container docker.\n",
+                    "text/markdown",
+                )
+            },
+        )
+        lain_id = lain.json()["id"]
+        await _wait_ready(client, lain_id)
+
+        response = await client.post(
+            "/api/v1/chat/query",
+            json={
+                "question": "dokumen apa saja yang tersedia?",
+                "document_ids": [dipilih_id],
+            },
+        )
+        assert response.status_code == 200, response.text
+        teks = "".join(
+            event.get("value", "")
+            for event in parse_sse(response.text)
+            if event["type"] == "token"
+        )
+        assert "koleksi-dipilih.md" in teks
+        assert "koleksi-lain.md" not in teks, (
+            "daftar dokumen melebar ke luar scope yang dipilih"
+        )
+
+
 class TestSettings:
     async def test_ambil_default(self, client: AsyncClient) -> None:
         response = await client.get("/api/v1/settings")

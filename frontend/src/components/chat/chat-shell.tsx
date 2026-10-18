@@ -18,6 +18,8 @@ import { ConfirmDialog } from "@/components/common/confirm-dialog";
 import { ChatEmptyState } from "./chat-empty-state";
 import { ChatInput } from "./chat-input";
 import { ChatSidebarContent } from "./chat-sidebar";
+import { DocumentScopePicker } from "./document-scope-picker";
+import { gabungScope } from "@/lib/chat/scope";
 import { MessageBubble } from "./message-bubble";
 import { RenameSessionDialog } from "./rename-session-dialog";
 import { SessionTitleBar, SidebarToggle } from "./session-title-bar";
@@ -27,7 +29,7 @@ import { uploadDocument } from "@/lib/api";
 import { ApiError } from "@/lib/api/error";
 import { queryKeys, useDocuments, useSessions } from "@/lib/queries";
 import { SESSION_TITLE_MAX_LENGTH } from "@/lib/mock/store";
-import type { ChatSession } from "@/types/api";
+import type { ChatSession, DocumentSummary } from "@/types/api";
 
 interface ChatShellProps {
   /** null untuk /chat (sesi baru), id untuk /chat/[sessionId]. */
@@ -46,6 +48,10 @@ export function ChatShell({
   // pertanyaan di luar dokumen hanya dijawab "tidak ditemukan". Jawabannya
   // tetap dilabeli sebagai bukan dari dokumen.
   const [allowUngrounded, setAllowUngrounded] = useState(true);
+  // Pilihan dokumen untuk sesi BARU. Untuk sesi yang sudah berjalan, scope-nya
+  // datang dari riwayat di server, bukan dari state ini, supaya klien yang
+  // lupa mengirimnya tidak memperlebar pencarian.
+  const [pickedDocumentIds, setPickedDocumentIds] = useState<string[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [attachmentPending, setAttachmentPending] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -68,17 +74,38 @@ export function ChatShell({
   // terlihat di UI.
   const initialDocumentId = routeSessionId ? null : routeDocumentId;
 
+  // `?doc=` mengunci satu dokumen. Nilainya HARUS ikut terkirim, bukan hanya
+  // ditampilkan: kalau hanya tampilan yang digabung, pencarian melebar ke
+  // semua dokumen sementara label di layar menyatakan dibatasi.
+  const lockedDocumentId = routeSessionId ? null : routeDocumentId;
+  const scopeTerkirim = gabungScope(lockedDocumentId, pickedDocumentIds);
+
   const chat = useChat(routeSessionId ?? undefined, "", {
     documentId: initialDocumentId,
+    documentIds: scopeTerkirim,
     allowUngrounded,
   });
 
   // Scope yang sedang aktif, dari sumber paling tepercaya ke paling lemah.
   const activeDocumentId =
     chat.sessionDocumentId ?? activeSession?.document_id ?? routeDocumentId ?? null;
+
+  // Scope jamak hanya berlaku untuk percakapan yang masih baru. Begitu sesi
+  // punya id di server, scope-nya milik server, dan menampilkan pilihan lokal
+  // yang tidak dipakai backend akan membuat badge berbohong.
+  const activeDocumentIds = routeSessionId
+    ? (chat.sessionDocumentIds.length > 0
+        ? chat.sessionDocumentIds
+        : (activeSession?.document_ids ?? []))
+    : pickedDocumentIds;
+
   const scopedDocument = activeDocumentId
     ? ((documents.data ?? []).find((item) => item.id === activeDocumentId) ?? null)
     : null;
+
+  const scopedDocuments = activeDocumentIds
+    .map((id) => (documents.data ?? []).find((item) => item.id === id))
+    .filter((item): item is DocumentSummary => Boolean(item));
 
   const activeSessionId = routeSessionId ?? chat.sessionId;
 
@@ -136,7 +163,12 @@ export function ChatShell({
   // Dokumen ber-scope dianggap cukup untuk bertanya meski daftar global belum
   // termuat: pengguna sudah memilih dokumennya, dan memblokir di sini hanya
   // membuat tombol kirim mati tanpa alasan yang terlihat.
-  const canAsk = readyDocuments.length > 0 || scopedDocument?.status === "ready";
+  const canAsk =
+    readyDocuments.length > 0 ||
+    scopedDocument?.status === "ready" ||
+    scopedDocuments.some((item) => item.status === "ready") ||
+    // Pengguna sudah memilih dokumen walau daftar global belum termuat.
+    activeDocumentIds.length > 0;
   const disabledReason = canAsk
     ? null
     : documents.isPending
@@ -159,6 +191,7 @@ export function ChatShell({
       activeSessionId={activeSessionId}
       onNewSession={() => {
         chat.startNewSession();
+        setPickedDocumentIds([]);
         promotedToRoute.current = null;
         setSidebarOpen(false);
         router.push("/chat");
@@ -188,6 +221,20 @@ export function ChatShell({
         */}
         <div className="flex items-center gap-2 border-b border-border px-3 py-2">
           <SidebarToggle onClick={() => setSidebarOpen(true)} className="lg:hidden" />
+          {/*
+            Pemilih scope hanya untuk percakapan baru. Sesi yang sudah berjalan
+            memakai scope yang tersimpan di server, dan mengubahnya di sini
+            hanya akan mengubah tampilan tanpa mengubah pencarian.
+          */}
+          {routeSessionId ? null : (
+            <DocumentScopePicker
+              documents={documents.data ?? []}
+              selected={scopeTerkirim}
+              onChange={setPickedDocumentIds}
+              disabled={chat.isSending || lockedDocumentId !== null}
+              lockedId={lockedDocumentId}
+            />
+          )}
           <SessionTitleBar
             session={activeSession}
             title={actions.liveTitleOf(activeSession) || chat.sessionTitle}
@@ -211,7 +258,15 @@ export function ChatShell({
             mode mana yang sedang aktif, dan itu yang membuat scope terasa
             tidak sinkron.
           */}
-          {activeDocumentId ? (
+          {!activeDocumentId && scopedDocuments.length > 0 ? (
+            <span
+              className="ml-auto flex min-w-0 shrink items-center gap-1.5 rounded-full bg-brand px-2.5 py-1 text-[11px] font-semibold text-primary-foreground"
+              title={`Pencarian dibatasi ke: ${scopedDocuments.map((item) => item.filename).join(", ")}`}
+            >
+              <FileText className="size-3 shrink-0" aria-hidden />
+              <span className="truncate">{scopedDocuments.length} dokumen</span>
+            </span>
+          ) : activeDocumentId ? (
             <span
               className="ml-auto flex min-w-0 shrink items-center gap-1.5 rounded-full bg-brand px-2.5 py-1 text-[11px] font-semibold text-primary-foreground"
               title={`Pencarian dibatasi ke ${scopedDocument?.filename ?? "satu dokumen"}`}

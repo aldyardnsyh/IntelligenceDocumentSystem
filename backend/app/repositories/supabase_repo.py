@@ -283,6 +283,8 @@ class SupabaseRepository:
                 "created_at": session.created_at,
                 "last_active_at": session.last_active_at,
                 "message_count": session.message_count,
+                "document_id": session.document_id,
+                "document_ids": session.document_ids,
             },
         )
 
@@ -436,12 +438,25 @@ def _to_document(row: dict[str, Any]) -> Document:
 
 
 def _to_session(row: dict[str, Any]) -> ChatSession:
+    mentah_ids = row.get("document_ids")
+    document_ids: list[str] | None = None
+    if isinstance(mentah_ids, list):
+        document_ids = [str(item) for item in mentah_ids if isinstance(item, str)] or None
+
     return ChatSession(
         id=row["id"],
         title=row["title"],
         created_at=row["created_at"],
         last_active_at=row["last_active_at"],
         message_count=int(row.get("message_count") or 0),
+        # `document_id` ikut dibaca, bukan hanya ditulis. Versi sebelumnya
+        # hanya mengirimnya saat upsert tapi tidak pernah membacanya kembali,
+        # jadi scope dokumen sesi hilang setiap kali sesi dimuat ulang, dan
+        # pertanyaan lanjutan diam-diam mencari di seluruh dokumen. Kolomnya
+        # memakai `.get` karena database yang belum dimigrasi tidak punya
+        # kolom ini, dan KeyError di sini akan menjatuhkan seluruh daftar sesi.
+        document_id=row.get("document_id"),
+        document_ids=document_ids,
     )
 
 

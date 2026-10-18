@@ -206,6 +206,98 @@ class TestSessions:
         assert repository.delete_all_sessions() == 3
         assert repository.list_sessions() == []
 
+    def test_scope_beberapa_dokumen_tersimpan(
+        self, repository: SqliteRepository
+    ) -> None:
+        """Scope jamak harus bertahan setelah sesi dibaca ulang.
+
+        Ini yang membuat chat multi-dokumen bisa dipercaya: kalau daftarnya
+        hilang saat dibaca, pertanyaan lanjutan diam-diam mencari di seluruh
+        koleksi dan jawabannya bisa berasal dari dokumen yang tidak dipilih.
+        """
+        repository.upsert_session(
+            ChatSession(
+                id="ses_multi",
+                title="Multi",
+                created_at="2026-01-01T00:00:00+00:00",
+                last_active_at="2026-01-01T00:00:00+00:00",
+                document_ids=["doc_a", "doc_b"],
+            )
+        )
+        found = repository.get_session("ses_multi")
+        assert found is not None
+        assert found.document_ids == ["doc_a", "doc_b"]
+
+    def test_scope_beberapa_dokumen_tidak_tertukar_dengan_scope_tunggal(
+        self, repository: SqliteRepository
+    ) -> None:
+        repository.upsert_session(
+            ChatSession(
+                id="ses_tunggal",
+                title="Tunggal",
+                created_at="2026-01-01T00:00:00+00:00",
+                last_active_at="2026-01-01T00:00:00+00:00",
+                document_id="doc_a",
+            )
+        )
+        found = repository.get_session("ses_tunggal")
+        assert found is not None
+        # Sesi satu dokumen tidak boleh tiba-tiba punya daftar scope.
+        assert found.document_ids is None
+
+    def test_scope_kosong_dibaca_sebagai_none(
+        self, repository: SqliteRepository
+    ) -> None:
+        """Daftar kosong dan "tidak ada scope" diperlakukan sama."""
+        repository.upsert_session(
+            ChatSession(
+                id="ses_kosong",
+                title="Kosong",
+                created_at="2026-01-01T00:00:00+00:00",
+                last_active_at="2026-01-01T00:00:00+00:00",
+                document_ids=[],
+            )
+        )
+        found = repository.get_session("ses_kosong")
+        assert found is not None
+        assert found.document_ids is None
+
+    def test_scope_ids_aturan_prioritas(self) -> None:
+        """`scope_ids` menjaga aturan prioritas di satu tempat.
+
+        Kalau aturan ini ditulis ulang di setiap pemakaian, cepat atau lambat
+        ada satu tempat yang lupa dan scope-nya bocor.
+        """
+        tanpa = ChatSession(
+            id="x", title="x", created_at="", last_active_at=""
+        )
+        assert tanpa.scope_ids() is None
+
+        tunggal = ChatSession(
+            id="x", title="x", created_at="", last_active_at="", document_id="doc_a"
+        )
+        assert tunggal.scope_ids() == ["doc_a"]
+
+        jamak = ChatSession(
+            id="x",
+            title="x",
+            created_at="",
+            last_active_at="",
+            document_ids=["doc_a", "doc_b"],
+        )
+        assert jamak.scope_ids() == ["doc_a", "doc_b"]
+
+        # Kalau keduanya terisi, yang lebih sempit menang.
+        keduanya = ChatSession(
+            id="x",
+            title="x",
+            created_at="",
+            last_active_at="",
+            document_id="doc_a",
+            document_ids=["doc_b", "doc_c"],
+        )
+        assert keduanya.scope_ids() == ["doc_a"]
+
 
 class TestAllChunks:
     """``all_chunks`` menopang rebuild indeks retrieval saat startup.

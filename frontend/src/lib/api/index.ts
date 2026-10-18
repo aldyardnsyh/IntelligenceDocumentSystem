@@ -183,6 +183,12 @@ export interface AskArgs {
   question: string;
   /** Scope dokumen untuk sesi ini (chat privat per dokumen). */
   documentId?: string | null;
+  /**
+   * Beberapa dokumen sekaligus sebagai scope. Daftar kosong berarti semua
+   * dokumen. Kalau `documentId` juga diberi, backend memakai `documentId`
+   * karena itu scope yang lebih sempit.
+   */
+  documentIds?: string[] | null;
   /** Izinkan jawaban dari pengetahuan umum saat tidak ada konteks dokumen. */
   allowUngrounded?: boolean;
 }
@@ -193,7 +199,7 @@ export interface AskArgs {
  * backend. Bentuk event-nya sama persis dengan FastAPI.
  */
 export async function askQuestion(
-  { sessionId, question, documentId, allowUngrounded }: AskArgs,
+  { sessionId, question, documentId, documentIds, allowUngrounded }: AskArgs,
   handlers: AskHandlers,
 ) {
   if (!isMockMode) {
@@ -206,6 +212,9 @@ export async function askQuestion(
         session_id: resolved,
         question,
         document_id: documentId ?? null,
+        // Daftar kosong dikirim sebagai null, bukan `[]`: backend membaca
+        // keduanya sebagai "tanpa scope", dan null lebih jelas maksudnya.
+        document_ids: documentIds && documentIds.length > 0 ? documentIds : null,
         allow_ungrounded: allowUngrounded ?? false,
       },
       { onEvent: handlers.onEvent, signal: handlers.signal },

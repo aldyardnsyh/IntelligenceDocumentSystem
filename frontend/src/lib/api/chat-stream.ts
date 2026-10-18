@@ -5,7 +5,7 @@ import { ApiError } from "./error";
 interface StreamQuery {
   session_id?: string | null;
   question: string;
-  document_ids?: string[];
+  document_ids?: string[] | null;
   document_id?: string | null;
   allow_ungrounded?: boolean;
 }

@@ -649,12 +649,32 @@ async def chat_query(
     # scope yang tidak terlihat di UI, dan persis yang membuat "chat privat
     # per dokumen" tidak bisa dipercaya.
     effective_document_id = payload.document_id
+    effective_document_ids: list[str] | None = None
     if payload.session_id:
         stored_session = await asyncio.to_thread(
             repository.get_session, payload.session_id
         )
         if stored_session is not None and stored_session.document_id:
             effective_document_id = stored_session.document_id
+        elif stored_session is not None and stored_session.document_ids:
+            # Sesi multi-dokumen mengikat dirinya sendiri, sama seperti sesi
+            # satu dokumen. Kalau scope hanya diambil dari request, klien yang
+            # lupa mengirimnya (mis. halaman dimuat ulang) akan membuat
+            # pertanyaan lanjutan mencari di seluruh dokumen.
+            effective_document_ids = list(stored_session.document_ids)
+
+    # Scope dari request hanya dipakai kalau belum ada scope yang tersimpan.
+    # `document_id` menang atas `document_ids`, karena itu scope yang lebih
+    # sempit: menggabungkan keduanya akan membuat pencarian lebih luas
+    # daripada yang diminta pengguna.
+    if (
+        effective_document_id is None
+        and effective_document_ids is None
+        and payload.document_ids
+    ):
+        efektif = [item for item in payload.document_ids if item]
+        if efektif:
+            effective_document_ids = efektif
 
     if effective_document_id is not None:
         scoped = await asyncio.to_thread(
@@ -673,6 +693,37 @@ async def chat_query(
                 ),
             )
 
+    if effective_document_ids:
+        # Setiap dokumen diperiksa, bukan hanya yang pertama. Satu dokumen
+        # yang belum selesai diindeks membuat jawaban bolong tanpa penjelasan:
+        # retrieval tidak menemukan apa pun dari dokumen itu, dan pengguna
+        # mengira isinya memang tidak ada.
+        tidak_dikenal: list[str] = []
+        belum_siap: list[str] = []
+        for identifier in effective_document_ids:
+            dokumen = await asyncio.to_thread(repository.get_document, identifier)
+            if dokumen is None:
+                tidak_dikenal.append(identifier)
+                continue
+            if dokumen.status is not DocumentStatus.READY:
+                belum_siap.append(f"{dokumen.filename} ({dokumen.status.value})")
+        if tidak_dikenal:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    "Dokumen yang dipilih tidak ditemukan: "
+                    f"{', '.join(tidak_dikenal)}. Muat ulang halaman lalu pilih lagi."
+                ),
+            )
+        if belum_siap:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Dokumen berikut belum siap ditanyai: "
+                    f"{', '.join(belum_siap)}. Tunggu sampai selesai diindeks."
+                ),
+            )
+
     async def event_stream() -> AsyncIterator[bytes]:
         # Komentar SSE sebagai pembuka: beberapa proxy menahan respons sampai
         # byte pertama masuk, dan ini memastikan koneksi langsung ter flushing.
@@ -681,7 +732,11 @@ async def chat_query(
             async for event in rag.answer(
                 question=payload.question,
                 session_id=payload.session_id,
-                document_ids=payload.document_ids,
+                # Yang diteruskan adalah scope yang sudah divalidasi dan
+                # digabung dengan scope tersimpan, bukan nilai mentah dari
+                # request. Kalau nilai mentah yang dipakai, sesi multi-dokumen
+                # akan kehilangan scope-nya pada pertanyaan lanjutan.
+                document_ids=effective_document_ids,
                 document_id=effective_document_id,
                 allow_ungrounded=payload.allow_ungrounded,
             ):

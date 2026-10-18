@@ -111,6 +111,16 @@ export interface ChatSession {
    * Sesi ber-scope hanya mencari di dokumen itu.
    */
   document_id?: string | null;
+  /**
+   * Beberapa dokumen sekaligus sebagai scope sesi.
+   *
+   * Dibedakan dari `document_id` karena artinya berbeda: `document_id`
+   * berarti sesi milik satu dokumen (badge menampilkan nama berkasnya),
+   * sedangkan daftar ini berarti sesi mencari di beberapa dokumen dan tidak
+   * punya satu dokumen utama. Backend memprioritaskan `document_id` kalau
+   * keduanya terisi.
+   */
+  document_ids?: string[];
 }
 
 export interface RetrievalSettings {

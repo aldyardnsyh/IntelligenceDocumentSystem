@@ -136,6 +136,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
     document_id TEXT,
+    document_ids TEXT,
     created_at TEXT NOT NULL,
     last_active_at TEXT NOT NULL,
     message_count INTEGER NOT NULL DEFAULT 0
@@ -192,10 +193,19 @@ class SqliteRepository:
         dibuat, jadi kolom baru hanya ada di database baru. Tanpa migrasi
         ini, `INSERT` yang menyebut kolom `document_id` gagal pada database
         pengguna yang sudah berjalan, bukan error yang hilang sendiri.
+
+        Urutan migrasi di bawah mengikuti urutan kolom itu ditambahkan ke
+        kode, supaya database lama sekalipun berakhir di bentuk yang sama
+        dengan database baru.
         """
         columns = {row["name"] for row in connection.execute("PRAGMA table_info(sessions)")}
         if "document_id" not in columns:
             connection.execute("ALTER TABLE sessions ADD COLUMN document_id TEXT")
+        if "document_ids" not in columns:
+            # Disimpan sebagai JSON, bukan tabel penghubung. Isinya paling
+            # banyak 20 id dan selalu dibaca utuh bersama sesinya, jadi tabel
+            # terpisah hanya menambah join tanpa memberi keuntungan.
+            connection.execute("ALTER TABLE sessions ADD COLUMN document_ids TEXT")
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self._path, check_same_thread=False)
@@ -335,8 +345,9 @@ class SqliteRepository:
         with self._lock, self._connect() as connection:
             connection.execute(
                 "INSERT OR REPLACE INTO sessions "
-                "(id, title, created_at, last_active_at, message_count, document_id) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
+                "(id, title, created_at, last_active_at, message_count, "
+                "document_id, document_ids) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     session.id,
                     session.title,
@@ -344,6 +355,9 @@ class SqliteRepository:
                     session.last_active_at,
                     session.message_count,
                     session.document_id,
+                    # Disimpan sebagai JSON atau NULL, bukan string kosong:
+                    # NULL dan [] harus bisa dibedakan saat dibaca kembali.
+                    json.dumps(session.document_ids) if session.document_ids else None,
                 ),
             )
 
@@ -625,6 +639,19 @@ def _row_to_chunk(row: sqlite3.Row) -> object:
 
 def _row_to_session(row: sqlite3.Row) -> ChatSession:
     keys = row.keys()
+    mentah_ids = row["document_ids"] if "document_ids" in keys else None
+    # JSON rusak atau bentuknya bukan daftar string tidak boleh menjatuhkan
+    # seluruh daftar sesi. Nilainya diperlakukan sebagai "tidak ada scope",
+    # sama seperti sesi yang belum pernah punya scope.
+    document_ids: list[str] | None = None
+    if mentah_ids:
+        try:
+            dibaca = json.loads(mentah_ids)
+        except (json.JSONDecodeError, TypeError):
+            dibaca = None
+        if isinstance(dibaca, list):
+            document_ids = [str(item) for item in dibaca if isinstance(item, str)] or None
+
     return ChatSession(
         id=row["id"],
         title=row["title"],
@@ -633,6 +660,7 @@ def _row_to_session(row: sqlite3.Row) -> ChatSession:
         message_count=int(row["message_count"] or 0),
         # Kolom hanya ada setelah migrasi; baris lama dibaca sebagai sesi global.
         document_id=row["document_id"] if "document_id" in keys else None,
+        document_ids=document_ids,
     )
 
 
