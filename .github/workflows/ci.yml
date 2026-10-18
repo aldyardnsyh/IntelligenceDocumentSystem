@@ -248,12 +248,26 @@ jobs:
         # pernah dipakai.
         run: npx playwright install --with-deps chromium
 
+      - name: Build frontend untuk E2E
+        working-directory: frontend
+        # Build produksi, bukan `next dev`. `next dev` mengompilasi halaman saat
+        # pertama dibuka; di runner CI itu memakan lebih dari 15 detik, sehingga
+        # test pertama sudah kehabisan waktu di langkah login sebelum halaman
+        # sempat dirender. Build produksi tidak mengompilasi saat request, dan
+        # yang diuji jadi bentuk yang benar-benar dikirim ke pengguna.
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+          BACKEND_ORIGIN: http://127.0.0.1:8000
+          NEXT_PUBLIC_USE_BACKEND: "1"
+          NEXT_PUBLIC_API_BASE_URL: ""
+        run: npx next build --webpack
+
       - name: Nyalakan frontend
         working-directory: frontend
-        # `next dev` dipakai, bukan `next start`, karena E2E memeriksa perilaku
-        # aplikasi apa adanya dan build produksi sudah diperiksa job frontend.
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
         run: |
-          nohup npx next dev --port 3000 > "$RUNNER_TEMP/web.log" 2>&1 &
+          nohup npx next start --port 3000 > "$RUNNER_TEMP/web.log" 2>&1 &
           for i in $(seq 1 90); do
             if curl -fsS http://127.0.0.1:3000/login > /dev/null 2>&1; then
               echo "Frontend siap setelah ${i} detik"

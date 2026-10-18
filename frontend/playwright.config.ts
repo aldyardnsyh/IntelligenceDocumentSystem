@@ -15,7 +15,10 @@ import { defineConfig, devices } from "@playwright/test";
 export default defineConfig({
   testDir: "./e2e",
   timeout: 60_000,
-  expect: { timeout: 15_000 },
+  // Runner CI lebih lambat daripada mesin pengembang. Batas 15 detik berasal
+  // dari mesin lokal, dan di CI sempat habis hanya untuk login. 30 detik di CI
+  // tidak menyembunyikan kegagalan, hanya memberi ruang untuk mesin lambat.
+  expect: { timeout: process.env.CI ? 30_000 : 15_000 },
   // Sengaja berurutan, satu worker. Banyak test mengunggah berkas yang sama
   // (groundedness dan preview-toast paling sering), dan `waitForDocumentReady`
   // mencocokkan baris tabel lewat nama berkas. Kalau dua test berjalan
