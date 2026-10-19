@@ -139,6 +139,28 @@ Cara ini menyalakan dua bagian: backend yang benar-benar mengindeks dokumen,
 dan frontend yang menampilkannya. Inilah bentuk yang sama dengan yang nanti
 berjalan di server.
 
+### Kalau login ditolak dengan pesan yang membingungkan
+
+Gejala yang paling sering: halaman login tampil normal, passcode diketik
+benar, tetapi selalu gagal tanpa penjelasan. Penyebabnya hampir selalu
+konfigurasi, bukan aplikasi. Periksa dengan satu perintah:
+
+```powershell
+cd "D:\Riset Pribadi\RAG - Intelegence Document System"
+python scripts/cek-kesiapan.py
+```
+
+Perintah itu memeriksa dua hal yang paling sering salah:
+
+1. **`backend/.env` ada dan `ACCESS_PASSCODE_SHA256` terisi.** Tanpa nilai itu,
+   backend menolak semua passcode dengan 401. Pesannya di log backend berbunyi
+   "ACCESS_PASSCODE_SHA256 belum diisi", tetapi mudah tertimpa log request.
+2. **Konsistensi `frontend/.env.local`.** Kalau `NEXT_PUBLIC_USE_BACKEND=1`,
+   frontend memakai backend sungguhan, sehingga backend wajib berjalan. Kalau
+   nilainya kosong, frontend memakai mode demo dan backend tidak dipakai.
+
+Kalau ada masalah, perintah itu juga menyebutkan tindakannya.
+
 Anda butuh **dua terminal** yang terbuka bersamaan: satu untuk backend, satu
 untuk frontend. Keduanya harus tetap berjalan selama Anda memakai aplikasi.
 
@@ -345,6 +367,7 @@ sengaja berbeda, dan labelnya harus terlihat.
 | Aplikasi lain muncul di <http://localhost:3000> | Port 3000 dipakai proyek lain | Pastikan terminal frontend menampilkan "Ready", lalu pakai port lain |
 | Halaman tampil tetapi tombol tidak bereaksi | Dibuka lewat `127.0.0.1`, atau `.env.local` masih berisi `NEXT_PUBLIC_USE_BACKEND=1` | Pakai `localhost:3000`, dan singkirkan `.env.local` untuk mode demo |
 | Petunjuk passcode berbeda dari yang diterima | `.env.local` mengisi `NEXT_PUBLIC_DEV_PASSCODE_HINT` | Singkirkan `.env.local`, lalu muat ulang halaman |
+| Login selalu 401 padahal passcode benar | `backend/.env` hilang atau `ACCESS_PASSCODE_SHA256` kosong | Jalankan `python scripts/cek-kesiapan.py` dari akar proyek |
 
 ### Cara memastikan yang salah backend atau frontend
 
