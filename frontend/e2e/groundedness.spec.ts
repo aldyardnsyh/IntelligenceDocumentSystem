@@ -160,7 +160,22 @@ test.describe("chat privat per dokumen", () => {
       timeout: 45_000,
     });
     // Tidak boleh ada sitasi dari dokumen cuti.
-    await expect(page.getByText(/kebijakan-cuti\.txt/).first()).toBeHidden({ timeout: 5_000 });
+    //
+    // Pemeriksaan dibatasi ke panel sumber. Nama berkas juga muncul di sidebar
+    // "Dokumen terbaru" dan di halaman dokumen, jadi memeriksa seluruh halaman
+    // akan selalu gagal walaupun scope-nya benar.
+    const panelSumber = page.getByRole("button", { name: /sumber ditemukan/i });
+    if ((await panelSumber.count()) > 0) {
+      await panelSumber.last().click();
+      const tautanSitasi = page.locator('a[href*="/documents/"][href*="chunk="]');
+      const jumlah = await tautanSitasi.count();
+      for (let ke = 0; ke < jumlah; ke += 1) {
+        await expect(
+          tautanSitasi.nth(ke),
+          "sitasi berasal dari dokumen di luar scope sesi",
+        ).not.toContainText(/kebijakan-cuti\.txt/);
+      }
+    }
   });
 
   test("pertanyaan dijawab dengan sitasi dokumen itu, dan tercatat di sidebar", async ({ page }) => {

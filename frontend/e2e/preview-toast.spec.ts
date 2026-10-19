@@ -15,7 +15,7 @@ test.describe("pratinjau dokumen", () => {
     await uploadSample(page, "laporan-infrastruktur.pdf");
     await waitForDocumentReady(page, "laporan-infrastruktur.pdf");
 
-    await page.getByRole("link", { name: /laporan-infrastruktur\.pdf/ }).first().click();
+    await kartuDokumen(page, "laporan-infrastruktur.pdf").click();
     await expect(page).toHaveURL(/\/documents\/doc_/);
 
     // Untuk PDF, yang tampil adalah berkas aslinya di iframe.
@@ -34,7 +34,7 @@ test.describe("pratinjau dokumen", () => {
     await page.goto("/documents");
     await uploadSample(page, "laporan-infrastruktur.pdf");
     await waitForDocumentReady(page, "laporan-infrastruktur.pdf");
-    await page.getByRole("link", { name: /laporan-infrastruktur\.pdf/ }).first().click();
+    await kartuDokumen(page, "laporan-infrastruktur.pdf").click();
 
     await page.getByRole("button", { name: /lihat teks hasil ekstraksi/i }).click();
     // Isi PDF yang dikenal harus terbaca sebagai teks berurutan.
@@ -50,7 +50,11 @@ test.describe("pratinjau dokumen", () => {
     await page.goto("/documents");
     await uploadSample(page, "kebijakan-cuti.txt");
     await waitForDocumentReady(page, "kebijakan-cuti.txt");
-    await page.getByRole("link", { name: /kebijakan-cuti\.txt/ }).first().click();
+
+    // Klik dibatasi ke kartu yang sama dengan yang ditunggu siap. Memakai
+    // `getByRole("link")` di seluruh halaman bisa menunjuk kartu dari test
+    // sebelumnya, karena setiap test mengunggah berkas dengan nama sama.
+    await kartuDokumen(page, "kebijakan-cuti.txt").click();
 
     await expect(page.getByText(/cuti tahunan sebanyak 12 hari kerja/i)).toBeVisible({
       timeout: 20_000,
@@ -62,7 +66,7 @@ test.describe("pratinjau dokumen", () => {
     await page.goto("/documents");
     await uploadSample(page, "panduan-tiket-layanan.md");
     await waitForDocumentReady(page, "panduan-tiket-layanan.md");
-    await page.getByRole("link", { name: /panduan-tiket-layanan\.md/ }).first().click();
+    await kartuDokumen(page, "panduan-tiket-layanan.md").click();
 
     await page.getByRole("tab", { name: /chunk hasil ingestion/i }).click();
     await expect(page.getByText(/chunk dalam dokumen ini|chunk mengandung/i)).toBeVisible();
@@ -134,3 +138,17 @@ test.describe("notifikasi membedakan jenisnya", () => {
     await expect(toast.getByText(/nilai baru dipakai/i)).toBeVisible();
   });
 });
+
+/**
+ * Tautan nama berkas di dalam kartu dokumen tertentu.
+ *
+ * Dipakai agar klik tidak jatuh ke kartu lain dengan nama berkas sama, yang
+ * bisa terjadi karena setiap test mengunggah berkas yang sama.
+ */
+function kartuDokumen(page: import("@playwright/test").Page, nama: string) {
+  return page
+    .getByTestId("document-card")
+    .filter({ hasText: nama })
+    .first()
+    .getByRole("link", { name: new RegExp(nama.replace(".", "\\.")) });
+}
