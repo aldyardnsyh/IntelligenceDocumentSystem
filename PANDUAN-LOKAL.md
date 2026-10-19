@@ -47,6 +47,22 @@ Cara ini menjalankan tampilan saja. Data contoh disimpan di browser, jadi
 perubahan hilang saat halaman dimuat ulang. Cocok untuk melihat seluruh
 halaman dan mencoba setiap tombol.
 
+### Sebelum mulai: periksa `.env.local`
+
+Buka folder `frontend`. Kalau ada berkas bernama `.env.local`, **ganti
+namanya sementara** (misalnya menjadi `.env.local.simpan`).
+
+```powershell
+cd "D:\Riset Pribadi\RAG - Intelegence Document System\frontend"
+if (Test-Path .env.local) { Rename-Item .env.local .env.local.simpan }
+```
+
+Alasannya: kalau berkas itu berisi `NEXT_PUBLIC_USE_BACKEND=1`, aplikasi
+mencoba memanggil backend yang tidak berjalan. Gejalanya membingungkan,
+karena halaman tetap terbuka dan passcode terlihat benar, tetapi login gagal
+tanpa pesan yang menjelaskan sebabnya. Nanti di Cara B berkas ini dipakai
+lagi.
+
 ### Langkah 1: buka folder frontend
 
 ```powershell
@@ -88,9 +104,14 @@ Tunggu sampai muncul tulisan seperti ini:
 
 ### Langkah 4: buka di browser
 
-Buka <http://localhost:3000>.
+Buka **<http://localhost:3000>**, lalu masuk dengan passcode demo:
+**`demo-rag-2025`**
 
-Masuk dengan passcode demo: **`demo-rag-2025`**
+Pakai `localhost`, bukan `127.0.0.1`. Di mode pengembangan, Next.js hanya
+mengizinkan berkas JavaScript-nya dimuat dari alamat tertentu. Kalau Anda
+membuka `127.0.0.1:3000`, halaman tampil normal tetapi semua tombol diam
+karena JavaScript-nya diblokir. Kalau itu terjadi, ganti alamatnya menjadi
+`localhost:3000` dan halaman akan berfungsi.
 
 Di bagian atas akan muncul banner **"Mode demo"**. Itu artinya data berasal
 dari browser, bukan dari server. Banner ini sengaja ada supaya tidak ada yang
@@ -322,6 +343,8 @@ sengaja berbeda, dan labelnya harus terlihat.
 | Port 3000 sudah dipakai | Ada aplikasi lain di port itu | Hentikan aplikasi itu, atau jalankan `npm run dev -- -p 3001` |
 | Port 8000 sudah dipakai | Backend lain masih berjalan | Tutup terminal backend yang lama |
 | Aplikasi lain muncul di <http://localhost:3000> | Port 3000 dipakai proyek lain | Pastikan terminal frontend menampilkan "Ready", lalu pakai port lain |
+| Halaman tampil tetapi tombol tidak bereaksi | Dibuka lewat `127.0.0.1`, atau `.env.local` masih berisi `NEXT_PUBLIC_USE_BACKEND=1` | Pakai `localhost:3000`, dan singkirkan `.env.local` untuk mode demo |
+| Petunjuk passcode berbeda dari yang diterima | `.env.local` mengisi `NEXT_PUBLIC_DEV_PASSCODE_HINT` | Singkirkan `.env.local`, lalu muat ulang halaman |
 
 ### Cara memastikan yang salah backend atau frontend
 
