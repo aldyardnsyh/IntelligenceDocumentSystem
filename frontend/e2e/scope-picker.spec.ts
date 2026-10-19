@@ -1,3 +1,4 @@
+import { chatInput } from "./fixtures";
 import { expect, test } from "@playwright/test";
 import {
   login,
@@ -35,10 +36,11 @@ test.describe("scope dokumen di chat", () => {
   test("memilih satu dokumen mengubah badge ke nama berkas", async ({ page }) => {
     await page.getByRole("button", { name: /semua dokumen/i }).first().click();
     await page
-      .getByRole("menuitemcheckbox", { name: /panduan-tiket-layanan\.md/i })
+      .getByRole("checkbox", { name: /panduan-tiket-layanan\.md/i })
+      .first()
       .click();
-    // Tutup menu supaya badge di header bisa diperiksa.
-    await page.keyboard.press("Escape");
+    // Tutup panel supaya badge di header bisa diperiksa tanpa tertutup.
+    await page.getByRole("button", { name: /tutup pemilih dokumen/i }).click();
 
     await expect(
       page.getByText(/panduan-tiket-layanan\.md/).first(),
@@ -50,9 +52,10 @@ test.describe("scope dokumen di chat", () => {
     const tombol = page.getByRole("button", { name: /semua dokumen/i }).first();
     await tombol.click();
     await page
-      .getByRole("menuitemcheckbox", { name: /panduan-tiket-layanan\.md/i })
+      .getByRole("checkbox", { name: /panduan-tiket-layanan\.md/i })
+      .first()
       .click();
-    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: /tutup pemilih dokumen/i }).click();
 
     // Badge sekarang menampilkan nama berkas; tombol pemilih ada di baris
     // yang sama, jadi cari berdasarkan namanya.
@@ -61,7 +64,7 @@ test.describe("scope dokumen di chat", () => {
       .first()
       .click();
     await page.getByRole("button", { name: /^hapus$/i }).click();
-    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: /tutup pemilih dokumen/i }).click();
 
     await expect(page.getByText("Semua dokumen").first()).toBeVisible({
       timeout: 10_000,
@@ -71,11 +74,12 @@ test.describe("scope dokumen di chat", () => {
   test("pertanyaan memakai scope yang dipilih", async ({ page }) => {
     await page.getByRole("button", { name: /semua dokumen/i }).first().click();
     await page
-      .getByRole("menuitemcheckbox", { name: /panduan-tiket-layanan\.md/i })
+      .getByRole("checkbox", { name: /panduan-tiket-layanan\.md/i })
+      .first()
       .click();
-    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: /tutup pemilih dokumen/i }).click();
 
-    const input = page.getByPlaceholder(/apa yang ingin ditanyakan|tulis pertanyaan/i);
+    const input = chatInput(page);
     await input.fill("berapa hari SLA respons tiket prioritas sedang?");
     await input.press("Enter");
 

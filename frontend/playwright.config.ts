@@ -14,6 +14,10 @@ import { defineConfig, devices } from "@playwright/test";
  */
 export default defineConfig({
   testDir: "./e2e",
+  // Membersihkan dokumen dan sesi sebelum seluruh suite berjalan, supaya
+  // setiap run mulai dari keadaan yang sama. Tanpa ini, korpus menumpuk antar
+  // run dan test mulai gagal karena data, bukan karena kode.
+  globalSetup: "./e2e/global-setup.ts",
   timeout: 60_000,
   // Runner CI lebih lambat daripada mesin pengembang. Batas 15 detik berasal
   // dari mesin lokal, dan di CI sempat habis hanya untuk login. 30 detik di CI

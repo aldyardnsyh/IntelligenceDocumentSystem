@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { login, uploadSample, waitForDocumentReady } from "./fixtures";
+import { chatInput, login, uploadSample, waitForDocumentReady } from "./fixtures";
 
 /**
  * Dua perilaku produk yang menentukan apakah sistem ini berguna:
@@ -19,15 +19,27 @@ test.describe("pertanyaan tentang koleksi dokumen", () => {
     await waitForDocumentReady(page, "kebijakan-cuti.txt");
     await page.goto("/chat");
 
-    const input = page.getByPlaceholder(/tanyakan sesuatu|tulis pertanyaan/i);
+    const input = chatInput(page);
     await input.fill("carikan dokumen terkait dengan tiketing");
     await input.press("Enter");
 
     // Jawaban harus menyebut dokumen yang benar-benar ada, atau menjelaskan
     // bahwa tidak ada yang cocok. Yang tidak boleh: daftar buku dengan
     // penulis dan URL yang tidak bisa dicek.
-    const jawaban = page.getByText(/dokumen yang tersedia|tidak ada dokumen yang cocok/i);
+    //
+    // Tiga kalimat yang mungkin: "Dokumen yang cocok dengan kata kunci itu
+    // ada N", "Tidak ada dokumen yang cocok dengan kata kunci itu", dan
+    // "Belum ada dokumen yang tersimpan".
+    const jawaban = page.getByText(
+      /dokumen yang cocok dengan kata kunci|tidak ada dokumen yang cocok|belum ada dokumen yang tersimpan/i,
+    );
     await expect(jawaban.first()).toBeVisible({ timeout: 45_000 });
+
+    // Jawaban harus menyebut nama berkas yang benar-benar diunggah, bukan
+    // daftar karangan. Ini inti test: sistem menjawab dari metadata nyata.
+    await expect(page.getByText(/kebijakan-cuti\.txt/).first()).toBeVisible({
+      timeout: 15_000,
+    });
 
     // Penanda halusinasi referensi tidak boleh muncul.
     await expect(page.getByText(/https?:\/\//i)).toHaveCount(0);
@@ -41,7 +53,7 @@ test.describe("pertanyaan tentang koleksi dokumen", () => {
     await waitForDocumentReady(page, "kebijakan-cuti.txt");
     await page.goto("/chat");
 
-    const input = page.getByPlaceholder(/tanyakan sesuatu|tulis pertanyaan/i);
+    const input = chatInput(page);
     await input.fill("dokumen apa saja yang tersedia?");
     await input.press("Enter");
 
@@ -62,7 +74,7 @@ test.describe("jawaban tanpa dokumen", () => {
   });
 
   test("pertanyaan di luar dokumen tetap dijawab, dengan label jelas", async ({ page }) => {
-    const input = page.getByPlaceholder(/tanyakan sesuatu|tulis pertanyaan/i);
+    const input = chatInput(page);
     await input.fill("berapa harga tiket bioskop di jakarta?");
     await input.press("Enter");
 
@@ -77,7 +89,7 @@ test.describe("jawaban tanpa dokumen", () => {
 
   test("sakelar dimatikan mengembalikan mode ketat", async ({ page }) => {
     await page.getByLabel(/jawab tanpa dokumen/i).uncheck();
-    const input = page.getByPlaceholder(/tanyakan sesuatu|tulis pertanyaan/i);
+    const input = chatInput(page);
     await input.fill("berapa harga tiket bioskop di jakarta?");
     await input.press("Enter");
     await expect(page.getByText(/tidak ditemukan dalam dokumen/i).first()).toBeVisible({
@@ -112,7 +124,14 @@ test.describe("chat privat per dokumen", () => {
     await page.getByRole("link", { name: /tanya dokumen ini/i }).first().click();
 
     await expect(page.getByText(/kebijakan-cuti\.txt/).first()).toBeVisible();
-    await expect(page.getByText(/^semua dokumen$/i)).toHaveCount(0);
+
+    // Badge scope berisi nama berkas, bukan "Semua dokumen". Yang diperiksa
+    // adalah badge-nya, bukan seluruh teks di halaman: pemilih scope juga
+    // menampilkan label "Semua dokumen" saat tidak ada pilihan, dan label itu
+    // tidak ada hubungannya dengan badge mode sesi.
+    const badge = page.locator("[title^='Pencarian dibatasi ke']").first();
+    await expect(badge).toBeVisible();
+    await expect(badge).toContainText(/kebijakan-cuti\.txt/i);
   });
 
   test("sesi ber-scope tidak mencari di dokumen lain", async ({ page }) => {
@@ -128,13 +147,13 @@ test.describe("chat privat per dokumen", () => {
     // Buka chat khusus dokumen tiket, lalu tanya hal yang hanya ada di
     // dokumen cuti. Jawabannya tidak boleh menemukan sumber dari dokumen cuti.
     const card = page
-      .locator("li, article, div")
+      .getByTestId("document-card")
       .filter({ hasText: "panduan-tiket-layanan.md" })
       .first();
     await card.getByRole("link", { name: /tanya dokumen ini/i }).click();
     await expect(page).toHaveURL(/\/chat\?doc=doc_/);
 
-    const input = page.getByPlaceholder(/tanyakan sesuatu|tulis pertanyaan/i);
+    const input = chatInput(page);
     await input.fill("berapa hari cuti tahunan karyawan?");
     await input.press("Enter");
     await expect(page.getByText(/tidak ditemukan|bukan dari dokumen/i).first()).toBeVisible({
@@ -151,7 +170,7 @@ test.describe("chat privat per dokumen", () => {
     await waitForDocumentReady(page, "panduan-tiket-layanan.md");
     await page.getByRole("link", { name: /tanya dokumen ini/i }).first().click();
 
-    const input = page.getByPlaceholder(/tanyakan sesuatu|tulis pertanyaan/i);
+    const input = chatInput(page);
     await input.fill("berapa jam SLA respons tiket prioritas tinggi?");
     await input.press("Enter");
 

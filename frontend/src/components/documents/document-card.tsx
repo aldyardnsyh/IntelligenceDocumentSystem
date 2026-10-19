@@ -108,7 +108,15 @@ export function DocumentCard({ document }: DocumentCardProps) {
 
   return (
     <>
-      <div className="group relative flex flex-col gap-3 rounded-lg bg-card p-4 ring-1 ring-border transition-shadow hover:shadow-sm">
+      <div
+        // Penanda untuk test: kartu dokumen adalah unit yang dicari, bukan
+        // baris tabel. `data-testid` dipakai supaya test tidak bergantung pada
+        // kelas CSS yang bisa berubah karena alasan tampilan.
+        data-testid="document-card"
+        data-document-id={document.id}
+        data-status={document.status}
+        className="group relative flex flex-col gap-3 rounded-lg bg-card p-4 ring-1 ring-border transition-shadow hover:shadow-sm"
+      >
         <div className="flex items-start gap-2.5">
           <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
             <FileText className="size-4" aria-hidden />

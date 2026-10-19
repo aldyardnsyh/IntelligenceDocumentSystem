@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { login } from "./fixtures";
+import { chatInput, login, uploadSample, waitForDocumentReady } from "./fixtures";
 
 /**
  * Halaman analytics harus punya jalan keluar, bukan hanya memberi tahu ada
@@ -45,8 +45,19 @@ test.describe("evaluasi & observability", () => {
 
   test("jejak latensi terisi setelah bertanya", async ({ page }) => {
     await login(page);
+
+    // Dokumen harus ada lebih dulu. Input chat sengaja dinonaktifkan selama
+    // belum ada dokumen siap, jadi mengetik tanpa ini akan gagal karena
+    // textarea-nya `disabled`, bukan karena aplikasinya rusak.
+    await page.goto("/documents");
+    await uploadSample(page, "panduan-tiket-layanan.md");
+    await waitForDocumentReady(page, "panduan-tiket-layanan.md");
+
     await page.goto("/chat");
-    const input = page.getByPlaceholder(/tanyakan sesuatu|tulis pertanyaan/i);
+    const input = chatInput(page);
+    await expect(input, "input chat masih nonaktif walau dokumen siap").toBeEnabled({
+      timeout: 30_000,
+    });
     await input.fill("berapa hari SLA penyelesaian?");
     await input.press("Enter");
     // Tunggu jawaban selesai.

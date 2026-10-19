@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { login, uploadSample, waitForDocumentReady } from "./fixtures";
+import { chatInput, login, uploadSample, waitForDocumentReady } from "./fixtures";
 
 /**
  * Chat: dua aturan yang menentukan apakah sistem ini bisa dipercaya.
@@ -21,7 +21,7 @@ test.describe("tanya jawab", () => {
   });
 
   test("pertanyaan yang ada jawabannya memberi sitasi", async ({ page }) => {
-    const input = page.getByPlaceholder(/apa yang ingin ditanyakan|tulis pertanyaan/i);
+    const input = chatInput(page);
     await input.fill("berapa hari SLA respons tiket prioritas sedang?");
     await input.press("Enter");
 
@@ -30,12 +30,22 @@ test.describe("tanya jawab", () => {
     // dilepas, dan stream dibatalkan.
     const answer = page.locator('[data-role="assistant"], .whitespace-pre-wrap').last();
     await expect(answer).not.toBeEmpty({ timeout: 30_000 });
+
+    // Panel sumber tertutup secara default, dan Base UI tidak merender
+    // panel yang tertutup. Tautan sitasi baru ada setelah dibuka.
+    await bukaPanelSumber(page);
     await expect(page.getByRole("link", { name: /chunk|hal\.|halaman/i }).first())
       .toBeVisible({ timeout: 15_000 });
   });
 
   test("pertanyaan di luar dokumen dijawab tidak ditemukan", async ({ page }) => {
-    const input = page.getByPlaceholder(/apa yang ingin ditanyakan|tulis pertanyaan/i);
+    // Sakelar "Jawab tanpa dokumen" menyala secara default, dan dengan
+    // menyala pertanyaan di luar dokumen memang dijawab (dengan label).
+    // Test ini menguji mode ketat, jadi sakelarnya harus dimatikan dulu.
+    // Versi lama melewatkan langkah ini, sehingga yang diuji bukan mode ketat.
+    await page.getByRole("checkbox", { name: /jawab tanpa dokumen/i }).uncheck();
+
+    const input = chatInput(page);
     await input.fill("berapa harga tiket bioskop di jakarta?");
     await input.press("Enter");
     // Gate anti-halusinasi. Kalau sistem mengarang di sini, seluruh
@@ -45,7 +55,7 @@ test.describe("tanya jawab", () => {
   });
 
   test("sesi bertahan setelah pertanyaan pertama", async ({ page }) => {
-    const input = page.getByPlaceholder(/apa yang ingin ditanyakan|tulis pertanyaan/i);
+    const input = chatInput(page);
     await input.fill("apa itu prioritas tiket?");
     await input.press("Enter");
     await expect(page).toHaveURL(/\/chat\/ses_/, { timeout: 30_000 });
@@ -59,12 +69,19 @@ test.describe("tanya jawab", () => {
   });
 
   test("klik sitasi membuka chunk sumbernya", async ({ page }) => {
-    const input = page.getByPlaceholder(/apa yang ingin ditanyakan|tulis pertanyaan/i);
+    const input = chatInput(page);
     await input.fill("berapa hari SLA respons tiket prioritas sedang?");
     await input.press("Enter");
 
-    const citation = page.getByRole("link", { name: /chunk|hal\.|halaman/i }).first();
-    await expect(citation).toBeVisible({ timeout: 30_000 });
+    await bukaPanelSumber(page);
+
+    // Hanya tautan yang membawa `chunk=`. Sidebar memuat tautan ke dokumen
+    // yang sama tanpa parameter itu, dan sebelumnya itulah yang terpilih.
+    const citation = page.locator('a[href*="/documents/"][href*="chunk="]').first();
+    await expect(
+      citation,
+      "tidak ada tautan sitasi yang mengarah ke chunk tertentu",
+    ).toBeVisible({ timeout: 30_000 });
     await citation.click();
 
     await expect(page).toHaveURL(/\/documents\/doc_.*chunk=/);
@@ -73,7 +90,7 @@ test.describe("tanya jawab", () => {
   });
 
   test("percakapan baru tidak menampilkan layar error", async ({ page }) => {
-    const input = page.getByPlaceholder(/apa yang ingin ditanyakan|tulis pertanyaan/i);
+    const input = chatInput(page);
     await input.fill("apa itu prioritas tiket?");
     await input.press("Enter");
     await expect(page).toHaveURL(/\/chat\/ses_/, { timeout: 30_000 });
@@ -85,3 +102,17 @@ test.describe("tanya jawab", () => {
     await expect(page.getByText(/sesi tidak ditemukan|sudah berakhir/i)).toHaveCount(0);
   });
 });
+
+/**
+ * Buka panel sumber pada jawaban terakhir.
+ *
+ * Tombolnya berbunyi "<n> sumber ditemukan ... Lihat sumber". Panelnya tidak
+ * dirender selama tertutup, jadi langkah ini wajib sebelum memeriksa sitasi.
+ */
+async function bukaPanelSumber(page: import("@playwright/test").Page) {
+  const pemicu = page.getByRole("button", { name: /sumber ditemukan/i }).last();
+  await expect(pemicu, "panel sumber tidak muncul pada jawaban").toBeVisible({
+    timeout: 30_000,
+  });
+  await pemicu.click();
+}

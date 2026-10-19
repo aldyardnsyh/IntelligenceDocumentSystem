@@ -92,6 +92,21 @@ export function UploadDropzone({ onSelect, busy = false, compact = false, classN
           {busy ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <CloudUpload className="size-4" aria-hidden />}
           Unggah dokumen
         </Button>
+
+        {/*
+          Pesan error HARUS ikut dirender di mode compact. Versi sebelumnya
+          hanya merendernya di mode besar, sehingga memilih berkas yang tidak
+          didukung lewat tombol header tidak memberi penjelasan apa pun:
+          berkas tidak terunggah, dan pengguna tidak tahu kenapa.
+        */}
+        {localError ? (
+          <p
+            role="alert"
+            className="max-w-[240px] text-right text-[12px] text-destructive"
+          >
+            {localError}
+          </p>
+        ) : null}
       </>
     );
   }

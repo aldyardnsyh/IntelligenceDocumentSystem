@@ -159,7 +159,14 @@ jobs:
       E2E_PASSCODE: "uji-e2e-playwright-ci"
       LLM_PROVIDER: mock
       LLM_FALLBACK_CHAIN: ""
-      USE_LOCAL_EMBEDDING: "0"
+      # Model embedding ASLI untuk E2E, bukan stub.
+      #
+      # Ambang kemiripan aplikasi (default 0,82, minimum 0,75) dikalibrasi
+      # untuk model ini: pertanyaan relevan berskor 0,84 sampai 0,91. Stub
+      # hashing hanya memberi 0,49, sehingga setiap pertanyaan dijawab "tidak
+      # ditemukan" walaupun dokumennya berisi jawabannya, dan test sitasi
+      # mustahil lulus.
+      USE_LOCAL_EMBEDDING: "1"
       REDIS_URL: ""
       SUPABASE_URL: ""
       SUPABASE_SERVICE_KEY: ""
@@ -189,9 +196,23 @@ jobs:
       - name: Pasang dependency backend
         run: |
           python -m pip install --upgrade pip
+          # torch dipasang LEBIH DULU, dari index CPU. Kalau
+          # `sentence-transformers` dipasang dulu, pip menarik torch dari PyPI
+          # biasa, yang di Linux berarti build CUDA lebih dari 2 GB, padahal
+          # runner CI tidak punya GPU.
+          pip install --index-url https://download.pytorch.org/whl/cpu torch
           pip install fastapi "uvicorn[standard]" pydantic pydantic-settings \
             python-multipart httpx numpy chromadb pypdf redis \
-            pytest pytest-asyncio pytest-cov ruff "reportlab>=4.0"
+            pytest pytest-asyncio pytest-cov ruff "reportlab>=4.0" \
+            sentence-transformers
+
+      - name: Cache model embedding
+        # E2E memakai model asli (470 MB). Tanpa cache, setiap push
+        # mengunduhnya ulang dan job bisa kehabisan waktu hanya untuk itu.
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-${{ runner.os }}-multilingual-e5-small
 
       - name: Siapkan konfigurasi E2E
         working-directory: backend

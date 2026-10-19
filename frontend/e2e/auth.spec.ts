@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { login, PASSCODE } from "./fixtures";
+import { PASSCODE, chatInput, login } from "./fixtures";
 
 /**
  * Gerbang akses: apa yang boleh dan tidak boleh dilihat tanpa passcode.
@@ -27,7 +27,7 @@ test.describe("gerbang akses", () => {
 
   test("login benar memberi akses penuh", async ({ page }) => {
     await login(page);
-    await expect(page.getByPlaceholder(/apa yang ingin ditanyakan|tulis pertanyaan/i))
+    await expect(chatInput(page))
       .toBeVisible();
   });
 

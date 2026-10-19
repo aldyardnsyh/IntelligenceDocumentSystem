@@ -65,8 +65,17 @@ test.describe("sesi bertahan setelah login", () => {
     // bahwa sesi tidak "bocor" antar login.
     for (let ke = 1; ke <= 3; ke += 1) {
       await page.context().clearCookies();
+
+      // Navigasi eksplisit ke /login. Memuat ulang sambil berada di /chat
+      // membuat pengalihan proxy dan permintaan muat ulang berjalan
+      // bersamaan, dan hasil akhirnya bergantung pada waktu.
       await page.goto("/login");
-      await page.getByLabel("Passcode akses").fill(PASSCODE);
+
+      const isian = page.getByLabel("Passcode akses");
+      await expect(isian, `form login tidak muncul pada percobaan ${ke}`).toBeVisible({
+        timeout: 15_000,
+      });
+      await isian.fill(PASSCODE);
       await page.getByRole("button", { name: "Masuk" }).click();
       await expect(page, `login ke-${ke} gagal`).toHaveURL(/\/chat/);
     }

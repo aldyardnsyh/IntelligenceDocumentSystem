@@ -33,9 +33,15 @@ test.describe("unggah dokumen", () => {
       mimeType: "image/png",
       buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47]),
     });
-    // Pesan harus muncul di respons pertama. Kalau tidak, dokumen tercatat
-    // "diproses" lalu gagal diam-diam saat polling.
-    await expect(page.getByText(/tidak didukung/i).first()).toBeVisible();
+    // Pesan harus muncul pada respons pertama, bukan nanti saat polling.
+    //
+    // Pesannya dirender sebagai `role="alert"` di bawah tombol unggah.
+    // Sebelumnya pesan ini hanya dirender pada dropzone besar, sehingga
+    // memilih berkas yang salah lewat tombol header tidak memberi penjelasan
+    // apa pun: berkas tidak terunggah dan pengguna tidak tahu kenapa.
+    await expect(
+      page.getByRole("alert").filter({ hasText: /tidak didukung/i }),
+    ).toBeVisible({ timeout: 30_000 });
   });
 
   test("dokumen bisa dihapus beserta indeksnya", async ({ page }) => {
@@ -44,9 +50,37 @@ test.describe("unggah dokumen", () => {
     await uploadSample(page, "panduan-tiket-layanan.md");
     await waitForDocumentReady(page, "panduan-tiket-layanan.md");
 
-    await page.getByRole("button", { name: new RegExp("panduan-tiket-layanan") }).first().click();
-    await page.getByRole("button", { name: /hapus/i }).first().click();
-    await page.getByRole("button", { name: /hapus|batal tidak|hapus dokumen/i }).last().click();
-    await expect(page.getByText(/panduan-tiket-layanan/)).toHaveCount(0, { timeout: 20_000 });
+    // Menu aksi dibuka lewat tombol berlabel "Aksi untuk <berkas>". Item
+    // menunya berperan `menuitem`, bukan `button`.
+    const kartu = page
+      .getByTestId("document-card")
+      .filter({ hasText: "panduan-tiket-layanan.md" })
+      .first();
+    const sebelumHapus = await page
+      .getByTestId("document-card")
+      .filter({ hasText: "panduan-tiket-layanan.md" })
+      .count();
+
+    await kartu
+      .getByRole("button", { name: /aksi untuk panduan-tiket-layanan\.md/i })
+      .click();
+    await page.getByRole("menuitem", { name: /hapus dokumen/i }).click();
+
+    // Dialog konfirmasi memakai label "Hapus permanen", bukan "Hapus".
+    await page.getByRole("button", { name: /hapus permanen/i }).click();
+
+    // Penghapusan diperiksa dari berkurangnya jumlah kartu dengan nama itu.
+    // Memeriksa "harus nol" rapuh: kalau test lain mengunggah berkas yang sama,
+    // kartunya tetap ada walaupun penghapusan berhasil.
+    await expect
+      .poll(
+        async () =>
+          page
+            .getByTestId("document-card")
+            .filter({ hasText: "panduan-tiket-layanan.md" })
+            .count(),
+        { timeout: 20_000, message: "jumlah kartu tidak berkurang setelah dihapus" },
+      )
+      .toBeLessThan(sebelumHapus);
   });
 });
