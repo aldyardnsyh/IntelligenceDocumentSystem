@@ -56,6 +56,24 @@ Tiga aturan yang menjaga sistem ini bisa dipercaya:
 3. **Semua angka berasal dari server.** Jumlah chunk, ambang kemiripan,
    latensi, dan token semuanya hasil pengukuran, bukan nilai contoh.
 
+## Mulai dari mana?
+
+Pilih sesuai yang ingin Anda lakukan. Dua panduan di bawah ditulis langkah
+demi langkah, dengan perintah yang bisa langsung disalin, dan penjelasan apa
+yang seharusnya muncul di setiap langkah.
+
+| Tujuan | Panduan | Waktu |
+|---|---|---|
+| **Melihat hasilnya di komputer sendiri** | [PANDUAN-LOKAL.md](PANDUAN-LOKAL.md) | 5 menit untuk tampilan, 30 menit untuk versi penuh |
+| **Memasangnya di server supaya bisa dibuka dari mana saja** | [PANDUAN-DEPLOY-VPS.md](PANDUAN-DEPLOY-VPS.md) | 30 sampai 60 menit |
+
+Keduanya memuat bagian masalah yang sering terjadi, beserta gejalanya, jadi
+kalau ada langkah yang tidak sesuai Anda tidak perlu menebak.
+
+Sisanya di README ini menjelaskan cara kerja, keputusan teknis, dan hasil
+pengujian. Bacalah kalau Anda ingin memahami alasannya, bukan hanya
+menjalankannya.
+
 ## Daftar isi
 
 - [Coba tanpa backend (2 menit)](#coba-tanpa-backend-2-menit)
@@ -65,6 +83,7 @@ Tiga aturan yang menjaga sistem ini bisa dipercaya:
 - [Cara memakai fitur utamanya](#cara-memakai-fitur-utamanya)
 - [Verifikasi dan pengujian](#verifikasi-dan-pengujian)
 - [Deployment ke server](#deployment-ke-server)
+- [Panduan terpisah: lokal dan deploy](PANDUAN-LOKAL.md)
 - [Struktur proyek](#struktur-proyek)
 - [Kualitas dan pengujian](#kualitas-dan-pengujian)
 - [Keamanan](#keamanan)

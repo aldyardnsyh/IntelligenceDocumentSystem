@@ -209,16 +209,63 @@ fi
 # ------------------------------------------------------------------ 4. kode
 step "4/8  Mengambil kode"
 
+# Unduh kode lewat git, dengan fallback arsip HTTPS.
+#
+# Fallback ini bukan kemewahan: `git clone` bisa gagal di server baru karena
+# jaringan yang memblokir git, versi TLS yang tidak cocok, atau permintaan
+# kredensial yang tidak bisa dijawab dari terminal web. Kegagalan di sini
+# menghentikan seluruh setup, padahal kode yang sama bisa diunduh lewat HTTPS
+# biasa tanpa git sama sekali.
+unduh_arsip() {
+    local arsip="/tmp/ida-$$.zip"
+    local url="${REPO_URL%.git}/archive/refs/heads/master.zip"
+    info "Mengunduh arsip dari ${url}..."
+    if ! as_root curl -fsSL --retry 3 -o "$arsip" "$url"; then
+        die "Gagal mengunduh arsip. Periksa koneksi server, atau salin kode secara manual ke ${APP_DIR}."
+    fi
+    if ! command -v unzip >/dev/null 2>&1; then
+        as_root apt-get install -y -qq unzip >/dev/null 2>&1 || true
+    fi
+    command -v unzip >/dev/null 2>&1 \
+        || die "unzip tidak tersedia. Pasang dengan: sudo apt-get install -y unzip"
+    as_root rm -rf "${APP_DIR}.tmp"
+    as_root mkdir -p "${APP_DIR}.tmp"
+    as_root unzip -q "$arsip" -d "${APP_DIR}.tmp"
+    # Arsip GitHub membungkus isinya dalam satu direktori bernama
+    # "<repo>-master". Isinya dipindah ke APP_DIR supaya strukturnya sama
+    # dengan hasil git clone.
+    local dalam
+    dalam=$(as_root find "${APP_DIR}.tmp" -maxdepth 1 -mindepth 1 -type d | head -1)
+    [ -n "$dalam" ] || die "Arsip tidak berisi direktori proyek."
+    as_root rm -rf "$APP_DIR"
+    as_root mv "$dalam" "$APP_DIR"
+    as_root rm -rf "${APP_DIR}.tmp" "$arsip"
+    ok "Kode diunduh lewat arsip ke ${APP_DIR}"
+}
+
 if [ -d "${APP_DIR}/.git" ]; then
     info "Kode sudah ada di ${APP_DIR}, memperbarui..."
-    as_root git -C "$APP_DIR" fetch --quiet origin
-    as_root git -C "$APP_DIR" reset --hard --quiet origin/master
-    ok "Kode diperbarui ke $(git -C "$APP_DIR" log -1 --format=%h)"
+    if as_root git -C "$APP_DIR" fetch --quiet origin \
+        && as_root git -C "$APP_DIR" reset --hard --quiet origin/master; then
+        ok "Kode diperbarui ke $(git -C "$APP_DIR" log -1 --format=%h)"
+    else
+        warn "Pembaruan lewat git gagal, mengunduh arsip sebagai gantinya."
+        unduh_arsip
+    fi
+elif [ -d "$APP_DIR" ] && [ -f "${APP_DIR}/backend/docker-compose.yml" ]; then
+    # Kode sudah ada tetapi tanpa .git, misalnya hasil unduhan arsip sebelumnya.
+    # Membiarkannya apa adanya lebih aman daripada menimpanya, karena bisa jadi
+    # operator menyalin kode secara manual dan mengubah sesuatu di sana.
+    info "Kode sudah ada di ${APP_DIR} (tanpa git), dilewati."
 else
     info "Mengunduh dari ${REPO_URL}..."
     as_root mkdir -p "$(dirname "$APP_DIR")"
-    as_root git clone --quiet "$REPO_URL" "$APP_DIR"
-    ok "Kode diunduh ke ${APP_DIR}"
+    if as_root git clone --quiet "$REPO_URL" "$APP_DIR" 2>/dev/null; then
+        ok "Kode diunduh ke ${APP_DIR}"
+    else
+        warn "git clone gagal, mencoba unduh arsip."
+        unduh_arsip
+    fi
 fi
 
 BACKEND_DIR="${APP_DIR}/backend"
