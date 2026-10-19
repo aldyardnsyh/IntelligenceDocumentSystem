@@ -17,8 +17,8 @@
      bukan klaim. Badge CI diambil langsung dari hasil GitHub Actions, jadi
      kalau ada yang rusak, badge-nya merah. -->
 [![CI](https://github.com/aldyardnsyh/IntelligenceDocumentSystem/actions/workflows/ci.yml/badge.svg)](https://github.com/aldyardnsyh/IntelligenceDocumentSystem/actions/workflows/ci.yml)
-[![pytest](https://img.shields.io/badge/pytest-502_passed-0A9EDC?logo=pytest&logoColor=white)](#verifikasi-dan-pengujian)
-[![Playwright](https://img.shields.io/badge/Playwright-46_specs-2EAD33?logo=playwright&logoColor=white)](#verifikasi-dan-pengujian)
+[![pytest](https://img.shields.io/badge/pytest-534_passed-0A9EDC?logo=pytest&logoColor=white)](#verifikasi-dan-pengujian)
+[![Playwright](https://img.shields.io/badge/Playwright-59_specs-2EAD33?logo=playwright&logoColor=white)](#verifikasi-dan-pengujian)
 [![coverage](https://img.shields.io/badge/coverage-83%25-4C1)](#verifikasi-dan-pengujian)
 [![Lisensi](https://img.shields.io/badge/lisensi-PSHT-blue)](LICENSE.md)
 
@@ -61,6 +61,7 @@ Tiga aturan yang menjaga sistem ini bisa dipercaya:
 - [Coba tanpa backend (2 menit)](#coba-tanpa-backend-2-menit)
 - [Jalankan lengkap (backend + frontend)](#jalankan-lengkap-backend--frontend)
 - [Dokumen contoh untuk pengujian](#dokumen-contoh-untuk-pengujian)
+- [Tampilan dan halaman](#tampilan-dan-halaman)
 - [Cara memakai fitur utamanya](#cara-memakai-fitur-utamanya)
 - [Verifikasi dan pengujian](#verifikasi-dan-pengujian)
 - [Deployment ke server](#deployment-ke-server)
@@ -243,13 +244,128 @@ Evaluasi ini tidak memerlukan API key tambahan. Untuk skor RAGAS lengkap
 (termasuk faithfulness yang dinilai oleh model kedua), lihat bagian
 [Evaluasi dengan RAGAS](#evaluasi-dengan-ragas).
 
+## Tampilan dan halaman
+
+Tangkapan layar di bawah diambil dari aplikasi yang berjalan sungguhan dengan
+tiga dokumen contoh dan beberapa percakapan. Tidak ada data tiruan: setiap
+angka dan kutipan berasal dari backend yang sama dengan yang dipakai di
+produksi.
+
+### Halaman masuk
+
+<p align="center">
+  <img src="docs/screenshots/01-login.png" alt="Halaman masuk" width="820">
+</p>
+
+Satu pintu masuk untuk seluruh aplikasi. Passcode bukan formalitas: seluruh
+dokumen pengguna berada di baliknya, jadi panjang minimumnya 12 karakter dan
+percobaan yang gagal dibatasi per alamat IP. Di mode pengembangan, passcode
+contoh ditampilkan sebagai petunjuk supaya tidak ada tebakan.
+
+### Beranda
+
+<p align="center">
+  <img src="docs/screenshots/10-beranda.png" alt="Beranda" width="820">
+</p>
+
+Ringkasan keadaan sistem dan jalan masuk ke setiap fitur. Angka yang tampil
+dibaca dari backend, bukan konstanta di halaman, sehingga beranda tidak pernah
+menampilkan keadaan yang berbeda dari isi sebenarnya.
+
+### Chat
+
+<p align="center">
+  <img src="docs/screenshots/02-chat-kosong.png" alt="Chat, keadaan awal" width="820">
+</p>
+
+Halaman utama. Di kiri ada daftar dokumen aktif dan riwayat percakapan; di
+kanan ada kotak tanya. Tombol "Tanya dokumen ini" mengunci percakapan ke satu
+dokumen, sehingga pertanyaan lanjutan tidak pernah mencari ke dokumen lain.
+Pemilih di atas kotak tanya membatasi pencarian ke beberapa dokumen sekaligus,
+dan tanpa pilihan berarti semua dokumen.
+
+<p align="center">
+  <img src="docs/screenshots/03-chat-jawaban.png" alt="Chat, jawaban dengan sitasi" width="820">
+</p>
+
+Setiap jawaban membawa sumbernya. Panel "3 sumber ditemukan" bisa dibuka untuk
+melihat kutipan, nomor chunk, dan skor kemiripan. Kalau tidak ada bagian
+dokumen yang cukup mirip, sistem tidak mengarang: ia mengatakan tidak
+menemukan, atau menjawab dari pengetahuan umum dengan label tegas.
+
+<p align="center">
+  <img src="docs/screenshots/04-chat-sitasi.png" alt="Chat, panel sumber terbuka" width="820">
+</p>
+
+Sumber bisa diklik dan membawa ke chunk yang dimaksud di halaman dokumen. Itu
+sebabnya tautannya memuat nomor chunk, bukan hanya id dokumen: jawaban
+seharusnya bisa diverifikasi sampai ke bagian teks yang dipakai.
+
+### Dokumen
+
+<p align="center">
+  <img src="docs/screenshots/05-dokumen.png" alt="Daftar dokumen" width="820">
+</p>
+
+Unggah PDF, TXT, atau Markdown, lalu pantau statusnya. Dokumen hanya bisa
+ditanyai setelah statusnya "Siap ditanyai", dan status itu diperbarui berkala
+selama masih ada yang diproses. Saringan dan pencarian bekerja pada metadata,
+jadi tidak perlu memuat ulang halaman.
+
+<p align="center">
+  <img src="docs/screenshots/06-dokumen-detail.png" alt="Detail dokumen" width="820">
+</p>
+
+Halaman detail menampilkan metadata dan pratinjau isi teks. Berkas asli bisa
+dibuka berdampingan untuk dokumen PDF, sehingga tata letak dan tabel bisa
+diperiksa tanpa harus mengunduhnya.
+
+<p align="center">
+  <img src="docs/screenshots/07-dokumen-chunk.png" alt="Chunk hasil ingestion" width="820">
+</p>
+
+Tab chunk menunjukkan bagaimana dokumen dipotong sebelum diindeks. Ini bagian
+yang paling sering menjelaskan mengapa sebuah pertanyaan tidak menemukan
+sumber: potongannya bisa dilihat langsung, bukan ditebak.
+
+### Analitik
+
+<p align="center">
+  <img src="docs/screenshots/08-analitik.png" alt="Analitik" width="820">
+</p>
+
+Latensi, jumlah sumber, dan log pertanyaan. Evaluasi retrieval bisa dijalankan
+dari halaman ini tanpa API key, dan hasilnya disimpan supaya perubahan
+retrieval bisa dibandingkan, bukan hanya dirasakan.
+
+### Pengaturan
+
+<p align="center">
+  <img src="docs/screenshots/09-pengaturan.png" alt="Pengaturan" width="820">
+</p>
+
+Dua parameter retrieval yang bisa diubah: jumlah sumber yang diambil dan ambang
+kemiripan minimum. Nilainya disimpan otomatis ke backend, jadi berlaku untuk
+semua sesi. Zona berbahaya untuk menghapus seluruh data dipisahkan tegas,
+karena tindakan di sana tidak bisa dibatalkan.
+
+### Tentang dan arsitektur
+
+<p align="center">
+  <img src="docs/screenshots/11-tentang.png" alt="Tentang" width="820">
+</p>
+
+Penjelasan alur kerja dari unggah sampai jawaban, beserta tumpukan teknologi
+dan alasan setiap pilihan. Halaman ini berguna saat menyerahkan proyek kepada
+orang lain: yang perlu dipahami ada di sini, bukan tersebar di kode.
+
 ## Verifikasi dan pengujian
 
 ### Backend
 
 ```powershell
 cd backend
-python -m pytest                 # 502 test, coverage gate 70%
+python -m pytest                 # 534 test, coverage gate 70%
 python -m ruff check app tests scripts
 ```
 
@@ -275,14 +391,26 @@ python -m scripts.e2e_check
 
 ### Uji browser otomatis
 
-46 skenario Playwright yang mencakup login, unggah tiga format berkas, tanya
-jawab dengan sitasi, penolakan halusinasi, pratinjau PDF, pemilih dokumen di
-halaman evaluasi, dan notifikasi.
+59 skenario Playwright yang mencakup login, sesi yang bertahan melewati
+perpindahan halaman, unggah tiga format berkas, tanya jawab dengan sitasi,
+penolakan halusinasi, pratinjau PDF, scope beberapa dokumen, dan notifikasi.
 
 ```powershell
 cd frontend
 npx playwright test
 ```
+
+E2E memakai **model embedding asli**, bukan stub, dan backend-nya harus
+berjalan dengan `USE_LOCAL_EMBEDDING=1`. Alasannya terukur: ambang kemiripan
+aplikasi (default 0,82, minimum 0,75) dikalibrasi untuk model
+`intfloat/multilingual-e5-small`, yang memberi skor 0,84 sampai 0,91 untuk
+pertanyaan relevan. Embedding stub hashing hanya memberi sekitar 0,49, sehingga
+setiap pertanyaan dijawab "tidak ditemukan" walaupun dokumennya berisi
+jawabannya. Dengan model asli, sitasi muncul sebagaimana di produksi.
+
+Suite ini membersihkan dokumen dan sesi sebelum berjalan, lalu memulihkan
+pengaturan retrieval sebelum setiap test, supaya hasilnya tidak terpengaruh
+data dari run sebelumnya.
 
 Saat dijalankan di komputer sendiri, Playwright sengaja tidak menyalakan
 server. Jalankan backend dan frontend lebih dulu di dua terminal terpisah,
