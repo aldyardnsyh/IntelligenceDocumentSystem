@@ -15,6 +15,28 @@ cukup**. Cara B dipakai kalau Anda ingin menguji kualitas jawaban sungguhan.
 
 ---
 
+## Jalan pintas: satu perintah
+
+Kalau Anda memakai **Cara B** (dengan backend), ada satu perintah yang
+menyiapkan hampir semuanya: membuat `backend/.env`, membuat
+`frontend/.env.local`, menyiapkan folder data, dan memeriksa perangkat serta
+dependency yang sudah terpasang.
+
+```powershell
+cd "D:\Riset Pribadi\RAG - Intelegence Document System"
+python scripts/siapkan-lokal.py
+```
+
+Perintah itu menampilkan **passcode acak** yang harus Anda catat. Yang disimpan
+hanya hash-nya, jadi passcode tidak bisa dilihat lagi setelah itu. Kalau
+hilang, buat yang baru dengan `python -m scripts.make_passcode`.
+
+Perintah itu **tidak menimpa** berkas yang sudah ada, jadi aman dijalankan
+ulang. Kalau Anda memilih Cara A (mode demo), cukup singkirkan
+`frontend/.env.local` seperti dijelaskan di bawah.
+
+---
+
 ## Yang harus ada lebih dulu
 
 | Perangkat | Versi | Cara memeriksa |
@@ -393,6 +415,12 @@ npm install
 npm run dev                       # buka http://localhost:3000
 ```
 
+**Lengkap, sekali saja dari akar proyek:**
+
+```powershell
+python scripts/siapkan-lokal.py    # membuat .env, .env.local, dan passcode acak
+```
+
 **Lengkap, terminal 1:**
 
 ```powershell
@@ -401,8 +429,6 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
 pip install sentence-transformers
-python -m scripts.make_passcode    # salin hash ke .env
-Copy-Item .env.example .env        # lalu isi ACCESS_PASSCODE_SHA256 dan LLM_PROVIDER=mock
 python -m uvicorn app.main:app --port 8000
 ```
 
