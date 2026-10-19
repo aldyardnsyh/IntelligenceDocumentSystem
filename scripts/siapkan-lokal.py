@@ -195,7 +195,8 @@ def main() -> int:
     # Node: periksa folder node_modules.
     node_modules = FRONTEND / "node_modules"
     node_ada = node_modules.exists() and any(node_modules.iterdir())
-    print(f"   node    node_modules             {'ada' if node_ada else 'BELUM (jalankan npm install)'}")
+    status_node = "ada" if node_ada else "BELUM (jalankan npm install)"
+    print(f"   node    node_modules             {status_node}")
 
     print()
     print("== 4. Langkah berikutnya")
