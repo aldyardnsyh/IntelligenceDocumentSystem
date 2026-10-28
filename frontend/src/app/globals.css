@@ -127,6 +127,10 @@
        scrollbar, control formulir, dan caret bawaan browser supaya tidak
        ikut gelap hanya karena sistem operasi pengguna gelap. */
     color-scheme: light;
+    /* Ruang scrollbar selalu dipesan, jadi lebar viewport tidak berubah saat
+       konten memanjang dan memunculkan scrollbar. Tanpa ini, elemen terpusat
+       bergeser mendatar setiap kali jawaban chat melewati tinggi layar. */
+    scrollbar-gutter: stable;
   }
 
   body {

@@ -288,3 +288,103 @@ test.describe("reset data demo", () => {
     ).toHaveCount(0);
   });
 });
+
+/**
+ * Penjaga regresi "sidebar bergetar saat streaming".
+ *
+ * Perbaikannya adalah app shell setinggi layar (h-dvh + overflow-hidden),
+ * daftar pesan sebagai satu-satunya wadah yang menggulir, dan
+ * scrollbar-gutter stable. Kalau salah satu lepas, halaman luar ikut
+ * menggulir dan sidebar bergeser saat jawaban mengetik.
+ */
+test.describe("stabilitas layout saat streaming", () => {
+  test.beforeEach(async ({ page }) => {
+    await masukDemo(page);
+  });
+
+  test("sidebar dan halaman tidak bergeser", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto("/chat");
+
+    const sidebar = page.locator("aside").first();
+    const awal = await sidebar.boundingBox();
+    expect(
+      awal,
+      "sidebar tidak ditemukan atau belum punya kotak; periksa apakah app shell gagal dirender",
+    ).not.toBeNull();
+    const kotakAwal = awal as NonNullable<typeof awal>;
+
+    const input = chatInput(page);
+    await input.fill(PERTANYAAN_SITASI);
+    await input.press("Enter");
+
+    const pemicuSumber = page
+      .getByRole("button", { name: /sumber ditemukan/i })
+      .last();
+    await expect(
+      pemicuSumber,
+      "jawaban tidak pernah tampil, sehingga stabilitas layout tidak bisa dinilai",
+    ).toBeVisible({ timeout: 30_000 });
+
+    // Pengukuran pertama: tepat setelah jawaban selesai mengetik.
+    const sesudah1 = await sidebar.boundingBox();
+    const scroll1 = await page.evaluate(() => window.scrollY);
+    const mainScroll1 = await page.evaluate(
+      () => document.querySelector("main")?.scrollTop ?? 0,
+    );
+
+    expect(
+      scroll1,
+      "halaman ikut menggulir saat jawaban mengetik; kemungkinan app shell kehilangan h-dvh/overflow-hidden sehingga body yang menggulir",
+    ).toBe(0);
+    expect(
+      mainScroll1,
+      "wadah main ikut menggulir, bukan hanya daftar pesan; periksa overflow pada main",
+    ).toBe(0);
+    expect(
+      sesudah1,
+      "sidebar hilang saat streaming, sehingga posisinya tidak bisa dibandingkan",
+    ).not.toBeNull();
+    const kotak1 = sesudah1 as NonNullable<typeof sesudah1>;
+    expect(
+      Math.abs(kotak1.x - kotakAwal.x) <= 1,
+      `sidebar bergeser horizontal dari ${kotakAwal.x} ke ${kotak1.x} saat jawaban mengetik; cek scrollbar-gutter stable dan lebar panel yang berubah`,
+    ).toBe(true);
+    expect(
+      Math.abs(kotak1.y - kotakAwal.y) <= 1,
+      `sidebar bergeser vertikal dari ${kotakAwal.y} ke ${kotak1.y} saat jawaban mengetik; kemungkinan tinggi halaman bertambah karena daftar pesan tidak menggulir sendiri`,
+    ).toBe(true);
+
+    // Pengukuran kedua: 800 ms kemudian, untuk menangkap pergeseran susulan
+    // (misalnya saat scrollbar muncul atau animasi tinggi selesai).
+    await page.waitForTimeout(800);
+
+    const sesudah2 = await sidebar.boundingBox();
+    const scroll2 = await page.evaluate(() => window.scrollY);
+    const mainScroll2 = await page.evaluate(
+      () => document.querySelector("main")?.scrollTop ?? 0,
+    );
+
+    expect(
+      scroll2,
+      "halaman menggulir setelah jeda 800 ms; kemungkinan fokus otomatis atau pengukuran tinggi memindahkan body",
+    ).toBe(0);
+    expect(
+      mainScroll2,
+      "main menggulir setelah jeda 800 ms, bukan daftar pesan; periksa overflow pada main",
+    ).toBe(0);
+    expect(
+      sesudah2,
+      "sidebar hilang setelah jeda 800 ms, sehingga posisinya tidak bisa dibandingkan",
+    ).not.toBeNull();
+    const kotak2 = sesudah2 as NonNullable<typeof sesudah2>;
+    expect(
+      Math.abs(kotak2.x - kotakAwal.x) <= 1,
+      `sidebar bergeser horizontal dari ${kotakAwal.x} ke ${kotak2.x} setelah jeda 800 ms; cek scrollbar-gutter stable`,
+    ).toBe(true);
+    expect(
+      Math.abs(kotak2.y - kotakAwal.y) <= 1,
+      `sidebar bergeser vertikal dari ${kotakAwal.y} ke ${kotak2.y} setelah jeda 800 ms; kemungkinan app shell tidak lagi setinggi layar`,
+    ).toBe(true);
+  });
+});

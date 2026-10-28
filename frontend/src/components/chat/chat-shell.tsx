@@ -55,7 +55,10 @@ export function ChatShell({
   const [attachmentPending, setAttachmentPending] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatInputRef = useRef<ChatInputHandle>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  // `true` selama pengguna sedang menempel di dasar daftar. Menjadi `false`
+  // begitu ia menggulir ke atas untuk membaca pesan lama.
+  const stickToBottom = useRef(true);
   const promotedToRoute = useRef<string | null>(routeSessionId);
 
   const documents = useDocuments();
@@ -155,8 +158,15 @@ export function ChatShell({
   }, [chat.sessionId, chat.isSending, routeSessionId, router]);
 
   // Auto-scroll mengikuti pesan baru dan token streaming.
+  //
+  // Sengaja tidak memanggil scroll-into-view milik DOM: fungsi itu menggulir
+  // semua leluhur, termasuk window, sehingga setiap token ikut menggeser
+  // seluruh halaman. Kita hanya menyetel `scrollTop` milik daftar pesan
+  // sendiri, dan hanya kalau pengguna memang sedang menempel di dasar.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ block: "end" });
+    const el = listRef.current;
+    if (!el || !stickToBottom.current) return;
+    el.scrollTop = el.scrollHeight;
   }, [chat.messages]);
 
   const lastMessage = chat.messages[chat.messages.length - 1];
@@ -208,11 +218,13 @@ export function ChatShell({
   );
 
   return (
-    <div className="flex min-h-0 flex-1">
+    <div className="flex h-full min-h-0 flex-1 overflow-hidden">
       {/* Sidebar permanen di desktop, drawer di layar kecil. */}
-      <aside className="hidden w-70 shrink-0 border-r border-border lg:block">{sidebar}</aside>
+      <aside className="hidden h-full w-70 shrink-0 overflow-y-auto border-r border-border lg:block">
+        {sidebar}
+      </aside>
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {/*
           Bar ini muncul di semua lebar layar. Judul sesi beserta menu aksinya
           adalah tempat yang sedang dibaca pengguna, jadi harus ada di sana.
@@ -286,7 +298,20 @@ export function ChatShell({
           )}
         </div>
 
-        <div className="flex-1 overflow-y-auto scrollbar-slim">
+        {/*
+          `min-h-0` wajib: tanpa itu flex item menolak menyusut di bawah tinggi
+          kontennya, daftar ikut memanjang, dan yang menggulir jadi halaman.
+          `[scrollbar-gutter:stable]` menjaga lebar kolom tetap sama saat
+          scrollbar muncul/hilang, jadi isi terpusat tidak bergeser mendatar.
+        */}
+        <div
+          ref={listRef}
+          onScroll={(event) => {
+            const el = event.currentTarget;
+            stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+          }}
+          className="min-h-0 flex-1 overflow-y-auto scrollbar-slim [scrollbar-gutter:stable]"
+        >
           <div className="mx-auto flex w-full max-w-[768px] flex-col gap-6 px-4 py-6">
             {chat.isLoadingHistory ? (
               <MessageSkeleton />
@@ -321,8 +346,6 @@ export function ChatShell({
                 <CitationSkeleton />
               </div>
             ) : null}
-
-            <div ref={bottomRef} />
           </div>
         </div>
 
