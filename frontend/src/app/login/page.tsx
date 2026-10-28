@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Logo } from "@/components/brand/logo";
 import { devPasscodeHint } from "@/lib/auth/session";
 import { safeNextPath } from "@/lib/api/origin";
+import { isDemoEntryEnabled } from "@/lib/demo/profile";
 import { LoginForm } from "./login-form";
 
 export const metadata: Metadata = {
@@ -37,13 +38,31 @@ export default async function LoginPage({
             <div className="flex flex-col items-center gap-3 text-center">
               <Logo size={52} />
               <p className="eyebrow">Akses demo</p>
-              <h1 className="text-2xl font-semibold tracking-tight">Masuk untuk melanjutkan</h1>
-              <p className="max-w-80 text-[13px] leading-relaxed text-muted-foreground">
-                Masukkan passcode akses untuk memakai workspace dokumen ini.
-              </p>
+              {isDemoEntryEnabled ? (
+                <>
+                  <h1 className="text-2xl font-semibold tracking-tight">Masuk ke demo</h1>
+                  <p className="max-w-80 text-[13px] leading-relaxed text-muted-foreground">
+                    Demo portofolio dengan data contoh. Pencarian berbasis kata dan
+                    jawaban berupa kutipan; data hanya tersimpan di peramban ini.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <h1 className="text-2xl font-semibold tracking-tight">
+                    Masuk untuk melanjutkan
+                  </h1>
+                  <p className="max-w-80 text-[13px] leading-relaxed text-muted-foreground">
+                    Masukkan passcode akses untuk memakai workspace dokumen ini.
+                  </p>
+                </>
+              )}
             </div>
 
-            <LoginForm devHint={devPasscodeHint()} nextPath={safeNextPath(rawNext)} />
+            <LoginForm
+              devHint={devPasscodeHint()}
+              nextPath={safeNextPath(rawNext)}
+              demoEnabled={isDemoEntryEnabled}
+            />
           </div>
         </div>
 

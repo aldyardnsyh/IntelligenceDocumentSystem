@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { LinkButton } from "@/components/common/link-button";
-import { externalLinks } from "@/lib/api/config";
+import { externalLinks, isMockMode } from "@/lib/api/config";
 
 export const metadata: Metadata = {
   title: "Tentang & Arsitektur",
@@ -61,6 +61,50 @@ const STACK = [
   { name: "RAGAS", detail: "Evaluasi kualitas retrieval dan jawaban" },
 ] as const;
 
+const ENVIRONMENT_COMPARISON = [
+  {
+    aspect: "Pencarian",
+    production:
+      "Pencarian semantik lewat embedding dan cosine similarity di ChromaDB.",
+    demo: "Pencocokan kata, dihitung di peramban. Tidak ada vektor.",
+  },
+  {
+    aspect: "Penyusunan jawaban",
+    production: "Model bahasa menyusun jawaban dari chunk yang lolos ambang.",
+    demo: "Jawaban dirangkai dari kutipan chunk. Tidak ada model bahasa.",
+  },
+  {
+    aspect: "Penyimpanan data",
+    production:
+      "Metadata di SQLite, vektor di ChromaDB, memori sesi di server.",
+    demo: "Data tersimpan di peramban dan hilang bila dibersihkan.",
+  },
+  {
+    aspect: "Model bahasa",
+    production: "Groq, dengan Ollama sebagai cadangan.",
+    demo: "Tidak ada.",
+  },
+  {
+    aspect: "Dokumen asli",
+    production: "Disimpan di server untuk pratinjau.",
+    demo: "Dibaca di peramban; teks tidak dikirim ke mana pun.",
+  },
+] as const;
+
+const DEMO_STEPS = [
+  "Baca: PDF dibaca di peramban, teksnya diambil per halaman.",
+  "Pecah: teks dipotong menjadi bagian sekitar 500 karakter dengan sedikit tumpang tindih.",
+  "Cocokkan: pertanyaan dibandingkan kata per kata dengan setiap bagian.",
+  "Jawab: bagian yang paling cocok dirangkai menjadi jawaban, dan setiap jawaban menyebut sumbernya.",
+] as const;
+
+const PRODUCTION_STEPS = [
+  "Baca: berkas diterima server, teksnya diekstrak, lalu dibersihkan.",
+  "Indeks: setiap bagian diubah menjadi vektor dan disimpan di basis data vektor.",
+  "Cari: pertanyaan diubah menjadi vektor, lalu dicocokkan dengan cosine similarity.",
+  "Jawab: model bahasa menyusun jawaban dari bagian yang lolos ambang, lalu dikirim bertahap.",
+] as const;
+
 const MISSING_LINKS = [
   { href: externalLinks.repository, envName: "NEXT_PUBLIC_REPO_URL", label: "Repository GitHub" },
   { href: externalLinks.apiDocs, envName: "NEXT_PUBLIC_API_DOCS_URL", label: "Dokumentasi API" },
@@ -110,7 +154,37 @@ function ExternalLinkButton({
   );
 }
 
+/**
+ * Satu bentuk untuk kedua daftar "cara kerja": heading h2 dan daftar bernomor
+ * yang sama persis. Kalau bentuknya berbeda, pembaca akan mengira isinya
+ * berbeda tingkat kepentingan, padahal keduanya sejajar.
+ */
+function HowItWorksSection({
+  title,
+  steps,
+}: {
+  title: string;
+  steps: readonly string[];
+}) {
+  return (
+    <section className="flex flex-col gap-3">
+      <h2 className="text-xl font-semibold tracking-tight">{title}</h2>
+      <ol className="flex list-decimal flex-col gap-2 pl-5 text-[13px] leading-relaxed text-muted-foreground marker:font-mono marker:text-[11px]">
+        {steps.map((step) => (
+          <li key={step} className="pl-1">
+            {step}
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
 export default function AboutPage() {
+  const repositoryActionsUrl = externalLinks.repository
+    ? `${externalLinks.repository.replace(/\/+$/, "")}/actions`
+    : null;
+
   return (
     <div className="mx-auto flex w-full max-w-[860px] flex-1 flex-col gap-14 px-4 py-10 sm:px-6">
       <header className="flex flex-col gap-3">
@@ -122,6 +196,105 @@ export default function AboutPage() {
           ada, sistem mengatakannya.
         </p>
       </header>
+
+      {isMockMode ? (
+        <section id="produksi-demo" className="flex flex-col gap-4 scroll-mt-20">
+          <h2 className="text-xl font-semibold tracking-tight">
+            Produksi dan Demo ini
+          </h2>
+          {/*
+            Dua render dari data yang sama: tabel tiga kolom saat ruang cukup,
+            dan tumpukan per aspek di layar sempit. Tabel yang dipaksa tiga
+            kolom di ponsel memaksa teks jadi kolom sempit yang tidak terbaca.
+          */}
+          <div className="hidden overflow-hidden rounded-lg bg-card ring-1 ring-border sm:block">
+            <table className="w-full border-collapse text-left">
+              <caption className="sr-only">
+                Perbandingan lingkungan produksi dan demo untuk lima aspek.
+              </caption>
+              <thead>
+                <tr className="border-b border-border">
+                  <th
+                    scope="col"
+                    className="w-[20%] px-4 py-3 align-top text-[12px] font-medium text-muted-foreground"
+                  >
+                    Aspek
+                  </th>
+                  <th
+                    scope="col"
+                    className="w-[40%] px-4 py-3 align-top text-[12px] font-medium text-muted-foreground"
+                  >
+                    Produksi
+                  </th>
+                  <th
+                    scope="col"
+                    className="w-[40%] px-4 py-3 align-top text-[12px] font-medium text-muted-foreground"
+                  >
+                    Demo ini
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {ENVIRONMENT_COMPARISON.map((row) => (
+                  <tr
+                    key={row.aspect}
+                    className="border-b border-border last:border-b-0"
+                  >
+                    <th
+                      scope="row"
+                      className="px-4 py-3 align-top text-[13px] font-medium"
+                    >
+                      {row.aspect}
+                    </th>
+                    <td className="px-4 py-3 align-top text-[13px] leading-relaxed text-muted-foreground">
+                      {row.production}
+                    </td>
+                    <td className="px-4 py-3 align-top text-[13px] leading-relaxed text-muted-foreground">
+                      {row.demo}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <ul className="flex flex-col gap-px overflow-hidden rounded-lg bg-border ring-1 ring-border sm:hidden">
+            {ENVIRONMENT_COMPARISON.map((row) => (
+              <li key={row.aspect} className="flex flex-col gap-3 bg-card p-4">
+                <h3 className="text-[13px] font-semibold">{row.aspect}</h3>
+                <div className="flex flex-col gap-1">
+                  <span className="text-[11px] font-medium text-muted-foreground">
+                    Produksi
+                  </span>
+                  <p className="text-[13px] leading-relaxed text-muted-foreground">
+                    {row.production}
+                  </p>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <span className="text-[11px] font-medium text-muted-foreground">
+                    Demo ini
+                  </span>
+                  <p className="text-[13px] leading-relaxed text-muted-foreground">
+                    {row.demo}
+                  </p>
+                </div>
+              </li>
+            ))}
+          </ul>
+
+          <p className="text-[13px] leading-relaxed text-muted-foreground">
+            Dua kolom ini menjelaskan lingkungan yang berbeda, bukan dua versi
+            produk yang berbeda.
+          </p>
+        </section>
+      ) : null}
+
+      {isMockMode ? (
+        <div className="flex flex-col gap-10">
+          <HowItWorksSection title="Cara kerja di demo ini" steps={DEMO_STEPS} />
+          <HowItWorksSection title="Cara kerja di produksi" steps={PRODUCTION_STEPS} />
+        </div>
+      ) : null}
 
       <section className="flex flex-col gap-5">
         <h2 className="text-xl font-semibold tracking-tight">Alur kerja</h2>
@@ -167,6 +340,65 @@ export default function AboutPage() {
           </div>
         </div>
       </section>
+
+      {isMockMode ? (
+        <section className="flex flex-col gap-4">
+          <h2 className="text-xl font-semibold tracking-tight">Bukti teknis</h2>
+          <p className="max-w-2xl text-[13px] leading-relaxed text-muted-foreground">
+            Klaim di halaman ini bisa diperiksa sendiri, bukan hanya dipercaya.
+          </p>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            <div className="flex flex-col gap-2 rounded-lg bg-card p-5 ring-1 ring-border">
+              <h3 className="text-[14px] font-semibold">Pengujian otomatis</h3>
+              <p className="text-[13px] leading-relaxed text-muted-foreground">
+                Status pengujian terbaru ada di riwayat pemeriksaan repositori,
+                bukan angka yang ditulis manual di halaman ini.
+              </p>
+              {repositoryActionsUrl ? (
+                <LinkButton
+                  variant="secondary"
+                  href={repositoryActionsUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-auto gap-1.5 self-start"
+                >
+                  Lihat hasil pengujian
+                  <ArrowUpRight className="size-3.5" aria-hidden />
+                </LinkButton>
+              ) : (
+                <p className="mt-auto text-[12px] leading-relaxed text-muted-foreground">
+                  Tautan repositori belum diatur.
+                </p>
+              )}
+            </div>
+            <div className="flex flex-col gap-2 rounded-lg bg-card p-5 ring-1 ring-border">
+              <h3 className="text-[14px] font-semibold">Arsitektur</h3>
+              <p className="text-[13px] leading-relaxed text-muted-foreground">
+                Alur produksi dan demo dijelaskan di atas, termasuk komponen yang
+                tidak berjalan di demo.
+              </p>
+              <LinkButton
+                variant="secondary"
+                href="/about#produksi-demo"
+                className="mt-auto gap-1.5 self-start"
+              >
+                Lihat Produksi dan Demo
+              </LinkButton>
+            </div>
+            <div className="flex flex-col gap-2 rounded-lg bg-card p-5 ring-1 ring-border">
+              <h3 className="text-[14px] font-semibold">Status produksi</h3>
+              <p className="text-[13px] leading-relaxed text-muted-foreground">
+                Aplikasi produksi berjalan di server sendiri dengan basis data dan
+                model yang sesungguhnya. Demo ini tidak terhubung ke sana.
+              </p>
+            </div>
+          </div>
+          <p className="text-[12px] leading-relaxed text-muted-foreground">
+            Angka dan status diambil dari sumber masing-masing, bukan dari halaman
+            ini.
+          </p>
+        </section>
+      ) : null}
 
       <section className="flex flex-col gap-4">
         <h2 className="text-xl font-semibold tracking-tight">Tumpukan teknologi</h2>

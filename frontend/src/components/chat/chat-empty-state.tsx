@@ -11,30 +11,17 @@ interface ChatEmptyStateProps {
 }
 
 /**
- * Pertanyaan awal dibuat dari nama dokumen yang benar-benar ada, bukan teks
- * contoh hardcoded. Kalau nama dokumen tidak menghasilkan pertanyaan yang
- * masuk akal, bagian ini disembunyikan seluruhnya, bukan diisi kalimat generik.
+ * Pertanyaan contoh tetap, bukan diturunkan dari nama berkas. Tujuannya
+ * menunjukkan bentuk pertanyaan yang bisa dijawab dokumen (SOP, tiket, cuti)
+ * dan mengisi kotak tanya saja, bukan langsung mengirim.
  */
-function suggestFrom(documents: DocumentSummary[]): string[] {
-  const suggestions: string[] = [];
-
-  for (const document of documents.slice(0, 3)) {
-    const stem = document.filename
-      .replace(/\.[^.]+$/, "")
-      .replace(/[_-]+/g, " ")
-      .trim();
-
-    if (stem.length < 3) continue;
-
-    suggestions.push(`Ringkas poin utama dari ${stem}`);
-    if (suggestions.length >= 3) break;
-  }
-
-  return suggestions;
-}
+const SUGGESTED_QUESTIONS = [
+  "Berapa lama target penyelesaian permintaan menurut SOP layanan?",
+  "Apa langkah pertama saat membuat tiket layanan?",
+  "Berapa sisa cuti tahunan yang bisa dibawa ke tahun berikutnya?",
+];
 
 export function ChatEmptyState({ documents, onPick, onUpload }: ChatEmptyStateProps) {
-  const suggestions = suggestFrom(documents);
   const hasReadyDocument = documents.length > 0;
 
   return (
@@ -46,23 +33,24 @@ export function ChatEmptyState({ documents, onPick, onUpload }: ChatEmptyStatePr
       <div className="flex flex-col gap-1.5">
         <h2 className="text-[15px] font-semibold">
           {hasReadyDocument
-            ? "Mulai percakapan dengan dokumen Anda"
+            ? "Tanya dokumen Anda"
             : "Unggah dokumen untuk mulai bertanya"}
         </h2>
         <p className="max-w-md text-[13px] leading-relaxed text-muted-foreground">
           {hasReadyDocument
-            ? "Ajukan pertanyaan spesifik. Jawaban akan disusun dari chunk dokumen dan disertai sumbernya."
+            ? "Pilih salah satu pertanyaan contoh, atau tulis pertanyaan sendiri."
             : "Sistem menjawab hanya dari dokumen yang sudah diunggah. Tanpa dokumen, tidak ada sumber untuk dijawab."}
         </p>
       </div>
 
-      {hasReadyDocument && suggestions.length > 0 ? (
+      {hasReadyDocument ? (
         <ul className="flex w-full flex-col gap-2">
-          {suggestions.map((suggestion) => (
+          {SUGGESTED_QUESTIONS.map((suggestion) => (
             <li key={suggestion}>
               <Button
+                type="button"
                 variant="outline"
-                className="h-auto w-full justify-start py-2.5 text-left text-[13px]"
+                className="h-auto w-full justify-start whitespace-normal py-2.5 text-left text-[13px]"
                 onClick={() => onPick(suggestion)}
               >
                 {suggestion}

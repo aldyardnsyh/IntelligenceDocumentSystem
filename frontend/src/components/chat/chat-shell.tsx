@@ -16,7 +16,7 @@ import { ErrorState } from "@/components/common/error-state";
 import { CitationSkeleton, MessageSkeleton } from "@/components/common/skeletons";
 import { ConfirmDialog } from "@/components/common/confirm-dialog";
 import { ChatEmptyState } from "./chat-empty-state";
-import { ChatInput } from "./chat-input";
+import { ChatInput, type ChatInputHandle } from "./chat-input";
 import { ChatSidebarContent } from "./chat-sidebar";
 import { DocumentScopePicker } from "./document-scope-picker";
 import { gabungScope } from "@/lib/chat/scope";
@@ -28,6 +28,7 @@ import { useSessionActions } from "./use-session-actions";
 import { uploadDocument } from "@/lib/api";
 import { ApiError } from "@/lib/api/error";
 import { queryKeys, useDocuments, useSessions } from "@/lib/queries";
+import { isDemoEntryEnabled } from "@/lib/demo/profile";
 import { SESSION_TITLE_MAX_LENGTH } from "@/lib/mock/store";
 import type { ChatSession, DocumentSummary } from "@/types/api";
 
@@ -44,10 +45,8 @@ export function ChatShell({
 }: ChatShellProps) {
   const router = useRouter();
   const queryClient = useQueryClient();
-  // Default menyala: pengguna memilih mode ini secara sadar, dan tanpa itu
-  // pertanyaan di luar dokumen hanya dijawab "tidak ditemukan". Jawabannya
-  // tetap dilabeli sebagai bukan dari dokumen.
-  const [allowUngrounded, setAllowUngrounded] = useState(true);
+  // Demo publik: matikan default agar pertanyaan di luar korpus tampil "tidak ditemukan" (klaim inti demo).
+  const [allowUngrounded, setAllowUngrounded] = useState(!isDemoEntryEnabled);
   // Pilihan dokumen untuk sesi BARU. Untuk sesi yang sudah berjalan, scope-nya
   // datang dari riwayat di server, bukan dari state ini, supaya klien yang
   // lupa mengirimnya tidak memperlebar pencarian.
@@ -55,6 +54,7 @@ export function ChatShell({
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [attachmentPending, setAttachmentPending] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const chatInputRef = useRef<ChatInputHandle>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const promotedToRoute = useRef<string | null>(routeSessionId);
 
@@ -299,7 +299,7 @@ export function ChatShell({
             ) : chat.messages.length === 0 ? (
               <ChatEmptyState
                 documents={readyDocuments}
-                onPick={handleSend}
+                onPick={(question) => chatInputRef.current?.fillDraft(question)}
                 onUpload={() => fileInputRef.current?.click()}
               />
             ) : (
@@ -338,6 +338,7 @@ export function ChatShell({
             ) : null}
 
             <ChatInput
+              ref={chatInputRef}
               onSend={handleSend}
               onStop={chat.stop}
               isSending={chat.isSending}

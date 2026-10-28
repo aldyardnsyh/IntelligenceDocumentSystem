@@ -11,6 +11,7 @@ import { EvaluationSetup } from "./evaluation-setup";
 import { QueryLogTable } from "./query-log-table";
 import { StatCard, type StatTone } from "./stat-card";
 import { getAnalyticsSummary, runRetrievalEvaluation } from "@/lib/api";
+import { isMockMode } from "@/lib/api/config";
 import { ApiError } from "@/lib/api/error";
 import { queryKeys, useDocuments } from "@/lib/queries";
 
@@ -133,6 +134,15 @@ export function AnalyticsView() {
             />
           ) : null}
         </div>
+      ) : isMockMode ? (
+        /*
+          Demo tidak punya endpoint evaluasi, jadi setup RAGAS selalu gagal.
+          Diganti satu kalimat penjelas alih-alih tombol yang pasti error.
+        */
+        <p className="text-[12px] leading-relaxed text-muted-foreground">
+          Evaluasi kualitas jawaban tidak tersedia di demo. Angka di halaman ini
+          berasal dari interaksi Anda sendiri.
+        </p>
       ) : (
         <EvaluationSetup
           documents={readyDocuments}

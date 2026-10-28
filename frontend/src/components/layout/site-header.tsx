@@ -102,10 +102,7 @@ export function SiteHeader() {
 
       {isMockMode ? (
         <p className="border-t border-border bg-brand-wash px-4 py-1.5 text-center text-[12px] text-brand-ink">
-          Mode demo: retrieval berjalan di browser memakai fixture lokal. Set
-          <code className="mx-1 font-mono">NEXT_PUBLIC_USE_BACKEND=1</code>
-          di <code className="font-mono">frontend/.env.local</code>, lalu restart
-          dev server, untuk menghubungkan backend FastAPI.
+          Jawaban diambil dari dokumen yang Anda unggah. Semua data tersimpan di peramban ini.
         </p>
       ) : null}
       {embeddingMismatch ? (

@@ -12,6 +12,7 @@ import {
   tooManyAttempts,
   verifyPasscode,
 } from "@/lib/auth/session";
+import { isDemoEntryEnabled } from "@/lib/demo/profile";
 
 export interface LoginState {
   status: "idle" | "error" | "rate_limited";
@@ -83,6 +84,65 @@ async function checkPasscode(passcode: string): Promise<{
   };
 }
 
+/**
+ * Menyetel cookie gerbang "sudah lewat halaman login" yang dibaca `proxy.ts`.
+ *
+ * Dipakai dua jalur masuk sekaligus: verifikasi passcode dan masuk demo. Satu
+ * implementasi saja, karena dua salinan cookie yang berbeda atributnya adalah
+ * cara paling mudah membuat salah satu jalur diam-diam tidak berfungsi.
+ *
+ * Cookie ini hanya penanda gerbang, bukan kredensial. Jalur passcode tetap
+ * ditegakkan backend; jalur demo memang tidak membawa kredensial apa pun dan
+ * karena itu hanya boleh hidup saat `isDemoEntryEnabled` bernilai true.
+ *
+ * `secure` mengikuti skema request, BUKAN `NODE_ENV`. Versi sebelumnya memakai
+ * `NODE_ENV === "production"`, dan itu membuat login tidak pernah bertahan saat
+ * aplikasi produksi diakses lewat HTTP (localhost untuk memeriksa hasil build,
+ * IP LAN, atau CI): browser membuang cookie `Secure` yang dikirim lewat HTTP,
+ * proxy tidak melihat sesi, dan setiap perpindahan halaman memantul ke /login
+ * tanpa pesan apa pun.
+ */
+async function setGateCookie(origin: string): Promise<void> {
+  const jar = await cookies();
+  jar.set(SESSION_COOKIE, "1", {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: origin.startsWith("https://"),
+    path: "/",
+    maxAge: SESSION_TTL_SECONDS,
+  });
+}
+
+export interface DemoEntryState {
+  status: "idle" | "error";
+  message?: string;
+}
+
+/**
+ * Jalur masuk tanpa passcode untuk demo publik.
+ *
+ * Gerbangnya `isDemoEntryEnabled`, bukan `isMockMode`: mode fixture juga aktif
+ * saat pengembangan lokal, dan di sana melewati login justru menyembunyikan
+ * bug alur auth. Saat sakelar produk itu mati, action ini hanya mengembalikan
+ * pesan dan tidak menyentuh cookie sama sekali.
+ */
+export async function enterDemo(
+  _prev: DemoEntryState,
+  formData: FormData,
+): Promise<DemoEntryState> {
+  if (!isDemoEntryEnabled) {
+    return { status: "error", message: "Masuk demo tidak tersedia di alur ini." };
+  }
+
+  // Skema request menentukan apakah cookie harus `Secure`.
+  await setGateCookie(resolveRequestOrigin(await headers()));
+
+  // `redirect` melempar error kendali milik Next.js, jadi ia harus berada di
+  // luar try/catch. Membungkusnya akan menelan pengalihan dan mengubahnya
+  // menjadi pesan error biasa.
+  redirect(safeNextPath(String(formData.get("next") ?? "")) || "/chat");
+}
+
 export async function submitPasscode(
   _prev: LoginState,
   formData: FormData,
@@ -142,22 +202,7 @@ export async function submitPasscode(
 
   const jar = await cookies();
 
-  // Cookie ini hanya penanda "sudah lewat gerbang" untuk proxy.ts, bukan
-  // kredensial. Penegakan sesungguhnya ada di backend.
-  //
-  // `secure` mengikuti skema request, BUKAN `NODE_ENV`. Versi sebelumnya
-  // memakai `NODE_ENV === "production"`, dan itu membuat login tidak pernah
-  // bertahan saat aplikasi produksi diakses lewat HTTP (localhost untuk
-  // memeriksa hasil build, IP LAN, atau CI): browser membuang cookie
-  // `Secure` yang dikirim lewat HTTP, proxy tidak melihat sesi, dan setiap
-  // perpindahan halaman memantul ke /login tanpa pesan apa pun.
-  jar.set(SESSION_COOKIE, "1", {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: origin.startsWith("https://"),
-    path: "/",
-    maxAge: SESSION_TTL_SECONDS,
-  });
+  await setGateCookie(origin);
 
   // Cookie sesi backend (`ida_session`) harus ikut ke browser. Server action
   // ini berjalan di server, jadi `Set-Cookie` dari respons backend tidak

@@ -3,13 +3,14 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, RotateCcw, Trash2, TriangleAlert } from "lucide-react";
+import { Database, Loader2, RotateCcw, Trash2, TriangleAlert } from "lucide-react";
 import { notify } from "@/lib/notify";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { ConfirmDialog } from "@/components/common/confirm-dialog";
 import { ErrorState } from "@/components/common/error-state";
-import { getSettings, resetAllSessions, updateSettings } from "@/lib/api";
+import { getSettings, resetAllSessions, resetDemoData, updateSettings } from "@/lib/api";
+import { isMockMode } from "@/lib/api/config";
 import { queryKeys } from "@/lib/queries";
 import { ApiError } from "@/lib/api/error";
 import type { RetrievalSettings } from "@/types/api";
@@ -17,23 +18,39 @@ import type { RetrievalSettings } from "@/types/api";
 /**
  * Batas slider dan nilai default.
  *
- * Angka di sini harus sama dengan `Settings` di backend
+ * Di produksi angka di sini harus sama dengan `Settings` di backend
  * (`app/core/config.py`). Kalau berbeda, slider menampilkan nilai yang tidak
  * sedang aktif: pengguna melihat 0.75 sementara server memakai 0.5, lalu
  * menggeser control yang tidak memberi efek. Backend yang meng-klem nilai
  * di luar rentang, jadi batas slider di sinilah yang harus sinkron.
+ *
+ * Di demo skalanya lain: skor chunk adalah cakupan kata pertanyaan yang
+ * ditemukan di chunk (0..1), bukan cosine similarity vektor. Selain itu sebuah
+ * chunk baru dipakai sebagai sumber bila minimal dua kata pertanyaan cocok.
+ * Karena itu ambang yang masuk akal ada di 0.20-0.60, dan memakai rentang
+ * produksi di sini akan menolak pertanyaan yang sebenarnya terjawab oleh
+ * dokumen contoh.
  */
 const LIMITS = {
   top_k: { min: 3, max: 10, step: 1 },
-  // Rentang ini mengikuti `min_similarity_threshold`/`max_similarity_threshold`
-  // di backend, yang diukur untuk model `multilingual-e5-small`. Slider yang
-  // menawarkan nilai di luar rentang server membuat pengguna menggeser kontrol
-  // yang hasilnya langsung diklem balik, terlihat seperti pengaturan tidak
-  // tersimpan.
-  similarity_threshold: { min: 0.75, max: 0.92, step: 0.01 },
+  // Produksi: rentang mengikuti `min_similarity_threshold`/
+  // `max_similarity_threshold` di backend, diukur untuk `multilingual-e5-small`.
+  // Demo: skor berupa cakupan kata, bukan cosine, jadi ambangnya 0.20-0.60.
+  similarity_threshold: isMockMode
+    ? { min: 0.2, max: 0.6, step: 0.01 }
+    : { min: 0.75, max: 0.92, step: 0.01 },
 } as const;
 
-const DEFAULTS: RetrievalSettings = { top_k: 5, similarity_threshold: 0.82 };
+/** Titik seimbang pada skala yang sedang aktif; hanya label, bukan default. */
+const BALANCED_THRESHOLD = isMockMode ? "0.40" : "0.84";
+
+const DEFAULTS: RetrievalSettings = {
+  top_k: 5,
+  // Demo 0.25: pencocokan kata memberi skor lebih rendah daripada cosine,
+  // apalagi pada pertanyaan panjang. Syarat minimal dua kata cocok yang
+  // menjaga sitasi tetap relevan.
+  similarity_threshold: isMockMode ? 0.25 : 0.82,
+};
 
 export function SettingsView() {
   const router = useRouter();
@@ -41,6 +58,7 @@ export function SettingsView() {
   const [draft, setDraft] = useState<RetrievalSettings | null>(null);
   const [seededFrom, setSeededFrom] = useState<RetrievalSettings | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [demoConfirmOpen, setDemoConfirmOpen] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const settings = useQuery({
@@ -84,6 +102,29 @@ export function SettingsView() {
     },
     onError: (error) => {
       notify.error(error instanceof ApiError ? error.message : "Sesi gagal direset.")
+    },
+  });
+
+  /**
+   * Reset penuh fixture demo.
+   *
+   * Selain dokumen dan riwayat, `reset()` di fixture juga mengembalikan
+   * pengaturan retrieval ke seed. Karena itu query settings ikut
+   * di-invalidasi: tanpa itu slider di halaman ini tetap menampilkan nilai
+   * sebelum reset, lalu penyimpanan berikutnya menulis balik angka lama.
+   */
+  const demoResetMutation = useMutation({
+    mutationFn: () => resetDemoData(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.documents });
+      queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
+      // Awalan ["analytics"] mencakup ringkasan sekaligus semua halaman log.
+      queryClient.invalidateQueries({ queryKey: ["analytics"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.settings });
+      notify.success("Data demo dikembalikan ke kondisi awal.");
+    },
+    onError: (error) => {
+      notify.error(error instanceof ApiError ? error.message : "Data demo gagal direset.")
     },
   });
 
@@ -209,13 +250,14 @@ export function SettingsView() {
           />
           <div className="flex justify-between text-[11px] text-muted-foreground tnum">
             <span>{LIMITS.similarity_threshold.min.toFixed(2)} longgar</span>
-            <span>0.84 seimbang</span>
+            <span>{BALANCED_THRESHOLD} seimbang</span>
             <span>{LIMITS.similarity_threshold.max.toFixed(2)} ketat</span>
           </div>
           <p className="text-[12px] leading-relaxed text-muted-foreground">
-            Batas skor kemiripan minimum agar sebuah chunk dipakai sebagai sumber.
-            Rentang ini diukur untuk model embedding yang dipakai: pertanyaan
-            relevan biasanya berskor 0.84-0.91, yang tidak relevan 0.72-0.81.
+            Batas skor minimum agar sebuah chunk dipakai sebagai sumber.{" "}
+            {isMockMode
+              ? "Di demo ini skor dihitung dari kecocokan kata pertanyaan dengan isi chunk, jadi pertanyaan yang jawabannya ada biasanya berskor 0.45-0.70. Di produksi skor berasal dari kemiripan vektor, yang angkanya lebih tinggi."
+              : "Di produksi skor berasal dari kemiripan vektor: pertanyaan relevan biasanya berskor 0.84-0.91, yang tidak relevan 0.72-0.81. Di demo ini skor dihitung dari kecocokan kata, bukan kemiripan vektor."}{" "}
             Semakin tinggi, semakin sering sistem menjawab &ldquo;tidak
             ditemukan&rdquo;.
           </p>
@@ -264,6 +306,32 @@ export function SettingsView() {
         </div>
       </section>
 
+      {/*
+        Kartu ini hanya muncul di mode demo. Di backend tidak ada data contoh
+        yang bisa dikembalikan, jadi menampilkannya akan menawarkan tombol yang
+        selalu gagal.
+      */}
+      {isMockMode ? (
+        <section className="flex flex-col gap-4 rounded-lg bg-card p-5 ring-1 ring-border">
+          <div className="flex flex-col gap-1">
+            <h2 className="text-[15px] font-semibold">Reset data demo</h2>
+            <p className="text-[13px] leading-relaxed text-muted-foreground">
+              Menghapus dokumen yang Anda unggah, riwayat percakapan, dan catatan
+              aktivitas. Tiga dokumen contoh dikembalikan seperti semula.
+            </p>
+          </div>
+          <Button
+            variant="destructive"
+            className="w-fit gap-1.5"
+            disabled={demoResetMutation.isPending}
+            onClick={() => setDemoConfirmOpen(true)}
+          >
+            <Database className="size-4" aria-hidden />
+            Reset data demo
+          </Button>
+        </section>
+      ) : null}
+
       <div className="flex flex-wrap items-center justify-between gap-3 pb-4">
         <Button
           variant="ghost"
@@ -289,6 +357,16 @@ export function SettingsView() {
         description="Seluruh riwayat percakapan akan dihapus permanen dari memori sesi. Tindakan ini tidak dapat dibatalkan."
         confirmLabel="Hapus semua sesi"
         onConfirm={() => resetMutation.mutateAsync()}
+      />
+
+      <ConfirmDialog
+        open={demoConfirmOpen}
+        onOpenChange={setDemoConfirmOpen}
+        title="Reset data demo?"
+        description="Semua dokumen unggahan dan riwayat percakapan di peramban ini akan dihapus. Tindakan ini tidak bisa dibatalkan."
+        confirmLabel="Ya, reset data"
+        cancelLabel="Batal"
+        onConfirm={() => demoResetMutation.mutateAsync()}
       />
     </div>
   );

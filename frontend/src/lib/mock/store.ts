@@ -9,6 +9,7 @@ import type {
   RetrievalSettings,
   QueryLog,
 } from "@/types/api";
+import { extractPdfText } from "@/lib/pdf/extract-text";
 
 /* --------------------------------------------------------------------------
    Fixture retrieval in-browser.
@@ -34,30 +35,32 @@ export const CHUNK_OVERLAP = 50;
 export const SESSION_TITLE_MAX_LENGTH = 80;
 
 /**
- * Parameter retrieval untuk mode mock.
+ * Parameter retrieval untuk mode fixture.
  *
- * **Nilai ini sengaja berbeda dari backend** (0.5). Alasannya bukan
+ * **Nilai ini sengaja berbeda dari backend** (0.82). Alasannya bukan
  * ketidaktelitian, tapi karena skalanya memang berbeda:
  *
- * - Mock: `scoreChunk` mengembalikan cakupan token pertanyaan yang ditemukan,
- *   jadi skornya 0..1 di mana 1.0 berarti semua token pertanyaan ada.
- *   Ambang 0.5 di sini akan menolak pertanyaan panjang yang jawabannya ada:
- *   "memverifikasi kelengkapan berkas" hanya menghasilkan 0.67, karena
- *   kata kerja itu tidak muncul di chunk yang sama.
- * - Backend: ambang diterapkan pada bukti mentah (cosine similarity vektor
- *   atau skor BM25 ternormalisasi), yang angkanya memang lebih tinggi.
+ * - Fixture: `scoreChunk` mengembalikan cakupan token pertanyaan yang
+ *   ditemukan di sebuah chunk, jadi skornya 0..1 di mana 1.0 berarti semua
+ *   token pertanyaan ada di chunk itu. Pertanyaan panjang yang jawabannya ada
+ *   tetap jarang melewati 0.70: kata kerja seperti "memverifikasi" sering
+ *   tidak muncul di chunk yang memuat jawabannya. Ambang yang berlaku di
+ *   skala ini adalah 0.20-0.60, dan sebuah chunk baru dianggap sumber bila
+ *   minimal dua kata pertanyaan cocok.
+ * - Backend: ambang diterapkan pada cosine similarity vektor, yang angkanya
+ *   memang lebih tinggi dan dikalibrasi pada 0.75-0.92.
  *
- * Begitu backend terhubung, nilai mock ini tidak lagi dipakai: `getSettings`
- * membaca dari server. Yang penting sekarang adalah tidak menyamakan dua
- * angka yang berbeda makna hanya agar terlihat rapi.
+ * Menyamakan kedua angka hanya membuat demo menolak pertanyaan yang
+ * sebenarnya terjawab oleh dokumen contoh.
  */
 export const DEFAULT_SETTINGS: RetrievalSettings = {
   top_k: 5,
-  // Sama dengan default backend dan rentang slider di /settings (0.75-0.92).
-  // Nilai di luar rentang control membuat thumb nempel di ujung dan tidak
-  // bisa dikembalikan. Angkanya sendiri hasil ukur untuk model
-  // `multilingual-e5-small`: relevan 0.84-0.91, tidak relevan 0.72-0.81.
-  similarity_threshold: 0.82,
+  // Rentang demo 0.20-0.60, default 0.25. Pencocokan kata memberi skor lebih
+  // rendah daripada cosine, dan cakupan kata turun drastis pada pertanyaan
+  // panjang, jadi ambang tinggi menolak pertanyaan yang sebenarnya terjawab.
+  // Karena itu syarat skor dilengkapi syarat minimal dua kata cocok: satu kata
+  // yang kebetulan sama tidak cukup untuk dianggap sumber.
+  similarity_threshold: 0.25,
 };
 
 interface StoredMessage {
@@ -139,6 +142,79 @@ dan jumlah permintaan yang tidak terlayani.
 Permintaan yang tidak menyertakan identitas pemohon yang jelas, atau yang
 berasal dari pihak ketiga tanpa persetujuan, tidak diproses.`;
 
+const SAMPLE_TICKET_TEXT = `Panduan Penggunaan Sistem Tiket Layanan
+
+1. Tujuan Panduan
+Panduan ini menjelaskan cara membuat tiket layanan agar permintaan tercatat
+rapi, terlacak, dan tidak hilang di kotak masuk surel unit kerja.
+
+2. Sebelum Membuat Tiket
+2.1 Pastikan Anda sudah masuk memakai akun dinas. Tiket yang dibuat dari akun
+pribadi tidak dapat diverifikasi oleh Receiving Officer.
+2.2 Siapkan nomor induk pegawai, unit kerja, dan uraian singkat kebutuhan.
+2.3 Lampirkan berkas pendukung bila permintaan berkaitan dengan dokumen resmi.
+
+3. Langkah Membuat Tiket
+3.1 Langkah pertama, masuk ke menu Layanan lalu pilih Buat Tiket. Menu ini
+menampilkan formulir tiket baru yang masih kosong.
+3.2 Isi judul tiket dengan kalimat singkat, misalnya "Permintaan salinan
+dokumen kerja sama".
+3.3 Pilih kategori layanan yang paling dekat dengan kebutuhan Anda.
+3.4 Tulis uraian kebutuhan secara jelas, termasuk tenggat yang diharapkan.
+3.5 Unggah lampiran pendukung pada bagian Lampiran.
+3.6 Periksa kembali seluruh isian, lalu tekan Kirim Tiket.
+3.7 Sistem menampilkan nomor tiket. Simpan nomor itu untuk pelacakan.
+
+4. Setelah Tiket Dikirim
+4.1 Tiket berstatus Baru sampai diterima oleh Receiving Officer.
+4.2 Perubahan status dapat dilihat pada menu Layanan, submenu Daftar Tiket.
+4.3 Pemohon dapat menambahkan tanggapan pada tiket yang sama tanpa membuat
+tiket baru.
+
+5. Hal yang Perlu Dihindari
+5.1 Membuat beberapa tiket untuk satu kebutuhan yang sama.
+5.2 Menyisipkan data pribadi pihak ketiga tanpa persetujuan tertulis.
+5.3 Menutup tiket sebelum hasil layanan benar-benar diterima.`;
+
+const SAMPLE_LEAVE_TEXT = `Kebijakan Cuti Tahunan
+
+1. Dasar Kebijakan
+Kebijakan ini mengatur hak cuti tahunan pegawai, termasuk sisa cuti yang dapat
+dibawa ke tahun berikutnya dan tenggat pengajuannya.
+
+2. Hak Cuti Tahunan
+2.1 Pegawai memperoleh cuti tahunan sebanyak dua belas hari kerja setiap tahun.
+2.2 Cuti tahunan tidak dapat dipakai untuk menggantikan izin sakit.
+2.3 Cuti tahunan diajukan melalui sistem kepegawaian paling sedikit tiga hari
+kerja sebelum tanggal cuti dimulai.
+
+3. Sisa Cuti dan Pembawaan ke Tahun Berikutnya
+3.1 Sisa cuti tahunan yang tidak terpakai dapat dibawa ke tahun berikutnya
+dengan batas maksimal enam hari.
+3.2 Sisa cuti di atas enam hari hangus pada akhir tahun berjalan dan tidak
+dapat dikonversi menjadi uang.
+3.3 Cuti yang dibawa wajib dipakai paling lambat tanggal tiga puluh satu Maret
+tahun berikutnya.
+3.4 Sisa cuti yang belum dipakai setelah tanggal tersebut dinyatakan hangus.
+
+4. Tenggat Pengajuan
+4.1 Pengajuan cuti untuk sisa tahun sebelumnya wajib disetujui atasan langsung
+paling lambat tanggal dua puluh Maret.
+4.2 Pengajuan yang masuk setelah tanggal dua puluh Maret tidak diproses untuk
+sisa cuti tahun sebelumnya.
+4.3 Cuti tahunan berjalan tetap dapat diajukan sepanjang tahun sesuai kuota.
+
+5. Pembatalan dan Perubahan
+5.1 Pembatalan cuti yang sudah disetujui harus diajukan sebelum tanggal cuti
+dimulai.
+5.2 Perubahan tanggal cuti mengikuti alur persetujuan yang sama dengan
+pengajuan baru.
+
+6. Pencatatan
+6.1 Saldo cuti dapat dilihat pada menu Kepegawaian, submenu Saldo Cuti.
+6.2 Unit kepegawaian menutup pembukuan saldo cuti setiap tanggal tiga puluh
+satu Desember.`;
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -199,6 +275,66 @@ function buildChunks(documentId: string, text: string): Chunk[] {
   }));
 }
 
+/**
+ * Chunk untuk dokumen berhalaman (PDF).
+ *
+ * `chunk_index` sengaja tetap berjalan lintas halaman: UI dan sitasi memakai
+ * indeks itu sebagai urutan global, sedangkan `page_number` dipakai untuk
+ * melompat ke halaman asli. Halaman hasil pindai tidak menghasilkan chunk,
+ * tetapi nomor halamannya tidak digeser supaya `page_number` tetap cocok
+ * dengan berkas yang dibuka pengguna.
+ */
+function buildChunksFromPages(documentId: string, pages: string[]): Chunk[] {
+  const chunks: Chunk[] = [];
+
+  pages.forEach((pageText, pageIndex) => {
+    for (const content of chunkText(pageText)) {
+      const index = chunks.length;
+      chunks.push({
+        id: `${documentId}_c${index + 1}`,
+        document_id: documentId,
+        chunk_index: index,
+        page_number: pageIndex + 1,
+        content,
+        token_count: Math.round(content.length / 4),
+      });
+    }
+  });
+
+  return chunks;
+}
+
+/* ---------------------------- berkas pratinjau --------------------------- */
+
+/**
+ * URL berkas asli untuk pratinjau selama tab ini hidup.
+ *
+ * Disimpan di memori, bukan di localStorage: object URL hanya valid untuk
+ * dokumen yang membuatnya dan mati setelah muat ulang, jadi menuliskannya ke
+ * storage justru menghasilkan tautan rusak. Karena itu tiap URL di-revoke
+ * saat dokumennya dihapus atau fixture di-reset, supaya blob tidak menahan
+ * memori sampai tab ditutup.
+ */
+const objectUrls = new Map<string, string>();
+
+function registerFile(id: string, file: File) {
+  if (typeof URL === "undefined" || typeof URL.createObjectURL !== "function") return;
+  // Unggah ulang dengan id yang sama (mis. retry) tidak boleh menumpuk blob.
+  releaseFile(id);
+  objectUrls.set(id, URL.createObjectURL(file));
+}
+
+function releaseFile(id: string) {
+  const url = objectUrls.get(id);
+  if (!url) return;
+  URL.revokeObjectURL(url);
+  objectUrls.delete(id);
+}
+
+function resolveFileUrl(id: string): string | null {
+  return objectUrls.get(id) ?? null;
+}
+
 /* ------------------------------- retrieval ------------------------------ */
 
 const STOP_WORDS = new Set([
@@ -226,6 +362,20 @@ export function scoreChunk(question: string, content: string): number {
   const contentTokens = new Set(tokenize(content));
   const hit = questionTokens.filter((token) => contentTokens.has(token)).length;
   return hit / questionTokens.length;
+}
+
+/**
+ * Jumlah token pertanyaan yang benar-benar muncul di token chunk.
+ *
+ * `scoreChunk` menormalkan jumlah kata cocok dengan panjang pertanyaan,
+ * sehingga pertanyaan panjang bisa berskor rendah walau chunk-nya memuat
+ * jawaban. Angka absolut ini dipakai sebagai syarat tambahan: satu kata yang
+ * kebetulan sama (mis. "layanan") tidak cukup untuk menyebut chunk sebagai
+ * sumber, jadi sitasi tidak menunjuk ke bagian yang tidak relevan.
+ */
+export function countMatches(question: string, content: string): number {
+  const contentTokens = new Set(tokenize(content));
+  return tokenize(question).filter((token) => contentTokens.has(token)).length;
 }
 
 function extractiveAnswer(
@@ -274,29 +424,46 @@ function quoteBlock(text: string) {
 
 /** Pembungkus state supaya skema fixture bisa diganti tanpa merusak cache lama. */
 interface StoredEnvelope {
-  version: 2;
+  version: 3;
   state: MockState;
 }
 
 function seedState(): MockState {
-  const uploadedAt = new Date(Date.now() - 1000 * 60 * 60 * 5).toISOString();
-  const id = "doc_sample_sop";
-  const chunks = buildChunks(id, SAMPLE_DOC_TEXT);
+  /**
+   * Tiga dokumen contoh siap pakai, bukan satu.
+   *
+   * Satu dokumen saja membuat pertanyaan lintas topik selalu jatuh ke
+   * "tidak ditemukan", sehingga mode demo tidak bisa memperlihatkan pemilihan
+   * sumber maupun sitasi dari beberapa berkas. Karena itu tiap contoh mewakili
+   * topik yang berbeda (prosedur, tiket, kepegawaian) dan tanggal unggahnya
+   * sengaja dibuat berbeda beberapa jam agar urutan daftar terlihat wajar.
+   */
+  const seedDocument = (
+    id: string,
+    filename: string,
+    text: string,
+    hoursAgo: number,
+  ): StoredDocument => {
+    const chunks = buildChunks(id, text);
+    return {
+      id,
+      filename,
+      size_bytes: new Blob([text]).size,
+      page_count: null,
+      status: "ready",
+      uploaded_at: new Date(Date.now() - 1000 * 60 * 60 * hoursAgo).toISOString(),
+      error_message: null,
+      chunk_count: chunks.length,
+      chunks,
+      text,
+    };
+  };
 
   return {
     documents: [
-      {
-        id,
-        filename: "contoh-sop-layanan.md",
-        size_bytes: new Blob([SAMPLE_DOC_TEXT]).size,
-        page_count: null,
-        status: "ready",
-        uploaded_at: uploadedAt,
-        error_message: null,
-        chunk_count: chunks.length,
-        chunks,
-        text: SAMPLE_DOC_TEXT,
-      },
+      seedDocument("doc_sample_sop", "contoh-sop-layanan.md", SAMPLE_DOC_TEXT, 5),
+      seedDocument("doc_sample_tiket", "panduan-tiket-layanan.md", SAMPLE_TICKET_TEXT, 9),
+      seedDocument("doc_sample_cuti", "kebijakan-cuti.md", SAMPLE_LEAVE_TEXT, 14),
     ],
     sessions: [],
     settings: { ...DEFAULT_SETTINGS },
@@ -319,7 +486,10 @@ function read(): MockState {
     if (raw) {
       const envelope = JSON.parse(raw) as Partial<StoredEnvelope>;
       // Ganti skema lama supaya seed baru tidak bentrok dengan cache lama.
-      if (envelope?.version === 2 && envelope.state) {
+      // Skema 3 mengganti ambang tersimpan: sebelum ini pengunjung bisa
+      // menyimpan 0.82, angka skala cosine yang membuat mode demo menolak
+      // pertanyaan yang jawabannya ada.
+      if (envelope?.version === 3 && envelope.state) {
         cache = envelope.state as MockState;
         return cache;
       }
@@ -336,7 +506,7 @@ function read(): MockState {
 function persist() {
   if (typeof window === "undefined" || !cache) return;
   try {
-    const envelope: StoredEnvelope = { version: 2, state: cache };
+    const envelope: StoredEnvelope = { version: 3, state: cache };
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(envelope));
   } catch {
     // Kuota penuh atau storage diblokir: biarkan state in-memory saja.
@@ -460,9 +630,12 @@ export const mockApi = {
   },
 
   /**
-   * File PDF tidak bisa diparse di browser, jadi fixture menandainya gagal
-   * dengan pesan yang persis seperti yang akan diberikan backend, supaya alur
-   * "gagal diproses" bisa dicoba tanpa backend.
+   * Unggah berkas di mode fixture.
+   *
+   * PDF benar-benar diparse di browser lewat PDF.js, jadi alur "berhasil",
+   * "tidak ada teks (hasil pindai)", dan "berkas rusak" bisa dicoba tanpa
+   * backend. Dokumen dikembalikan dalam status `processing` lebih dulu, sama
+   * seperti unggahan ke backend yang baru selesai saat worker selesai.
    */
   async uploadDocument(file: File): Promise<DocumentSummary> {
     const state = read();
@@ -481,40 +654,95 @@ export const mockApi = {
 
     const id = makeId("doc");
     const uploaded_at = nowIso();
-    const text = isText ? await file.text() : "";
+
+    // Berkas asli disimpan supaya pratinjau bisa menampilkan dokumen yang
+    // sebenarnya, bukan hanya teks hasil parsing.
+    registerFile(id, file);
+
+    if (isPdf) {
+      state.documents.unshift({
+        id,
+        filename: file.name,
+        size_bytes: file.size,
+        page_count: null,
+        status: "processing",
+        uploaded_at,
+        error_message: null,
+        chunk_count: 0,
+        chunks: [],
+        text: "",
+      });
+      commit();
+
+      void (async () => {
+        try {
+          const { pages, pageCount } = await extractPdfText(file);
+          // Dokumen bisa saja sudah dihapus saat ekstraksi berjalan.
+          const doc = state.documents.find((item) => item.id === id);
+          if (!doc) return;
+
+          const chunks = buildChunksFromPages(id, pages);
+          doc.page_count = pageCount;
+          doc.text = pages.join("\n\n");
+
+          if (chunks.length === 0) {
+            doc.status = "failed";
+            doc.error_message =
+              "Tidak ada teks yang bisa dibaca dari PDF ini. "
+              + "Berkas hasil pindai perlu OCR sebelum diunggah.";
+          } else {
+            doc.chunks = chunks;
+            doc.chunk_count = chunks.length;
+            doc.status = "ready";
+            doc.error_message = null;
+          }
+          commit();
+        } catch (error) {
+          const doc = state.documents.find((item) => item.id === id);
+          if (!doc) return;
+          doc.status = "failed";
+          // Pesan dari extractPdfText sudah user-facing (rusak/terkunci),
+          // jadi diteruskan apa adanya alih-alih ditelan jadi pesan generik.
+          doc.error_message = error instanceof Error && error.message
+            ? error.message
+            : "PDF gagal diproses.";
+          commit();
+        }
+      })();
+
+      return toSummary(state.documents.find((item) => item.id === id)!);
+    }
+
+    const text = await file.text();
 
     state.documents.unshift({
       id,
       filename: file.name,
       size_bytes: file.size,
-      page_count: isPdf ? null : 0,
-      status: isPdf ? "failed" : "processing",
+      page_count: 0,
+      status: "processing",
       uploaded_at,
-      error_message: isPdf
-        ? "Ekstraksi teks PDF dijalankan di server. Hubungkan backend FastAPI untuk mengunggah PDF."
-        : null,
+      error_message: null,
       chunk_count: 0,
       chunks: [],
       text,
     });
     commit();
 
-    if (!isPdf) {
-      // Simulasi worker ingestion: beberapa detik lalu status naik ke ready.
-      void (async () => {
-        await sleep(2600);
-        const doc = state.documents.find((item) => item.id === id);
-        if (!doc) return;
-        doc.chunks = buildChunks(id, doc.text);
-        doc.chunk_count = doc.chunks.length;
-        doc.page_count = 0;
-        doc.status = doc.chunks.length > 0 ? "ready" : "failed";
-        doc.error_message = doc.chunks.length > 0
-          ? null
-          : "Tidak ada teks yang bisa dibaca dari berkas ini.";
-        commit();
-      })();
-    }
+    // Simulasi worker ingestion: beberapa detik lalu status naik ke ready.
+    void (async () => {
+      await sleep(2600);
+      const doc = state.documents.find((item) => item.id === id);
+      if (!doc) return;
+      doc.chunks = buildChunks(id, doc.text);
+      doc.chunk_count = doc.chunks.length;
+      doc.page_count = 0;
+      doc.status = doc.chunks.length > 0 ? "ready" : "failed";
+      doc.error_message = doc.chunks.length > 0
+        ? null
+        : "Tidak ada teks yang bisa dibaca dari berkas ini.";
+      commit();
+    })();
 
     return toSummary(state.documents.find((item) => item.id === id)!);
   },
@@ -523,6 +751,9 @@ export const mockApi = {
     await sleep(150);
     const state = read();
     state.documents = state.documents.filter((doc) => doc.id !== id);
+    // Blob pratinjau ikut dilepas, kalau tidak memori tab menahan berkas
+    // yang sudah tidak bisa diakses dari UI.
+    releaseFile(id);
     for (const session of state.sessions) {
       const remaining = session.messages.filter((message) =>
         message.citations.every((citation) => citation.document_id !== id),
@@ -533,6 +764,15 @@ export const mockApi = {
       session.messages = remaining;
     }
     commit();
+  },
+
+  /**
+   * URL berkas asli untuk pratinjau (`<iframe>`/`<embed>`).
+   * `null` berarti berkas tidak tersedia di sesi ini — misalnya dokumen
+   * contoh bawaan, dokumen lama dari localStorage, atau setelah muat ulang.
+   */
+  getFileUrl(id: string): string | null {
+    return resolveFileUrl(id);
   },
 
   async listSessions() {
@@ -679,7 +919,16 @@ export const mockApi = {
           content: chunk.content,
         })),
       )
-      .filter((item) => item.citation.score >= settings.similarity_threshold)
+      // Dua syarat sekaligus: skor cakupan kata di atas ambang, DAN minimal
+      // dua kata pertanyaan benar-benar ada di chunk. Skor cakupan turun
+      // drastis pada pertanyaan panjang, sementara satu kata yang kebetulan
+      // sama tidak cukup untuk dianggap sumber — tanpa syarat kedua, sitasi
+      // bisa menunjuk ke chunk yang tidak relevan.
+      .filter(
+        (item) =>
+          item.citation.score >= settings.similarity_threshold
+          && countMatches(question, item.content) >= 2,
+      )
       .sort((a, b) => b.citation.score - a.citation.score)
       .slice(0, settings.top_k);
 
@@ -748,6 +997,10 @@ export const mockApi = {
   },
 
   reset() {
+    // Fixture dikembalikan ke seed, jadi semua berkas unggahan (beserta blob
+    // pratinjaunya) memang dibuang. Salin key dulu karena releaseFile
+    // menghapus entri map saat diiterasi.
+    [...objectUrls.keys()].forEach(releaseFile);
     cache = seedState();
     commit();
   },

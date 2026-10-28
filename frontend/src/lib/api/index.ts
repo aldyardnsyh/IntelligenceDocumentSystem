@@ -54,8 +54,14 @@ export function getDocumentPreview(id: string, signal?: AbortSignal) {
  * harus memuatnya: PDF ditampilkan oleh penampil bawaan browser, dan
  * mengunduhnya lewat fetch lalu membuat blob hanya menambah satu salinan
  * besar di memori tanpa manfaat.
+ *
+ * Di mode demo tidak ada endpoint berkas: sumbernya blob yang dibuat saat
+ * unggah dan hanya hidup selama sesi. Karena itu hasilnya bisa string kosong
+ * setelah muat ulang — pemanggil wajib menanganinya, bukan merender iframe
+ * dengan src kosong.
  */
 export function getDocumentFileUrl(id: string): string {
+  if (isMockMode) return mockApi.getFileUrl(id) ?? "";
   return `${API_BASE_URL}/api/v1/documents/${id}/file`;
 }
 
@@ -160,6 +166,24 @@ export async function deleteSession(id: string) {
 export async function resetAllSessions() {
   if (isMockMode) return mockApi.resetSessions();
   return request<void>("/api/v1/chat/sessions", { method: "DELETE" });
+}
+
+/**
+ * Mengembalikan seluruh data demo ke kondisi awal.
+ *
+ * Fixture hidup di peramban, jadi reset berarti membuang dokumen hasil
+ * unggahan (beserta blob pratinjaunya), riwayat percakapan, dan catatan
+ * aktivitas, lalu memuat kembali dokumen contoh. Tidak ada padanannya di
+ * backend: di sana data pengguna sungguhan, dan tombol demo tidak boleh
+ * menyentuhnya. Karena itu cabang non-mock sengaja melempar, bukan diam-diam
+ * tidak melakukan apa-apa.
+ */
+export async function resetDemoData(): Promise<void> {
+  if (isMockMode) {
+    mockApi.reset();
+    return;
+  }
+  throw new ApiError("Reset data demo hanya tersedia di mode demo.", 400);
 }
 
 export function newSessionId() {

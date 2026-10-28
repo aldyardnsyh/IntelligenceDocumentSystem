@@ -2,8 +2,10 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlertCircle, ExternalLink, FileText } from "lucide-react";
+import { AlertCircle, ExternalLink, FileQuestionMark, FileText } from "lucide-react";
+import { EmptyState } from "@/components/common/empty-state";
 import { ErrorState } from "@/components/common/error-state";
+import { Button } from "@/components/ui/button";
 import { getDocumentFileUrl, getDocumentPreview } from "@/lib/api";
 import { queryKeys } from "@/lib/queries";
 import { formatNumber } from "@/lib/format";
@@ -23,6 +25,11 @@ import { formatNumber } from "@/lib/format";
  * Yang dirender selalu berasal dari server sendiri (`/api/v1/...`), bukan URL
  * luar, dan PDF ditampilkan lewat iframe dengan `sandbox` supaya isi dokumen
  * tidak bisa menjalankan skrip di halaman aplikasi.
+ *
+ * Satu pengecualian: di mode demo berkas asli berupa blob yang hanya hidup
+ * selama sesi, jadi setelah muat ulang URL-nya kosong. Iframe dengan `src`
+ * kosong justru memuat halaman ini sendiri, sehingga kasus itu ditampilkan
+ * sebagai empty state dengan jalan keluar ke teks hasil ekstraksi.
  */
 export function DocumentPreview({
   documentId,
@@ -33,6 +40,7 @@ export function DocumentPreview({
 }) {
   const isPdf = filename.toLowerCase().endsWith(".pdf");
   const [showText, setShowText] = useState(!isPdf);
+  const fileUrl = getDocumentFileUrl(documentId);
 
   const preview = useQuery({
     queryKey: queryKeys.documentPreview(documentId),
@@ -41,6 +49,26 @@ export function DocumentPreview({
   });
 
   if (isPdf && !showText) {
+    if (!fileUrl) {
+      return (
+        <EmptyState
+          Icon={FileQuestionMark}
+          title="Pratinjau tidak tersedia"
+          description="Berkas asli PDF tidak tersimpan di peramban ini, jadi pratinjau tidak bisa dibuka lagi setelah halaman dimuat ulang. Teks hasil ekstraksi tetap bisa dibaca di tab Chunk hasil ingestion."
+          action={
+            <Button
+              type="button"
+              variant="outline"
+              className="mt-1"
+              onClick={() => setShowText(true)}
+            >
+              Lihat teks hasil ekstraksi
+            </Button>
+          }
+        />
+      );
+    }
+
     return (
       <div className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-muted/40 px-4 py-2.5">
@@ -57,7 +85,7 @@ export function DocumentPreview({
               Lihat teks hasil ekstraksi
             </button>
             <a
-              href={getDocumentFileUrl(documentId)}
+              href={fileUrl}
               target="_blank"
               rel="noreferrer noopener"
               className="flex items-center gap-1 text-[12px] font-medium text-brand-ink underline underline-offset-2 hover:no-underline"
@@ -75,7 +103,7 @@ export function DocumentPreview({
           iframe tidak bisa menyentuh storage aplikasi.
         */}
         <iframe
-          src={getDocumentFileUrl(documentId)}
+          src={fileUrl}
           title={`Pratinjau ${filename}`}
           sandbox=""
           className="h-[70vh] w-full rounded-lg bg-card ring-1 ring-border"

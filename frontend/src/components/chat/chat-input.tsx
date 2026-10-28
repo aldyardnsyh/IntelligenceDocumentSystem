@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
 import { ArrowUp, Info, Paperclip, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -12,7 +12,13 @@ import {
 import { ACCEPTED_EXTENSIONS, MAX_FILE_BYTES } from "@/lib/mock/store";
 import { formatBytes } from "@/lib/format";
 
+export interface ChatInputHandle {
+  /** Isi kotak tanya tanpa mengirim, fokus ke textarea, kursor di akhir teks. */
+  fillDraft(text: string): void;
+}
+
 interface ChatInputProps {
+  ref?: Ref<ChatInputHandle>;
   onSend: (question: string) => void;
   onStop: () => void;
   isSending: boolean;
@@ -25,6 +31,7 @@ interface ChatInputProps {
 }
 
 export function ChatInput({
+  ref,
   onSend,
   onStop,
   isSending,
@@ -36,6 +43,8 @@ export function ChatInput({
   const [value, setValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  // Posisi kursor yang harus dipasang setelah React menulis nilai baru ke DOM.
+  const pendingCursor = useRef<number | null>(null);
 
   // Auto-resize sampai empat baris, lalu scroll di dalam textarea.
   useEffect(() => {
@@ -47,6 +56,32 @@ export function ChatInput({
     node.style.height = `${Math.min(node.scrollHeight, max)}px`;
     node.style.overflowY = node.scrollHeight > max ? "auto" : "hidden";
   }, [value]);
+
+  // Kursor dipasang setelah nilai baru benar-benar ada di textarea. Kalau
+  // dipasang sebelum render, rentangnya terpotong ke panjang teks lama.
+  useEffect(() => {
+    const position = pendingCursor.current;
+    if (position === null) return;
+    pendingCursor.current = null;
+    textareaRef.current?.setSelectionRange(position, position);
+  }, [value]);
+
+  const fillDraft = (text: string) => {
+    const node = textareaRef.current;
+    node?.focus();
+
+    // Teks sama berarti state tidak berubah dan efek di atas tidak jalan,
+    // jadi kursor dipasang langsung.
+    if (value === text) {
+      node?.setSelectionRange(text.length, text.length);
+      return;
+    }
+
+    pendingCursor.current = text.length;
+    setValue(text);
+  };
+
+  useImperativeHandle(ref, () => ({ fillDraft }));
 
   const locked = disabledReason !== null;
 
