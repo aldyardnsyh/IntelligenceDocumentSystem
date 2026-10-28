@@ -23,7 +23,7 @@ menyiapkan hampir semuanya: membuat `backend/.env`, membuat
 dependency yang sudah terpasang.
 
 ```powershell
-cd "D:\Riset Pribadi\RAG - Intelegence Document System"
+cd "<folder-project>"
 python scripts/siapkan-lokal.py
 ```
 
@@ -75,7 +75,7 @@ Buka folder `frontend`. Kalau ada berkas bernama `.env.local`, **ganti
 namanya sementara** (misalnya menjadi `.env.local.simpan`).
 
 ```powershell
-cd "D:\Riset Pribadi\RAG - Intelegence Document System\frontend"
+cd "<folder-project>\frontend"
 if (Test-Path .env.local) { Rename-Item .env.local .env.local.simpan }
 ```
 
@@ -88,7 +88,7 @@ lagi.
 ### Langkah 1: buka folder frontend
 
 ```powershell
-cd "D:\Riset Pribadi\RAG - Intelegence Document System\frontend"
+cd "<folder-project>\frontend"
 ```
 
 Sesuaikan alamatnya dengan tempat Anda menyimpan proyek ini.
@@ -168,7 +168,7 @@ benar, tetapi selalu gagal tanpa penjelasan. Penyebabnya hampir selalu
 konfigurasi, bukan aplikasi. Periksa dengan satu perintah:
 
 ```powershell
-cd "D:\Riset Pribadi\RAG - Intelegence Document System"
+cd "<folder-project>"
 python scripts/cek-kesiapan.py
 ```
 
@@ -191,7 +191,7 @@ untuk frontend. Keduanya harus tetap berjalan selama Anda memakai aplikasi.
 #### Langkah 1: masuk ke folder backend
 
 ```powershell
-cd "D:\Riset Pribadi\RAG - Intelegence Document System\backend"
+cd "<folder-project>\backend"
 ```
 
 #### Langkah 2: buat lingkungan Python
@@ -304,7 +304,7 @@ Buka PowerShell **baru**, jangan menutup yang pertama.
 #### Langkah 8: masuk ke folder frontend
 
 ```powershell
-cd "D:\Riset Pribadi\RAG - Intelegence Document System\frontend"
+cd "<folder-project>\frontend"
 ```
 
 #### Langkah 9: pastikan mengarah ke backend

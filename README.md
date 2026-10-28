@@ -581,10 +581,15 @@ Tiga hal yang paling sering terlewat:
 3. **Domain di `Caddyfile`.** Nilai bawaannya `example.com` milik IANA, dan
    sertifikat TLS tidak akan pernah terbit untuk domain itu.
 
-**Vercel tidak bisa dipakai untuk backend.** Batas bundle Hobby 250 MB,
-sedangkan `torch` sendiri 1.260 MB, dan Vercel tidak punya disk persisten
-untuk SQLite dan ChromaDB. Domain `*.vercel.app` juga tidak bisa diarahkan
-ke server lain. Penjelasan lengkapnya ada di `backend/README.md`.
+**Backend FastAPI tetap tidak bisa dijalankan di Vercel.** Batas bundle Hobby
+250 MB, sedangkan `torch` sendiri 1.260 MB, dan Vercel tidak punya disk
+persisten untuk SQLite maupun ChromaDB. Produksi tetap berjalan di VPS.
+Penjelasan lengkapnya ada di `backend/README.md`.
+
+**Frontend dapat dibangun tanpa backend.** Dengan `NEXT_PUBLIC_USE_BACKEND=0`,
+seluruh alur berjalan di peramban: PDF dibaca di klien, pencarian memakai
+kecocokan kata, dan tidak ada data yang dikirim ke mana pun. Mode ini dipakai
+untuk pratinjau statis. Backend FastAPI tetap hanya berjalan di VPS.
 
 ## Struktur proyek
 
