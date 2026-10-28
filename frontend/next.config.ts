@@ -17,6 +17,14 @@ import type { NextConfig } from "next";
  */
 const BACKEND_ORIGIN = process.env.BACKEND_ORIGIN ?? "http://api:8000";
 
+/**
+ * Sakelar profil, dibaca dengan aturan yang sama seperti `readFlag` di
+ * `src/lib/api/config.ts` supaya rewrite dan UI tidak pernah berbeda pendapat.
+ */
+const useBackend = /^(1|true|yes|on)$/i.test(
+  process.env.NEXT_PUBLIC_USE_BACKEND?.trim() ?? "",
+);
+
 const nextConfig: NextConfig = {
   /**
    * Build mandiri, tanpa `node_modules` di image runtime.
@@ -24,8 +32,11 @@ const nextConfig: NextConfig = {
    * Tanpa ini, image frontend ikut membawa seluruh dependency Next.js
    * (~400 MB). Dengan `standalone`, Next cuma menyalin modul yang benar-benar
    * dipakai, biasanya image turun ke ~150 MB.
+   *
+   * Di Vercel nilainya dibiarkan `undefined`: platform itu sudah punya bentuk
+   * output sendiri dan `standalone` hanya memunculkan peringatan.
    */
-  output: "standalone",
+  output: process.env.VERCEL ? undefined : "standalone",
 
   /**
    * Prefix `/api/v1` diproxy ke FastAPI.
@@ -47,11 +58,15 @@ const nextConfig: NextConfig = {
    * build-argumen kalau nanti berubah. Compose sudah mengaturnya.
    */
   async rewrites() {
-    // Tidak ada kondisi "dimatikan" di sini. Dulu ada `if (!BACKEND_ORIGIN)
-    // return []`, dan itulah penyebab request `/api/v1/*` sampai ke halaman
-    // Next alih-alih backend. Sekarang mematikan rewrite dilakukan lewat
-    // `NEXT_PUBLIC_USE_BACKEND=0` di sisi frontend, bukan lewat menyalakan
-    // proxy ke tujuan yang tidak ada.
+    // Profil demo (`NEXT_PUBLIC_USE_BACKEND` kosong): tidak ada backend yang
+    // bisa dituju. Tanpa cabang ini, `/api/v1/*` di Vercel tetap diproxy ke
+    // `http://api:8000` dan gagal, padahal harusnya jatuh ke fixture browser.
+    if (!useBackend) return [];
+
+    // Saat backend aktif, rewrite selalu menyala. Cabang "mati" di sini
+    // sengaja tidak membaca nilai `BACKEND_ORIGIN` kosong; itulah penyebab
+    // request `/api/v1/*` sampai ke halaman Next alih-alih backend. Sakelar
+    // profil dibaca terpisah di atas.
     return [
       {
         source: "/api/v1/:path*",

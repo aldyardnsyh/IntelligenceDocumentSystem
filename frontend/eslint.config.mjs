@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // `public/` berisi aset vendor hasil salin (worker PDF.js), bukan kode sumber proyek.
+    "public/**",
   ]),
 ]);
 

@@ -2,11 +2,17 @@
   "name": "frontend",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=20.9"
+  },
   "scripts": {
+    "predev": "node scripts/copy-pdf-worker.mjs",
     "dev": "next dev",
+    "prebuild": "node scripts/copy-pdf-worker.mjs && node scripts/check-profile.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "check:profile": "node scripts/check-profile.mjs",
     "e2e": "playwright test",
     "favicon": "python scripts/make_favicon.py"
   },
@@ -33,6 +39,7 @@
     "cn": "^0.4.0",
     "lucide-react": "^1.48.0",
     "next": "16.4.0",
+    "pdfjs-dist": "^6.4.299",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "recharts": "^3.10.1",
