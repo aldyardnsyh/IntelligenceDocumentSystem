@@ -14,6 +14,11 @@ import { defineConfig, devices } from "@playwright/test";
  */
 export default defineConfig({
   testDir: "./e2e",
+  // Suite tanpa backend punya config sendiri (playwright.demo.config.ts).
+  // Tanpa pengecualian ini, suite tersebut ikut dijalankan di sini dengan
+  // NEXT_PUBLIC_USE_BACKEND=1, sehingga tombol masuk tanpa backend tidak
+  // pernah ada dan job E2E gagal karena lingkungan, bukan karena kode.
+  testIgnore: /demo-mode\.spec\.ts/,
   // Membersihkan dokumen dan sesi sebelum seluruh suite berjalan, supaya
   // setiap run mulai dari keadaan yang sama. Tanpa ini, korpus menumpuk antar
   // run dan test mulai gagal karena data, bukan karena kode.
