@@ -24,6 +24,7 @@ export function SiteFooter() {
             Tentang &amp; arsitektur
           </Link>
           <span className="font-mono tnum">v{VERSION}</span>
+          <span>Hak cipta (c) 2026 PogungSoftwareHouseTeam (PSHT). Seluruh hak dilindungi.</span>
         </p>
       </div>
     </footer>

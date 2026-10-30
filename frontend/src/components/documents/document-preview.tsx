@@ -2,10 +2,11 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlertCircle, ExternalLink, FileQuestionMark, FileText } from "lucide-react";
+import { AlertCircle, FileQuestionMark, FileText } from "lucide-react";
 import { EmptyState } from "@/components/common/empty-state";
 import { ErrorState } from "@/components/common/error-state";
 import { Button } from "@/components/ui/button";
+import { PdfCanvasPreview } from "@/components/documents/pdf-canvas-preview";
 import { getDocumentFileUrl, getDocumentPreview } from "@/lib/api";
 import { queryKeys } from "@/lib/queries";
 import { formatNumber } from "@/lib/format";
@@ -15,21 +16,14 @@ import { formatNumber } from "@/lib/format";
  *
  * Dua bentuk, dipilih menurut jenis berkasnya:
  *
- * - **PDF**: berkas aslinya ditampilkan di iframe. Ini yang dibutuhkan untuk
- *   memeriksa ekstraksi teks: tata letak, tabel, dan halaman yang gagal
- *   terbaca hanya terlihat di berkas aslinya. Teks hasil parsing tetap
+ * - **PDF**: tiap halaman di-render PDF.js langsung ke canvas di halaman ini
+ *   (tanpa iframe, karena iframe blob diblokir Edge). Teks hasil parsing tetap
  *   tersedia di tab di bawahnya.
  * - **Teks/Markdown**: teks hasil parsing ditampilkan berurutan, karena
  *   berkas aslinya tidak disimpan untuk jenis ini.
  *
- * Yang dirender selalu berasal dari server sendiri (`/api/v1/...`), bukan URL
- * luar, dan PDF ditampilkan lewat iframe dengan `sandbox` supaya isi dokumen
- * tidak bisa menjalankan skrip di halaman aplikasi.
- *
- * Satu pengecualian: di mode demo berkas asli berupa blob yang hanya hidup
- * selama sesi, jadi setelah muat ulang URL-nya kosong. Iframe dengan `src`
- * kosong justru memuat halaman ini sendiri, sehingga kasus itu ditampilkan
- * sebagai empty state dengan jalan keluar ke teks hasil ekstraksi.
+ * Berkas tidak pernah dikirim ke server: di mode demo semuanya diolah di
+ * browser (session storage + memori tab ini saja).
  */
 export function DocumentPreview({
   documentId,
@@ -84,30 +78,10 @@ export function DocumentPreview({
             >
               Lihat teks hasil ekstraksi
             </button>
-            <a
-              href={fileUrl}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="flex items-center gap-1 text-[12px] font-medium text-brand-ink underline underline-offset-2 hover:no-underline"
-            >
-              Buka di tab baru
-              <ExternalLink className="size-3" aria-hidden />
-            </a>
           </div>
         </div>
 
-        {/*
-          `sandbox` tanpa `allow-scripts`: PDF tidak butuh skrip, dan
-          mengizinkannya berarti isi dokumen pengguna bisa menjalankan kode di
-          origin aplikasi. `allow-same-origin` juga tidak diberikan supaya
-          iframe tidak bisa menyentuh storage aplikasi.
-        */}
-        <iframe
-          src={fileUrl}
-          title={`Pratinjau ${filename}`}
-          sandbox=""
-          className="h-[70vh] w-full rounded-lg bg-card ring-1 ring-border"
-        />
+        <PdfCanvasPreview fileUrl={fileUrl} filename={filename} />
 
         <p className="text-[12px] leading-relaxed text-muted-foreground">
           Bandingkan tampilan di atas dengan tab <span className="font-medium">Chunk

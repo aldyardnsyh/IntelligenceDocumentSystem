@@ -27,6 +27,13 @@ export default async function LoginPage({
   // `next` berasal dari URL, jadi divalidasi di server (open redirect).
   const params = await searchParams;
   const rawNext = Array.isArray(params.next) ? params.next[0] : params.next;
+  // Hint passcode demo yang eksplisit diumumkan operator. Opt-in lewat env,
+  // tampil juga di production build (berbeda dari devHint yang dev-only).
+  // Di mode demo publik tombol "Masuk demo" tidak butuh passcode sama sekali,
+  // jadi hint disembunyikan supaya pengunjung tidak bingung.
+  const demoHint = isDemoEntryEnabled
+    ? null
+    : (process.env.NEXT_PUBLIC_DEMO_PASSCODE_HINT?.trim() || null);
 
   return (
     <main className="flex min-h-dvh items-center justify-center bg-background px-4 py-12">
@@ -63,6 +70,12 @@ export default async function LoginPage({
               nextPath={safeNextPath(rawNext)}
               demoEnabled={isDemoEntryEnabled}
             />
+
+            {demoHint ? (
+              <p className="rounded-md bg-brand-wash px-3 py-2.5 text-center text-[13px] leading-relaxed text-brand-ink">
+                Passcode demo: <code className="font-mono font-semibold">{demoHint}</code>
+              </p>
+            ) : null}
           </div>
         </div>
 

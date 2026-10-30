@@ -2,8 +2,8 @@ import { NextResponse, type NextRequest } from "next/server";
 
 const SESSION_COOKIE = "ida_gate";
 
-/** Halaman yang boleh dibuka tanpa passcode. */
-const PUBLIC_PATHS = ["/login"];
+/** Halaman yang boleh dibuka tanpa passcode. `/` exact saja, bukan prefix. */
+const PUBLIC_EXACT = ["/", "/login"];
 
 /**
  * Access gate di sisi server. Redirect terjadi sebelum
@@ -18,7 +18,7 @@ export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const hasSession = request.cookies.has(SESSION_COOKIE);
 
-  if (PUBLIC_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`))) {
+  if (PUBLIC_EXACT.some((path) => pathname === path || pathname.startsWith(`${path}/`))) {
     // Sudah punya sesi, tidak perlu melihat form login lagi.
     if (pathname === "/login" && hasSession) {
       return NextResponse.redirect(new URL("/chat", request.url));

@@ -490,7 +490,20 @@ function read(): MockState {
       // menyimpan 0.82, angka skala cosine yang membuat mode demo menolak
       // pertanyaan yang jawabannya ada.
       if (envelope?.version === 3 && envelope.state) {
-        cache = envelope.state as MockState;
+        const stored = envelope.state as MockState;
+        // Migrasi ambang: pengaturan lama dari mode backend (0.75-0.92) bisa
+        // tersimpan di browser. Di mode demo skor berupa cakupan kata (0..1),
+        // jadi ambang 0.82 menolak hampir semua pertanyaan walau chunk-nya ada.
+        // Dokumen pengguna dipertahankan, hanya ambang yang dikembalikan ke
+        // rentang demo bila di luar 0.20-0.60.
+        const threshold = stored.settings?.similarity_threshold;
+        if (typeof threshold !== "number" || threshold < 0.2 || threshold > 0.6) {
+          stored.settings = { ...stored.settings, similarity_threshold: 0.25 };
+          cache = stored;
+          persist();
+          return cache;
+        }
+        cache = stored;
         return cache;
       }
     }
@@ -905,6 +918,11 @@ export const mockApi = {
       (doc) => doc.status === "ready" && (!documentId || doc.id === documentId),
     );
 
+    const questionTokens = tokenize(question);
+    // Syarat kata cocok menyesuaikan panjang pertanyaan: satu kata seperti
+    // "alamat" tidak mungkin memenuhi syarat dua kata, jadi cukup satu.
+    const requiredMatches = questionTokens.length <= 1 ? 1 : 2;
+
     const ranked = ready
       .flatMap((doc) =>
         doc.chunks.map((chunk) => ({
@@ -927,7 +945,7 @@ export const mockApi = {
       .filter(
         (item) =>
           item.citation.score >= settings.similarity_threshold
-          && countMatches(question, item.content) >= 2,
+          && countMatches(question, item.content) >= requiredMatches,
       )
       .sort((a, b) => b.citation.score - a.citation.score)
       .slice(0, settings.top_k);
