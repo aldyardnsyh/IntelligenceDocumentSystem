@@ -11,12 +11,13 @@ const WORKER_SRC = "/pdf.worker.min.mjs";
  */
 export function PdfCanvasPreview({ fileUrl, filename }: { fileUrl: string; filename: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  // Status awal "loading" sudah benar saat fileUrl berubah (komponen di-mount
+  // ulang per dokumen), jadi tidak perlu setState sinkron di dalam effect.
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [pageCount, setPageCount] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
-    setStatus("loading");
 
     (async () => {
       try {

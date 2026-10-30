@@ -18,10 +18,10 @@ test.describe("pratinjau dokumen", () => {
     await kartuDokumen(page, "laporan-infrastruktur.pdf").click();
     await expect(page).toHaveURL(/\/documents\/doc_/);
 
-    // Untuk PDF, yang tampil adalah berkas aslinya di iframe.
-    const frame = page.locator("iframe");
-    await expect(frame).toBeVisible({ timeout: 20_000 });
-    await expect(frame).toHaveAttribute("src", /\/api\/v1\/documents\/doc_.*\/file/);
+    // Untuk PDF, tiap halaman di-render langsung ke canvas di halaman ini
+    // (tanpa iframe, karena iframe blob diblokir Edge).
+    const canvas = page.locator("canvas").first();
+    await expect(canvas).toBeVisible({ timeout: 20_000 });
 
     // Ada jalan ke teks hasil ekstraksi, karena ekstraksinya perlu diperiksa.
     await expect(
