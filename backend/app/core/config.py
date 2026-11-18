@@ -13,7 +13,7 @@ from typing import Annotated, Literal
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
-LlmProviderName = Literal["groq", "ollama", "sglang", "mock"]
+LlmProviderName = Literal["groq", "openai_compatible", "ollama", "sglang", "mock"]
 
 
 class Settings(BaseSettings):
@@ -32,6 +32,15 @@ class Settings(BaseSettings):
 
     # ------------------------------------------------------------------ app
     app_name: str = "Intelligent Document Assistant API"
+    """Mode akses terbuka untuk demo publik.
+
+    Saat aktif, backend menerbitkan sesi otomatis untuk setiap pengunjung
+    (middleware ``open_access`` di ``main.py``) dan verifikasi passcode
+    menerima siapa pun. Gate frontend juga dilewati lewat
+    ``NEXT_PUBLIC_OPEN_MODE=1``. Semua logika keamanan tidak dihapus, hanya
+    di-jembatani, jadi mematikan env ini mengembalikan gate seperti semula.
+    """
+    auth_open_mode: bool = False
     version: str = "1.0.0"
     debug: bool = False
     # Origin frontend yang diizinkan. Dipakai CORS.
@@ -105,6 +114,25 @@ class Settings(BaseSettings):
 
     groq_api_key: str | None = None
     groq_base_url: str = "https://api.groq.com/openai/v1"
+    """Model Groq, overrides ``llm_model`` bila diisi.
+
+    Perlu karena rantai fallback memakai provider BERBEDA dengan katalog model
+    BERBEDA: ``LLM_MODEL`` bisa menunjuk model provider primary (katalog
+    berbeda) sementara fallback Groq memakai model Groq. Tanpa override ini,
+    fallback memakai nama model primary yang tidak ada di Groq dan rantai gagal
+    di tengah jalan.
+    """
+    groq_model: str | None = None
+
+    # ------------------------------------------------- openai-compatible
+    """Endpoint OpenAI-compatible milik sendiri (router/agregator/proxy).
+
+    Dipakai sebagai provider generation alternatif tanpa mengubah kode di
+    atasnya: kontraknya persis protokol OpenAI. ``OPENAI_COMPATIBLE_BASE_URL``
+    wajib diisi saat provider ini dipakai.
+    """
+    openai_compatible_api_key: str | None = None
+    openai_compatible_base_url: str | None = None
 
     ollama_base_url: str = "http://localhost:11434/v1"
     ollama_model: str = "qwen2.5:3b"
@@ -112,15 +140,98 @@ class Settings(BaseSettings):
     sglang_base_url: str = "http://localhost:30000/v1"
     sglang_model: str = "qwen2.5-3b-instruct"
 
+    # ------------------------------------------------- vision / OCR multimodal
+    """Cara PDF diproses: ``auto``, ``text``, atau ``vision``.
+
+    ``auto`` menilai kualitas text-layer PDF (lihat
+    ``app.services.ingestion.text_quality``). Text-layer yang utuh dipakai
+    apa adanya; yang rusak — seperti PDF Lembaran Negara dari BPK yang
+    text-layer OCR-nya kacau urutan bacanya — diganti dengan ekstraksi lewat
+    model vision. ``vision`` memaksa semua PDF lewat OCR, ``text`` mematikan
+    OCR sepenuhnya.
+    """
+    ingest_pdf_mode: Literal["auto", "text", "vision"] = "auto"
+    """Provider yang menjalankan OCR. Bukan harus sama dengan provider generation:
+    OCR butuh model multimodal, bukan model yang paling murah untuk chat."""
+    vision_provider: LlmProviderName = "groq"
+    """Model multimodal untuk OCR. ``meta-llama/llama-4-scout`` tersedia di free
+    tier Groq dan cukup akurat untuk teks cetak Indonesia."""
+    vision_model: str = "meta-llama/llama-4-scout-17b-16e-instruct"
+    """OCR harus deterministik: temperatur 0, bukan temperatur chat."""
+    vision_temperature: float = 0.0
+    """Satu halaman A4 padat bisa 1.500+ token; jangan diwarisi batas chat."""
+    vision_max_tokens: int = 2048
+    """Vision lebih lambat dari chat; timeout-nya sendiri, bukan yang 30 detik."""
+    vision_timeout_seconds: float = 90.0
+    """Skala render halaman ke gambar. 3.0 = 216 DPI untuk halaman 72 DPI.
+
+    Di 144 DPI PP-OCR kerap menyatukan teks rapat tanpa spasi
+    ("Tahun2008Nomor"), dan kata yang menyatu pecah di BM25 maupun embedding.
+    Biayanya gambar ~2x lebih besar dan OCR sedikit lebih lambat; masih jauh
+    lebih murah daripada mengirim semua halaman ke model vision."""
+    pdf_render_scale: float = 3.0
+    """Jeda antar halaman saat OCR. Free tier Groq membatasi token per menit,
+    dan 14 halaman sekali unggah bisa menghabiskan jatah itu sekaligus.
+    Menyerahkan halaman satu per satu dengan jeda lebih baik daripada kena 429
+    beruntun."""
+    ocr_request_delay_seconds: float = 1.0
+    """Percobaan ulang per halaman saat provider kena rate limit."""
+    ocr_max_retries: int = 2
+
+    # ------------------------------------------------- prompt injection guard
+    """Penyaringan anti-prompt-injection dengan classifier khusus.
+
+    Aturan 14-16 di SYSTEM_PROMPT hanya bertahan di level model; classifier
+    ``llama-prompt-guard-2-86m`` (86M parameter, ctx 512) menilai SETIAP konten
+    yang akan masuk prompt dan memberi skor risiko 0..1. Konten dengan skor di
+    atas ambang diblokir keluar dari konteks dan tidak disitasi — dokumen
+    berisi instruksi terselubung ("abaikan aturan sebelumnya") tidak pernah
+    sampai ke model generasi.
+
+    Screening dijalankan paralel per chunk saat query (fail-open: kegagalan
+    classifier tidak menjatuhkan jawaban), dan otomatis nonaktif saat provider
+    tidak tersedia.
+    """
+    prompt_guard_enabled: bool = True
+    prompt_guard_model: str = "meta-llama/llama-prompt-guard-2-86m"
+    """Skor risiko (0..1) di atas ambang ini memblokir chunk dari konteks.
+    0.5 seimbang: injection nyata skor 0.9+, teks legal normal 0.0-0.1."""
+    prompt_guard_threshold: float = 0.5
+    """Mesin OCR untuk halaman yang ditandai perlu ekstraksi:
+
+    - ``auto``   : PP-OCR lokal (RapidOCR) utama; halaman dengan confidence
+                   rendah dieskalasi ke model vision (butuh VISION_PROVIDER).
+    - ``paddle`` : PP-OCR lokal saja, tanpa eskalasi, tanpa biaya API.
+    - ``vision`` : model vision untuk semua halaman (perilaku lama).
+
+    Mesin lokal memakai model PP-OCR (RapidOCR/ONNX) dan memulihkan urutan
+    baca dua kolom dari bounding box, hal yang tidak bisa dilakukan
+    text-layer rusak maupun model vision tanpa biaya per halaman.
+    """
+    ocr_engine: Literal["auto", "paddle", "vision"] = "auto"
+    """Ambang confidence rata-rata halaman di bawahnya halaman dieskalasi ke
+    model vision. PP-OCR yang percaya diri tidak perlu dikirim ke API; halaman
+    pindai buruk (noda, miring, terlipat) yang perlu diselamatkan."""
+    ocr_vlm_rescue_confidence: float = 0.55
+    """Pass kedua OCR: celah vertikal besar antar baris di-crop dan dibaca
+    ulang dengan zoom 2x. Baris yang tertutup cap tinta Lembaran Negara kerap
+    lolos dari detektor pada citra utuh tapi terbaca pada crop zoom. Biayanya
+    kecil (maksimal 4 band per halaman); tanpa ini angka penting dalam satu
+    baris hilang diam-diam dari korpus."""
+    ocr_gap_rescan_enabled: bool = True
+
     # ------------------------------------------------------------- embedding
     """Model embedding lokal (nol biaya, data tidak keluar).
 
-    Default memakai model multilingual karena dokumen dan pertanyaan dalam
-    bahasa Indonesia. Model Inggris-first seperti all-MiniLM-L6-v2 menghasilkan
-    vektor yang jauh lebih buruk untuk Bahasa Indonesia.
+    Default ``multilingual-e5-base``: recall untuk parafrase Bahasa Indonesia
+    naik terukur dibanding ``-small``, dengan latensi query yang tetap di
+    bawah 100 ms di CPU. Model Inggris-first seperti all-MiniLM-L6-v2
+    menghasilkan vektor yang jauh lebih buruk untuk Bahasa Indonesia.
+    Mengganti model mengubah dimensi vektor; Chroma akan menandai signature
+    mismatch dan isi lama harus diindeks ulang (``python -m scripts.reindex``).
     """
-    embedding_model: str = "intfloat/multilingual-e5-small"
-    embedding_dimension: int = 384
+    embedding_model: str = "intfloat/multilingual-e5-base"
+    embedding_dimension: int = 768
     embedding_batch_size: int = 16
     """Diaktifkan hanya kalau env ``USE_LOCAL_EMBEDDING=0``; test memakai stub."""
     use_local_embedding: bool = True
@@ -128,6 +239,17 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------- chunking
     chunk_size: int = 500
     chunk_overlap: int = 50
+    """Chunking mengikuti struktur dokumen hukum (BAB/Bagian/Pasal) kalau
+    terdeteksi. Batas paragraf generik menghasilkan chunk yang mulai dan
+    berakhir di tengah kalimat pada dokumen legal — struktur Pasal adalah
+    unit makna alaminya, dan setiap chunk yang mengabaikannya merusak sitasi.
+    Dokumen tanpa struktur hukum tetap memakai jalur paragraf lama."""
+    legal_chunking_enabled: bool = True
+    """Batas karakter isi satu chunk legal sebelum dipecah lagi di batas
+    ayat/butir. Lebih besar dari ``chunk_size`` karena satu Pasal adalah satu
+    unit makna; memecahnya di tengah ayat menghilangkan konteks rujukan
+    "ayat (2)" yang sering dirujuk silang antar Pasal."""
+    legal_chunk_max_chars: int = 900
 
     # -------------------------------------------------------------- retrieval
     default_top_k: int = 5
@@ -136,42 +258,63 @@ class Settings(BaseSettings):
     # Rentang di sini adalah sumber kebenaran; slider di frontend harus
     # mengikuti angka yang sama.
     #
-    # Angka ini diukur, bukan ditebak. Dengan `multilingual-e5-small`, pertanyaan
-    # yang benar-benar relevan skornya 0.84-0.91, sedangkan yang tidak relevan
-    # masih 0.72-0.81, model embedding memang selalu memberi skor cukup tinggi
-    # pada teks bahasa Indonesia. Ambang lama 0.5 dibuat untuk stub hashing dan
-    # berbahaya di sini: pertanyaan tentang sepak bola lolos, lalu LLM menjawab
-    # berdasarkan chunk yang salah (lebih buruk daripada "tidak ditemukan",
-    # karena sekarang jawabannya terlihat bersumber).
-    default_similarity_threshold: float = 0.82
-    min_similarity_threshold: float = 0.75
+    # Angka ini diukur, bukan ditebak. Dengan `multilingual-e5-base`, pertanyaan
+    # yang benar-benar relevan skornya sekitar 0.85+, yang tidak relevan jauh
+    # lebih rendah daripada hasil -small. Ambang diturunkan dari 0.82 ke 0.78
+    # supaya pertanyaan parafrase yang relevan tidak tergerus gate, dan
+    # kasus "hampir cukup" diserahkan ke tier bukti lemah di RagService,
+    # bukan ditolak keras.
+    default_similarity_threshold: float = 0.78
+    min_similarity_threshold: float = 0.70
     max_similarity_threshold: float = 0.92
+    """Floor skor vektor untuk tier bukti lemah.
+
+    Kalau gate ambang menolak semua kandidat tapi masih ada yang skornya di
+    atas floor ini, pertanyaan tetap dijawab dengan label bukti terbatas,
+    bukan ditolak keras. Di bawah floor, jawaban hampir pasti bukan tentang
+    dokumen, dan menolak adalah perilaku yang benar.
+    """
+    weak_evidence_floor: float = 0.60
+    """Berapa chunk tetangga (chunk_index ± N) dari dokumen yang sama ikut ke
+    prompt sebagai konteks sekitar. Ayat dan butir sering dirujuk silang ke
+    Pasal di sebelahnya; tanpa konteks ini, LLM melihat Pasal 5 tanpa tahu
+    isi Pasal 4. Tetangga tidak ikut disitasi."""
+    context_window_chunks: int = 1
+    """Batas karakter total blok konteks di prompt (termasuk konteks sekitar).
+    Tanpa batas, dokumen padat dengan top_k besar bisa menelan window model."""
+    max_context_chars: int = 8000
     """Berapa pesan terakhir yang ikut sebagai konteks."""
     history_message_count: int = 6
-    """Reranking dua tahap dengan cross-encoder.
+    """Reranking dua tahap dengan cross-encoder multilingual.
 
-    Ambang tunggal tidak bisa memisahkan sempurna: pada dataset contoh, skor
-    cosine chunk benar 0.804 sampai 0.875 dan chunk salah 0.748 sampai 0.879.
-    Keduanya tumpang tindih, jadi tidak ada ambang yang benar untuk semua
-    kasus.
+    Ambang tunggal tidak bisa memisahkan sempurna: skor cosine chunk benar dan
+    salah tumpang tindih. Reranking menilai ulang kandidat memakai cross-encoder
+    yang membaca pertanyaan dan chunk bersamaan.
 
-    Reranking mengatasi ini dengan menilai ulang kandidat memakai cross-encoder
-    yang membaca pertanyaan dan chunk bersamaan, bukan membandingkan vektor
-    terpisah. Diukur pada dataset yang sama: ketepatan posisi pertama naik
-    dari 4/11 menjadi 7/11.
-
-    Dimatikan secara default karena menambah sekitar 80 MB model dan waktu
-    respons. Nyalakan kalau kualitas jawaban lebih penting daripada latensi.
+    ``BAAI/bge-reranker-v2-m3`` dipilih karena multilingual (100+ bahasa,
+    termasuk Indonesia) dan berlisensi Apache-2.0. Model Inggris
+    ms-marco-MiniLM praktis tidak berguna untuk query Indonesia. Biayanya
+    sekitar 1.1 GB RAM dan 150-400 ms per query di CPU; kegagalan memuat
+    model tidak menjatuhkan aplikasi (fallback ke urutan fusion).
     """
-    rerank_enabled: bool = False
-    rerank_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    rerank_enabled: bool = True
+    rerank_model: str = "BAAI/bge-reranker-v2-m3"
+    """Perangkat inferensi reranker. ``cpu`` aman untuk semua server; ``cuda``
+    untuk VPS/GPU box."""
+    rerank_device: str = "cpu"
     """Berapa kandidat yang diambil sebelum diurutkan ulang.
 
     Lebih banyak berarti peluang chunk benar masuk kandidat lebih besar, tapi
     cross-encoder harus menilai setiap pasangan, dan biayanya naik linear.
-    8 terbukti cukup pada dataset contoh.
+    Nilai ini juga menentukan kedalaman pool kandidat retrieval (sebelumnya
+    setting ini terbaca tapi tidak pernah dipakai).
     """
     rerank_candidates: int = 8
+    """Stemming Sastrawi pada token BM25. ``pengaduan``, ``mengadu``, dan
+    ``diadukan`` semuanya jadi ``adu``, jadi pertanyaan yang memakai kata
+    bentuk lain tetap menemukan chunk yang memakai istilah dokumen. Karena
+    dipakai seragam di dokumen dan query, hasilnya tetap konsisten."""
+    bm25_stemming_enabled: bool = True
     """Cache query: TTL dan key."""
     cache_ttl_seconds: int = 30 * 60
     """Rate limit query per sesi, untuk melindungi kuota free tier."""
@@ -311,7 +454,7 @@ class Settings(BaseSettings):
     @field_validator("llm_fallback_chain")
     @classmethod
     def _validate_fallback(cls, value: list[str]) -> list[str]:
-        allowed = {"groq", "ollama", "sglang", "mock"}
+        allowed = {"groq", "openai_compatible", "ollama", "sglang", "mock"}
         unknown = [item for item in value if item not in allowed]
         if unknown:
             raise ValueError(f"Provider fallback tidak dikenal: {unknown}")

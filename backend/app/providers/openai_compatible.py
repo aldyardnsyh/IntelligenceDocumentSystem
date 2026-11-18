@@ -8,6 +8,7 @@ kuota.
 
 from __future__ import annotations
 
+import base64
 import logging
 from collections.abc import AsyncIterator
 from typing import Any
@@ -166,10 +167,19 @@ class OpenAICompatibleProvider:
                 retryable=True,
             ) from exc
 
-    async def complete(self, prompt: str, system: str | None = None) -> str:
-        """Jawaban lengkap dalam satu panggilan."""
+    async def complete(
+        self, prompt: str, system: str | None = None, *, model: str | None = None
+    ) -> str:
+        """Jawaban lengkap dalam satu panggilan.
+
+        ``model`` opsional menimpa model default provider. Dipakai layanan
+        khusus yang berbagi provider dengan generation tapi butuh model lain,
+        misal classifier prompt-guard.
+        """
         payload = self._payload(prompt, system, stream=False)
         payload["stream"] = False
+        if model:
+            payload["model"] = model
 
         try:
             client = await self._client_async(self._settings.llm_timeout_seconds)
@@ -177,6 +187,62 @@ class OpenAICompatibleProvider:
         except httpx.TimeoutException as exc:
             raise ProviderError(
                 "Provider tidak merespons dalam batas waktu.", retryable=True
+            ) from exc
+        except httpx.ConnectError as exc:
+            raise ProviderError(
+                f"Tidak bisa menghubungi {self.name} di {self._base_url}: {exc}",
+                retryable=True,
+            ) from exc
+
+        if response.status_code != 200:
+            raise self._classify(response.status_code, _retry_after_seconds(response))
+        return _extract_full_text(response.json())
+
+    async def complete_vision(
+        self, prompt: str, images: list[bytes], system: str | None = None
+    ) -> str:
+        """Ekstraksi teks dari gambar lewat model vision (multimodal).
+
+        Dipakai pipeline OCR untuk halaman PDF hasil pindai. Kontraknya sama
+        dengan provider lain yang mendukung multimodal OpenAI-compatible:
+        gambar dikirim sebagai ``image_url`` data-URI di dalam satu pesan
+        user, dan model mengembalikan teks transkripsi.
+
+        Parameter model diambil dari setting vision (``VISION_MODEL`` dan
+        kawan-kawan), bukan setting chat — model chat dan model OCR adalah
+        dua kebutuhan berbeda, dan OCR justru butuh temperatur 0.
+        """
+        if not images:
+            raise ValueError("complete_vision butuh setidaknya satu gambar.")
+
+        content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+        for image in images:
+            encoded = base64.b64encode(image).decode("ascii")
+            content.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/png;base64,{encoded}"},
+                }
+            )
+
+        messages: list[dict[str, Any]] = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": content})
+        payload: dict[str, Any] = {
+            "model": self._settings.vision_model,
+            "messages": messages,
+            "temperature": self._settings.vision_temperature,
+            "max_tokens": self._settings.vision_max_tokens,
+            "stream": False,
+        }
+
+        try:
+            client = await self._client_async(self._settings.vision_timeout_seconds)
+            response = await client.post("/chat/completions", json=payload)
+        except httpx.TimeoutException as exc:
+            raise ProviderError(
+                "Provider vision tidak merespons dalam batas waktu.", retryable=True
             ) from exc
         except httpx.ConnectError as exc:
             raise ProviderError(
@@ -203,6 +269,36 @@ class OllamaProvider(OpenAICompatibleProvider):
         super().__init__(settings)
         self._base_url = settings.ollama_base_url.rstrip("/")
         self._model = settings.ollama_model
+
+
+class OpenAICompatibleEndpointProvider(OpenAICompatibleProvider):
+    """Endpoint OpenAI-compatible milik sendiri (router/agregator/proxy).
+
+    Katalog modelnya bisa berbeda dari Groq, jadi ``LLM_MODEL`` diisi nama
+    model endpoint ini dan fallback ke Groq menyetel ``GROQ_MODEL`` terpisah.
+    """
+
+    name = "openai_compatible"
+
+    def __init__(self, settings: Settings) -> None:
+        super().__init__(settings)
+        self._base_url = (settings.openai_compatible_base_url or "").rstrip("/")
+        self._model = settings.llm_model
+        self._api_key = settings.openai_compatible_api_key
+
+    def is_configured(self) -> bool:
+        """Endpoint cloud milik sendiri butuh API key DAN base URL.
+
+        Berbeda dari server lokal yang selalu dianggap siap. Tanpa override
+        ini, provider dianggap selalu siap dan rantai fallback mencoba endpoint
+        yang pasti ditolak.
+        """
+        return bool(
+            self._api_key
+            and self._api_key.strip()
+            and self._base_url
+            and self._base_url.strip()
+        )
 
 
 class SGLangProvider(OpenAICompatibleProvider):

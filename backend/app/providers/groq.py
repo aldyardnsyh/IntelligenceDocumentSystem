@@ -12,6 +12,7 @@ Catatan: batas Groq berlaku per organisasi, bukan per API key.
 
 from __future__ import annotations
 
+import base64
 import logging
 from collections.abc import AsyncIterator
 
@@ -37,12 +38,21 @@ class GroqProvider:
         self._settings = settings
         self._api_key = settings.groq_api_key
         self._base_url = settings.groq_base_url.rstrip("/")
-        self._model = settings.llm_model
+        # ``GROQ_MODEL`` menimpa ``LLM_MODEL``: katalog model Groq berbeda
+        # dari katalog provider primary (mis. endpoint OpenAI-compatible
+        # dengan katalog berbeda), dan rantai fallback butuh nama model yang
+        # benar-benar ada di masing-masing.
+        self._model = settings.groq_model or settings.llm_model
         self._shared: httpx.AsyncClient | None = None
 
     def is_configured(self) -> bool:
-        """Groq butuh API key. Tanpa itu, provider ini dilewati diam-diam."""
-        return bool(self._api_key)
+        """Groq butuh API key. Tanpa itu, provider ini dilewati diam-diam.
+
+        Key yang hanya berisi spasi dihitung tidak ada juga: kalau lolos,
+        request berikutnya mati di httpx dengan "Illegal header value" — pesan
+        yang tidak menyebut penyebabnya sama sekali.
+        """
+        return bool(self._api_key and self._api_key.strip())
 
     async def _shared_client(self, timeout: float) -> httpx.AsyncClient:
         """Klien HTTP yang dipakai bersama antar request.
@@ -158,13 +168,71 @@ class GroqProvider:
         except httpx.HTTPError as exc:
             raise ProviderError(f"Kesalahan jaringan ke Groq: {exc}", retryable=True) from exc
 
-    async def complete(self, prompt: str, system: str | None = None) -> str:
+    async def complete(
+        self, prompt: str, system: str | None = None, *, model: str | None = None
+    ) -> str:
+        """Jawaban lengkap dalam satu panggilan, dengan opsi timpa model.
+
+        ``model`` dipakai layanan khusus (mis. classifier prompt-guard) yang
+        berbagi kredensial dan klien dengan generation tapi butuh model lain.
+        """
         payload = self._payload(prompt, system, stream=False)
+        if model:
+            payload["model"] = model
         try:
             client = await self._shared_client(self._settings.llm_timeout_seconds)
             response = await client.post("/chat/completions", json=payload)
         except httpx.TimeoutException as exc:
             raise ProviderError("Groq tidak merespons dalam batas waktu.", retryable=True) from exc
+        except httpx.HTTPError as exc:
+            raise ProviderError(f"Kesalahan jaringan ke Groq: {exc}", retryable=True) from exc
+
+        if response.status_code != 200:
+            raise self._classify(response.status_code, _retry_after_seconds(response))
+        return _extract_full_text(response.json())
+
+    async def complete_vision(
+        self, prompt: str, images: list[bytes], system: str | None = None
+    ) -> str:
+        """OCR halaman scan lewat model vision Groq.
+
+        Format multimodal Groq mengikuti protokol OpenAI: gambar sebagai
+        ``image_url`` data-URI di dalam konten user. Model dan parameternya
+        dibaca dari setting vision, bukan setting chat, karena kebutuhan
+        keduanya berbeda (OCR butuh temperatur 0 dan output panjang).
+        """
+        if not images:
+            raise ValueError("complete_vision butuh setidaknya satu gambar.")
+
+        content: list[dict[str, object]] = [{"type": "text", "text": prompt}]
+        for image in images:
+            encoded = base64.b64encode(image).decode("ascii")
+            content.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/png;base64,{encoded}"},
+                }
+            )
+
+        messages: list[dict[str, object]] = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": content})
+        payload: dict[str, object] = {
+            "model": self._settings.vision_model,
+            "messages": messages,
+            "temperature": self._settings.vision_temperature,
+            "max_tokens": self._settings.vision_max_tokens,
+            "stream": False,
+        }
+
+        try:
+            client = await self._shared_client(self._settings.vision_timeout_seconds)
+            response = await client.post("/chat/completions", json=payload)
+        except httpx.TimeoutException as exc:
+            raise ProviderError(
+                "Groq vision tidak merespons dalam batas waktu.", retryable=True
+            ) from exc
         except httpx.HTTPError as exc:
             raise ProviderError(f"Kesalahan jaringan ke Groq: {exc}", retryable=True) from exc
 

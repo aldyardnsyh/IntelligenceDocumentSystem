@@ -13,14 +13,17 @@ import threading
 
 from app.core.config import Settings, get_settings
 from app.providers.embedding import build_embedding_provider
+from app.providers.groq import GroqProvider
 from app.repositories.sqlite_repo import MetadataRepository, SqliteRepository
 from app.services.generation.generator import LLMChain, build_chain
+from app.services.generation.injection_guard import build_injection_guard
 from app.services.ingestion.service import IngestionService
 from app.services.memory.rate_limit import RateLimiter
 from app.services.memory.store import MemoryStore, build_memory_store
 from app.services.rag_service import RagService
 from app.services.retrieval.reranker import build_reranker
 from app.services.retrieval.retriever import HybridRetriever
+from app.services.retrieval.text_processing import configure_stemming
 from app.services.retrieval.vector_store import VectorStore, build_vector_store
 from app.services.tracing import Tracer
 
@@ -54,12 +57,19 @@ def init_services(app_settings: Settings | None = None) -> None:
 
     _memory = build_memory_store(_settings)
     _store = build_vector_store(_settings)
-    # Reranking opsional. Kalau dimatikan, objeknya NoopReranker sehingga
-    # jalur kode di retriever tetap sama; kalau gagal dimuat, ia jatuh ke
-    # no-op dengan peringatan dan aplikasi tetap jalan.
-    reranker = build_reranker(_settings.rerank_enabled, _settings.rerank_model)
-    _retriever = HybridRetriever(_store, reranker)
-    _retriever._rerank_candidates = _settings.rerank_candidates  # noqa: SLF001
+    # Reranking aktif secara default dengan model multilingual. Kalau
+    # dimatikan, objeknya NoopReranker sehingga jalur kode di retriever tetap
+    # sama; kalau gagal dimuat, ia jatuh ke no-op dengan peringatan dan
+    # aplikasi tetap jalan.
+    reranker = build_reranker(
+        _settings.rerank_enabled, _settings.rerank_model, _settings.rerank_device
+    )
+    _retriever = HybridRetriever(
+        _store, reranker, rerank_candidates=_settings.rerank_candidates
+    )
+    # Stemming BM25 harus disetel SEBELUM indeks dibangun: dokumen dan query
+    # memakai pemroses yang sama, dan konfigurasinya dibaca sekali di sini.
+    configure_stemming(_settings)
 
     embedding = build_embedding_provider(_settings)
     # Memory store diteruskan supaya penghapusan dokumen bisa ikut membersihkan
@@ -75,8 +85,15 @@ def init_services(app_settings: Settings | None = None) -> None:
     # Tracer dibuat di sini supaya satu instans dipakai seluruh query.
     # Kalau tracing mati, objeknya tetap ada tapi semua method-nya no-op.
     _tracer = Tracer(_settings)
+    # Classifier anti-injection dipin ke GROQ, bukan mengikuti provider
+    # generation: model classifier-nya hanya ada di katalog Groq, dan
+    # generation primary bisa saja endpoint OpenAI-compatible/Ollama. Guard
+    # tetap jalan (fail-open) meski generation primary bukan Groq.
+    guard = build_injection_guard(
+        _settings, GroqProvider(_settings) if _settings.groq_api_key else None
+    )
     _rag = RagService(
-        _settings, _repository, _memory, _retriever, embedding, _chain, _tracer
+        _settings, _repository, _memory, _retriever, embedding, _chain, _tracer, guard
     )
     _limiter = RateLimiter(_memory, _settings)
 

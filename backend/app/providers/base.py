@@ -23,10 +23,15 @@ def _registry() -> dict[str, type]:
     """
     from app.providers.groq import GroqProvider
     from app.providers.mock import MockProvider
-    from app.providers.openai_compatible import OllamaProvider, SGLangProvider
+    from app.providers.openai_compatible import (
+        OllamaProvider,
+        OpenAICompatibleEndpointProvider,
+        SGLangProvider,
+    )
 
     return {
         "groq": GroqProvider,
+        "openai_compatible": OpenAICompatibleEndpointProvider,
         "ollama": OllamaProvider,
         "sglang": SGLangProvider,
         "mock": MockProvider,
@@ -137,3 +142,36 @@ def build_fallback_chain(settings: Settings) -> list[LLMProvider]:
     for provider in chain:
         _guard_mock(settings, provider.name)
     return chain
+
+
+def build_vision_provider(settings: Settings) -> LLMProvider:
+    """Provider untuk OCR halaman scan (``VISION_PROVIDER``).
+
+    Registry-nya sengaja sama dengan provider generation: Groq, Ollama, dan
+    SGLang semuanya mengekspos multimodal lewat protokol OpenAI-compatible,
+    jadi kelas yang sama bisa dipakai. Yang membedakan hanyalah model dan
+    parameternya, yang dibaca dari setting vision saat ``complete_vision``
+    dipanggil.
+    """
+    provider_cls = _registry().get(settings.vision_provider)
+    if provider_cls is None:
+        raise ValueError(
+            f"VISION_PROVIDER tidak dikenal: {settings.vision_provider}. "
+            f"Pilihan yang tersedia: {', '.join(sorted(_registry()))}."
+        )
+    _guard_mock(settings, settings.vision_provider)
+    return provider_cls(settings)  # type: ignore[return-value]
+
+
+def vision_provider_ready(settings: Settings) -> bool:
+    """True kalau provider vision bisa dipanggil sekarang.
+
+    Dipakai parser untuk memutuskan apakah PDF hasil pindai boleh dilanjutkan
+    ke OCR, atau harus ditolak dengan pesan yang bisa ditindaklanjuti. Error
+    apa pun saat pengecekan berarti "tidak siap": pelaporan kegagalan ingestion
+    yang jelas lebih berguna daripada crash di jalur pemeriksaan itu sendiri.
+    """
+    try:
+        return build_vision_provider(settings).is_configured()
+    except Exception:  # noqa: BLE001
+        return False

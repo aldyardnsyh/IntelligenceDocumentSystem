@@ -30,7 +30,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.api.v1.routes import public_router
 from app.api.v1.routes import router as v1_router
 from app.core.config import get_settings
-from app.core.security import SessionStore, SlidingWindowLimiter
+from app.core.security import SESSION_COOKIE_NAME, SessionStore, SlidingWindowLimiter
 from app.dependencies import (
     get_ingestion,
     get_repository,
@@ -156,6 +156,62 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Mode demo publik (AUTH_OPEN_MODE). Middleware ini hanya didaftarkan
+    # saat mode aktif: aplikasi yang bukan demo tidak boleh punya jalur
+    # penerbitan token otomatis sama sekali, bukan sekadar jalur yang
+    # "tidak dipakai".
+    if settings.auth_open_mode:
+
+        @app.middleware("http")
+        async def open_access(request: Request, call_next):  # noqa: ANN001, ANN202
+            """Terbitkan sesi otomatis untuk demo publik tanpa passcode.
+
+            Demo publik tanpa passcode, semua logika kepemilikan sesi/rate
+            limit tetap berjalan karena token tetap diterbitkan lewat
+            SessionStore yang sama: ``require_session`` tetap menolak token
+            yang tidak terdaftar, kepemilikan percakapan tetap diikat ke
+            token, dan ``/auth/logout`` tetap bisa mencabutnya. Middleware
+            ini hanya memindahkan penerbitan token dari halaman passcode ke
+            request pertama, jadi mematikan env var mengembalikan gate
+            persis seperti semula.
+            """
+            store = request.app.state.session_store
+            token = request.cookies.get(SESSION_COOKIE_NAME)
+            if token and store.is_valid(token):
+                # Cookie yang sah tidak disentuh sama sekali.
+                return await call_next(request)
+
+            # Pengunjung tanpa sesi sah langsung diberi token. Cookie-nya
+            # disuntikkan ke request yang SEDANG berjalan, bukan hanya ke
+            # respons: ``require_session`` membaca ``request.cookies``, dan
+            # tanpa injeksi ini endpoint yang dilindungi akan menolak 401
+            # pada request pertama sebelum set-cookie di bawah sempat
+            # dibaca browser. Header di scope ASGI berupa pasangan
+            # (bytes nama, bytes nilai), jadi nilai header cookie lama
+            # digabung lalu ditulis kembali, bukan ditambahkan sebagai
+            # header kedua.
+            token_baru = store.issue()
+            pasangan = f"{SESSION_COOKIE_NAME}={token_baru}"
+            scope_headers = request.scope["headers"]
+            for index, (nama, nilai) in enumerate(scope_headers):
+                if nama.lower() == b"cookie":
+                    digabung = f"{nilai.decode('latin-1')}; {pasangan}"
+                    scope_headers[index] = (nama, digabung.encode("latin-1"))
+                    break
+            else:
+                scope_headers.append((b"cookie", pasangan.encode("latin-1")))
+
+            response = await call_next(request)
+            response.set_cookie(
+                SESSION_COOKIE_NAME,
+                token_baru,
+                httponly=True,
+                samesite="lax",
+                path="/",
+                max_age=settings.session_ttl_seconds,
+            )
+            return response
 
     @app.middleware("http")
     async def add_timing_header(request: Request, call_next):  # noqa: ANN001, ANN202

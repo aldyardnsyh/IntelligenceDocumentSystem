@@ -494,3 +494,179 @@ class TestProviderError:
 
     def test_status_code_tersimpan(self) -> None:
         assert ProviderError("x", status_code=429).status_code == 429
+
+
+class TestCompleteVision:
+    """Kontrak multimodal: gambar dikirim sebagai image_url data-URI.
+
+    HTTP-nya dimock lewat httpx.MockTransport, bukan jaringan sungguhan —
+    yang diuji adalah bentuk payload dan pembacaan responsnya.
+    """
+
+    @staticmethod
+    def _pasang_mock(provider, captured: list[dict]) -> None:
+        import httpx
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            import json
+
+            captured.append(json.loads(request.content.decode("utf-8")))
+            return httpx.Response(
+                200,
+                json={"choices": [{"message": {"content": "teks hasil OCR"}}]},
+            )
+
+        client = httpx.AsyncClient(
+            transport=httpx.MockTransport(handler),
+            base_url=provider._base_url,
+            headers={"authorization": "Bearer uji"},
+        )
+        provider._shared = client
+
+    async def test_payload_groq_menggunakan_setting_vision(self) -> None:
+        import base64
+
+        settings = Settings(
+            groq_api_key="kunci",
+            vision_model="model-vision-uji",
+            vision_temperature=0.0,
+            vision_max_tokens=1234,
+        )
+        provider = GroqProvider(settings)
+        captured: list[dict] = []
+        self._pasang_mock(provider, captured)
+
+        result = await provider.complete_vision(
+            "transkrip gambar", [b"gambar"], system="peran"
+        )
+        assert result == "teks hasil OCR"
+
+        payload = captured[0]
+        assert payload["model"] == "model-vision-uji"
+        assert payload["temperature"] == 0.0
+        assert payload["max_tokens"] == 1234
+        messages = payload["messages"]
+        assert messages[0] == {"role": "system", "content": "peran"}
+        content = messages[1]["content"]
+        assert isinstance(content, list)
+        assert content[0] == {"type": "text", "text": "transkrip gambar"}
+        encoded = base64.b64encode(b"gambar").decode("ascii")
+        assert content[1]["type"] == "image_url"
+        assert content[1]["image_url"]["url"] == f"data:image/png;base64,{encoded}"
+
+    async def test_payload_ollama_multigambar(self) -> None:
+        settings = Settings(ollama_base_url="http://localhost:11434/v1")
+        provider = OllamaProvider(settings)
+        captured: list[dict] = []
+        self._pasang_mock(provider, captured)
+
+        await provider.complete_vision("prompt", [b"a", b"b"])
+        content = captured[0]["messages"][0]["content"]
+        assert len(content) == 3  # satu teks + dua gambar
+        assert [part["type"] for part in content] == ["text", "image_url", "image_url"]
+
+    async def test_tanpa_gambar_ditolak(self) -> None:
+        provider = MockProvider(Settings())
+        with pytest.raises(ValueError):
+            await provider.complete_vision("prompt", [])
+
+
+class TestFactoryVision:
+    def test_provider_vision_dibangun_dari_setting(self) -> None:
+        from app.providers.base import build_vision_provider
+
+        provider = build_vision_provider(Settings(vision_provider="mock"))
+        assert provider.name == "mock"
+
+    def test_provider_vision_tak_dikenal_ditolak(self) -> None:
+        from app.providers.base import build_vision_provider
+
+        # Literal di Settings menolak nilai asing; kelalaian ini dijaga lagi
+        # di factory dengan error yang jelas.
+        settings = Settings(vision_provider="mock")
+        settings.vision_provider = "tak-dikenal"  # type: ignore[assignment]
+        with pytest.raises(ValueError, match="VISION_PROVIDER"):
+            build_vision_provider(settings)
+
+    def test_vision_provider_ready_groq_tanpa_kunci(self) -> None:
+        from app.providers.base import vision_provider_ready
+
+        assert vision_provider_ready(Settings(vision_provider="groq", groq_api_key=None)) is False
+
+    def test_vision_provider_ready_mock_selalu_siap(self) -> None:
+        from app.providers.base import vision_provider_ready
+
+        assert vision_provider_ready(Settings(vision_provider="mock")) is True
+
+
+class TestOpenAICompatibleEndpointProvider:
+    def test_provider_dibangun_dari_setting(self) -> None:
+        provider = build_provider(
+            Settings(
+                _env_file=None,
+                llm_provider="openai_compatible",
+                openai_compatible_api_key="kunci",
+                openai_compatible_base_url="https://contoh.invalid/v1",
+            )
+        )
+        assert provider.name == "openai_compatible"
+        assert provider.is_configured() is True
+
+    def test_tanpa_api_key_tidak_siap(self) -> None:
+        # ``_env_file=None`` wajib: .env developer kini berisi kunci sungguhan,
+        # dan test tidak boleh bergantung pada isi .env mesin masing-masing.
+        provider = build_provider(
+            Settings(
+                _env_file=None,
+                llm_provider="openai_compatible",
+                openai_compatible_api_key=None,
+                openai_compatible_base_url=None,
+            )
+        )
+        assert provider.is_configured() is False
+
+    def test_tanpa_base_url_tidak_siap(self) -> None:
+        # Endpoint cloud milik sendiri butuh alamat; tanpa base URL provider
+        # tidak bisa dipanggil meski API key terisi.
+        provider = build_provider(
+            Settings(
+                _env_file=None,
+                llm_provider="openai_compatible",
+                openai_compatible_api_key="kunci",
+                openai_compatible_base_url=None,
+            )
+        )
+        assert provider.is_configured() is False
+
+    def test_groq_model_menimpa_llm_model(self) -> None:
+        from app.providers.groq import GroqProvider
+
+        provider = GroqProvider(
+            Settings(
+                groq_api_key="k",
+                groq_model="qwen/qwen3.8-27b",
+                llm_model="provider/model-primary",
+            )
+        )
+        assert provider._model == "qwen/qwen3.8-27b"
+
+    def test_groq_tanpa_override_pakai_llm_model(self) -> None:
+        from app.providers.groq import GroqProvider
+
+        provider = GroqProvider(
+            Settings(_env_file=None, groq_api_key="k", llm_model="provider/model-primary")
+        )
+        assert provider._model == "provider/model-primary"
+
+    def test_rantai_lintas_provider(self) -> None:
+        chain = build_fallback_chain(
+            Settings(
+                _env_file=None,
+                llm_provider="openai_compatible",
+                openai_compatible_api_key="k",
+                openai_compatible_base_url="https://contoh.invalid/v1",
+                llm_fallback_chain="groq",
+                groq_api_key="g",
+            )
+        )
+        assert [provider.name for provider in chain] == ["openai_compatible", "groq"]
