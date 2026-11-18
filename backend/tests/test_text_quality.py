@@ -9,7 +9,11 @@ harus menangkapnya, sementara teks bersih tidak boleh salah terdeteksi.
 
 from __future__ import annotations
 
-from app.services.ingestion.cleanup import clean_page_text, is_noise_line
+from app.services.ingestion.cleanup import (
+    clean_page_text,
+    is_noise_line,
+    split_fused_words,
+)
 from app.services.ingestion.parser import ParsedPage
 from app.services.ingestion.text_quality import assess_text_layer
 
@@ -84,6 +88,64 @@ class TestCleanup:
         assert "\\ 3 -" not in cleaned
         assert "PRES I DEN" not in cleaned
         assert "pemantauan dan evaluasi" not in cleaned
+
+
+class TestSplitFusedWords:
+    """Pemulihan word-fusion OCR pada Lembaran Negara hasil pindai.
+
+    Fusion nyata muncul saat spasi antarkata hilang pasca-pemindaian. Uji ini
+    mengunci dua kegagalan historis: pecahan pendek tak dikenal ("an") yang
+    memenangi tiebreak, dan pecahan terakhir yang tadinya terbuang.
+    """
+
+    def test_fusion_gazette_panjang_terpecah_benar(self) -> None:
+        # Contoh fusion nyata terpanjang: semua pecahan wajib kamus-legitim,
+        # tidak ada fragmen sisa seperti "an" atau "kepada" yang terpotong.
+        result = split_fused_words(
+            "pengadukepadapengelolapengaduanpelayananpublik"
+        )
+        for kata in ("pengadu", "pengelola", "pengaduan", "pelayanan", "publik"):
+            assert kata in result.split(), f"{kata} hilang dari {result!r}"
+
+    def test_pengelolaanpengaduan_tak_terbelah_pengelola_an(self) -> None:
+        # Akar bug #1: pecahan "an" (2 huruf, bukan kamus) memenangi tiebreak
+        # "lebih banyak kata". Setelah batas panjang-minimum pecahan, kata
+        # "pengelolaan" wajib utuh.
+        result = split_fused_words("pengelolaanpengaduan")
+        pieces = result.split()
+        assert "pengelolaan" in pieces
+        assert "pengelola" not in pieces, (
+            f"'pengelola' seharusnya jadi bagian 'pengelolaan', bukan berdiri "
+            f"sendiri: {pieces}"
+        )
+        assert "pengaduan" in pieces
+
+    def test_kewenangan_penyelenggara_keduanya_utuh(self) -> None:
+        # Akar bug #2: pecahan terakhir ("penyelenggara") terbuang karena
+        # boundaries hanya menyimpan start-positions.
+        result = split_fused_words("kewenanganpenyelenggara")
+        pieces = result.split()
+        assert "kewenangan" in pieces
+        assert "penyelenggara" in pieces
+
+    def test_kata_sah_panjang_tak_terpecah(self) -> None:
+        # Kata sah panjang yang kebetulan berawalan mirip prefiks jangan
+        # terpangkas jadi pecahan pendek tak dikenal.
+        for kata in (
+            "bertanggungjawab",
+            "mempertanggungjawabkannya",
+            "menyelenggarakannya",
+            "pengelolaan",
+        ):
+            assert split_fused_words(kata) == kata, (
+                f"{kata!r} seharusnya tetap utuh"
+            )
+
+    def test_teks_biasa_tanpa_fusion_tak_berubah(self) -> None:
+        # Kalimat normal (semua kata di bawah ambang panjang atau sudah
+        # ber-spasi) harus lolos tanpa diutak-atik.
+        kalimat = "Penyelenggara wajib menyelesaikan setiap pengaduan pelayanan publik."
+        assert split_fused_words(kalimat) == kalimat
 
 
 class TestAssessTextLayer:
