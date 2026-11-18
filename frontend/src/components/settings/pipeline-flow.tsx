@@ -100,7 +100,7 @@ function useStages(live: ReturnType<typeof useLiveCounts>): Stage[] {
     {
       Icon: FileUp,
       title: "Dokumen diunggah",
-      body: "Berkas PDF, TXT, atau Markdown diterima server. Berkas aslinya disimpan untuk pratinjau dan metadata halamannya dicatat — sebelum satu karakter pun diproses.",
+      body: "Berkas PDF, TXT, atau Markdown diterima dan disimpan apa adanya untuk pratinjau. Halaman, ukuran, dan waktu unggahnya dicatat sebelum pemrosesan dimulai.",
       chips: ["PDF · TXT · Markdown", "maks 10 MB"],
       Scene: UploadScene,
       stats: live.hasDocuments
@@ -113,15 +113,15 @@ function useStages(live: ReturnType<typeof useLiveCounts>): Stage[] {
     {
       Icon: ScanText,
       title: "Ekstraksi teks (OCR)",
-      body: "Halaman hasil scan dibaca OCR yang berjalan lokal — bukan layanan berbayar — lalu teksnya dibersihkan dan urutan bacanya dikembalikan untuk tata letak dua kolom. Halaman dengan keyakinan baca rendah diselamatkan model vision.",
-      chips: ["PP-OCR lokal", "rescue VLM bila confidence < 0,55", "tanpa API berbayar"],
+      body: "Setiap halaman dirender jadi gambar lalu dibaca PP-OCRv6 di server. Hasilnya dirapikan bertahap: urutan baca dua kolom dipulihkan, kata yang menempel dipisah, penanda butir yang rusak dipulihkan, dan cap kaki halaman dibuang. Halaman yang masih dibaca dengan keyakinan rendah dieskalasi ke model vision. Lambang, tanda tangan, dan stempel ikut terdeteksi sebagai chunk tersendiri.",
+      chips: ["PP-OCRv6 lokal", "koreksi leksikon korpus", "lambang & tanda tangan ikut diindeks"],
       Scene: OcrScene,
     },
     {
       Icon: Scissors,
       title: "Chunking struktur hukum",
-      body: "Teks tidak dipotong asal memenuhi kuota karakter. Sistem mengikuti struktur dokumen: satu Pasal menjadi satu chunk, sehingga sitasi menunjuk unit makna yang utuh. Dokumen tanpa struktur hukum memakai jalur paragraf.",
-      chips: ["per-Pasal (BAB/Bagian)", "fallback paragraf 500/50"],
+      body: "Teks dipotong mengikuti struktur dokumen: satu Pasal menjadi satu chunk, sehingga sitasi menunjuk unit makna yang utuh. Pasal yang panjang dipecah per ayat, dan tiap pecahan tetap menyimpan badan Pasal utuhnya untuk dipakai sebagai konteks saat menjawab. Dokumen tanpa struktur hukum memakai jalur paragraf.",
+      chips: ["per-Pasal (BAB/Bagian)", "small-to-big: pecahan + induk utuh"],
       Scene: ChunkScene,
       stats: live.hasDocuments ? [{ value: live.chunks, label: "chunk" }] : undefined,
     },
@@ -140,8 +140,8 @@ function useStages(live: ReturnType<typeof useLiveCounts>): Stage[] {
     {
       Icon: Bot,
       title: "Retrieval & model bahasa",
-      body: "Pertanyaan dicocokkan dua jalur, kandidat terbaik dinilai ulang oleh cross-encoder, baru diserahkan ke model bahasa. Hanya bukti yang lolos ambang yang boleh jadi jawaban, dan setiap Pasal dibawa konteks Pasal di sekitarnya.",
-      chips: ["bge-reranker-v2-m3", "top-k 5 · ambang 0,78", "Groq"],
+      body: "Pertanyaan dicocokkan dua jalur: semantik (vektor) dan kata kunci (BM25, dengan toleransi typo dan padanan kata). Kandidat yang lolos dinilai ulang oleh cross-encoder sebelum lima teratas dipakai. Masuk jawaban kuat butuh kecocokan semantik atau kata kunci yang benar-benar spesifik; di antara keduanya, pertanyaan tetap dijawab dengan label bukti terbatas. Induk Pasal dari tiap pecahan ikut dikirim sebagai konteks.",
+      chips: ["bge-reranker-v2-m3", "gate dua bar: 0,78 semantik / 0,85 leksikal", "Groq"],
       Scene: RetrievalScene,
       status: {
         key: "llm",
@@ -152,7 +152,7 @@ function useStages(live: ReturnType<typeof useLiveCounts>): Stage[] {
     {
       Icon: Sparkles,
       title: "Jawaban & insight",
-      body: "Jawaban datang terstruktur dengan sitasi yang bisa ditelusuri balik ke chunk asalnya — termasuk label jujur saat buktinya lemah atau memang tidak ditemukan. Kualitasnya diukur terus-menerus, bukan diasumsikan.",
+      body: "Jawaban disusun dari bukti terpilih dan selalu menyertakan sitasi yang bisa dibuka sampai ke Pasal atau halamannya. Sumber yang hasil pembacaannya meragukan ditandai, dan jawabannya menambahkan catatan otomatis soal itu. Bila bukti lemah, jawaban diberi label bukti terbatas; bila kosong, sistem menolak dan menawarkan kata kunci alternatif.",
       chips: ["sitasi [SUMBER n]", "cache jawaban 30 menit", "trace Langfuse"],
       Scene: AnswerScene,
       link: { href: "/analytics", label: "Lihat evaluasi & log" },

@@ -38,10 +38,11 @@ export function SettingsView() {
         <p className="eyebrow">Konfigurasi</p>
         <h1 className="text-2xl font-semibold tracking-tight">Pengaturan Sistem</h1>
         <p className="max-w-[62ch] text-[13px] leading-relaxed text-muted-foreground">
-          Parameter retrieval dikunci di belakang layar dan dikalibrasi lewat
-          evaluasi, bukan digeser manual. Yang tampil di sini adalah alur
-          lengkapnya: bagaimana dokumen Anda diolah menjadi pengetahuan,
-          dihubungkan ke model bahasa, dan kembali sebagai jawaban bersitasi.
+          Halaman ini tidak menawarkan slider. Nilai retrieval dikalibrasi
+          lewat evaluasi di backend, karena menggesernya tanpa pengukuran
+          hanya menambah tempat salah. Yang ditampilkan adalah jalur yang
+          benar-benar dilalui dokumen Anda, dari berkas mentah sampai
+          jawaban bersitasi, beserta angka terkininya.
         </p>
       </header>
 
@@ -55,18 +56,18 @@ export function SettingsView() {
       <section className="flex flex-col gap-2 rounded-lg bg-card p-5 ring-1 ring-border">
         <h2 className="text-[15px] font-semibold">Di mana parameter retrieval?</h2>
         <p className="text-[13px] leading-relaxed text-muted-foreground">
-          top-k, ambang kemiripan, dan konfigurasi reranker sengaja tidak
-          disediakan di sini. Nilainya diukur lewat evaluasi terhadap dataset
-          uji, lalu dikunci di konfigurasi backend — menggesernya dari
-          antarmuka tanpa pengukuran hanya menambah satu tempat untuk salah.
-          Yang bisa Anda lakukan dari sini adalah menilai hasilnya di{" "}
+          top-k, ambang kemiripan, dan reranker tidak diatur dari sini.
+          Nilainya diukur terhadap dataset uji lewat halaman{" "}
           <a
             href="/analytics"
             className="rounded font-medium text-brand-ink underline underline-offset-2"
           >
-            halaman Analitik
+            Analitik
           </a>
-          , dan angka di atas ikut bergerak saat dokumen bertambah.
+          , lalu dikunci di konfigurasi backend. Kalau hasil jawabannya
+          menurun, angka di Analitik yang akan menunjukkannya lebih dulu,
+          dan penyetelannya dikerjakan di sana, bukan dengan menebak-nebak
+          slider.
         </p>
       </section>
 
