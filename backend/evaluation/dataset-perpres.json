@@ -1,0 +1,200 @@
+[
+  {
+    "id": "fakta-1",
+    "kategori": "fakta",
+    "question": "Berapa batas waktu maksimal penyelenggara menyelesaikan setiap pengaduan?",
+    "ground_truth": "Penyelenggara wajib menyelesaikan setiap pengaduan paling lambat 60 (enam puluh) hari sejak berkas pengaduan dinyatakan lengkap (Pasal 12 ayat 3).",
+    "expected_pasal": [12],
+    "expected_behavior": "answer",
+    "document_name": "Perpres 76 2013.pdf"
+  },
+  {
+    "id": "fakta-2",
+    "kategori": "fakta",
+    "question": "Dalam berapa hari sejak menerima layanan pengadu harus menyampaikan pengaduan?",
+    "ground_truth": "Pengaduan dilakukan paling lambat 30 (tiga puluh) hari sejak pengadu menerima layanan (Pasal 12 ayat 2).",
+    "expected_pasal": [12],
+    "expected_behavior": "answer",
+    "document_name": "Perpres 76 2013.pdf"
+  },
+  {
+    "id": "fakta-3",
+    "kategori": "fakta",
+    "question": "Apa saja kewajiban penyelenggara dalam pengelolaan pengaduan menurut Pasal 2?",
+    "ground_truth": "Dalam pengelolaan pengaduan, penyelenggara wajib mengumumkan nama dan alamat kantor penanggung jawab pengelola pengaduan, mensosialisasikan mekanisme dan prosedur pengelolaan pengaduan, menerima, menanggapi, memproses, dan menyelesaikan setiap pengaduan, menyalurkan pengaduan yang bukan kewenangannya kepada penyelenggara lain yang berwenang, melakukan pencatatan dan pelaporan, serta melakukan pemantauan dan evaluasi (Pasal 2 ayat 2 huruf a sampai huruf f).",
+    "expected_pasal": [2],
+    "expected_behavior": "answer",
+    "document_name": "Perpres 76 2013.pdf"
+  },
+  {
+    "id": "fakta-4",
+    "kategori": "fakta",
+    "question": "Apa isi minimal formulir pengaduan yang wajib disediakan penyelenggara?",
+    "ground_truth": "Formulir pengaduan memuat sekurang-kurangnya identitas pengadu yang terdiri atas nama dan alamat lengkap, uraian keluhan atas pelayanan, serta tempat, waktu penyampaian, dan tanda tangan (Pasal 5 ayat 1).",
+    "expected_pasal": [5],
+    "expected_behavior": "answer",
+    "document_name": "Perpres 76 2013.pdf"
+  },
+  {
+    "id": "fakta-5",
+    "kategori": "fakta",
+    "question": "Bagaimana kewajiban pelayanan yang harus diberikan pengelola pengaduan?",
+    "ground_truth": "Pengelola wajib memberikan pelayanan dengan empati, hormat dan santun, tanpa pamrih, dan tanpa unsur pemaksaan; cepat, tepat, terbuka, adil, tidak diskriminatif, dan tidak memungut biaya; menjamin kerahasiaan identitas pelapor; memberikan penjelasan transparan tentang perkembangan proses pengaduan; mengedepankan profesionalitas dan independensi; serta memperhatikan kelompok rentan dan berkebutuhan khusus (Pasal 13).",
+    "expected_pasal": [13],
+    "expected_behavior": "answer",
+    "document_name": "Perpres 76 2013.pdf"
+  },
+  {
+    "id": "definisi-6",
+    "kategori": "definisi",
+    "question": "Apa yang dimaksud dengan pengaduan menurut Peraturan Presiden ini?",
+    "ground_truth": "Pengaduan adalah penyampaian keluhan yang disampaikan pengadu kepada pengelola pengaduan pelayanan publik atas pelayanan pelaksana yang tidak sesuai dengan standar pelayanan, atau pengabaian kewajiban dan/atau pelanggaran larangan oleh penyelenggara (Pasal 1 angka 8).",
+    "expected_pasal": [1],
+    "expected_behavior": "answer",
+    "document_name": "Perpres 76 2013.pdf"
+  },
+  {
+    "id": "definisi-7",
+    "kategori": "definisi",
+    "question": "Apa perbedaan antara pengadu dan pengelola pengaduan?",
+    "ground_truth": "Pengadu adalah seluruh pihak, baik orang perseorangan, kelompok, maupun badan hukum, yang menyampaikan pengaduan kepada pengelola pengaduan pelayanan publik (Pasal 1 angka 7), sedangkan pengelola adalah pejabat, pegawai, atau orang yang ditugaskan oleh penyelenggara untuk mengelola pengaduan masyarakat pada penyelenggara pelayanan publik (Pasal 1 angka 6).",
+    "expected_pasal": [1],
+    "expected_behavior": "answer",
+    "document_name": "Perpres 76 2013.pdf"
+  },
+  {
+    "id": "definisi-8",
+    "kategori": "definisi",
+    "question": "Apa yang dimaksud dengan standar pelayanan dalam peraturan ini?",
+    "ground_truth": "Standar pelayanan adalah tolok ukur yang dipergunakan sebagai pedoman penyelenggaraan pelayanan dan acuan penilaian kualitas pelayanan sebagai kewajiban dan janji penyelenggara kepada masyarakat dalam rangka pelayanan yang berkualitas, cepat, mudah, terjangkau, dan terukur (Pasal 1 angka 9).",
+    "expected_pasal": [1],
+    "expected_behavior": "answer",
+    "document_name": "Perpres 76 2013.pdf"
+  },
+  {
+    "id": "struktur-9",
+    "kategori": "struktur",
+    "question": "Dokumen ini terdiri atas berapa BAB dan berapa Pasal?",
+    "ground_truth": "Peraturan Presiden ini terdiri atas 3 (tiga) BAB dan 21 (dua puluh satu) Pasal.",
+    "expected_pasal": [],
+    "expected_behavior": "answer",
+    "document_name": "Perpres 76 2013.pdf"
+  },
+  {
+    "id": "struktur-10",
+    "kategori": "struktur",
+    "question": "Sebutkan judul lengkap peraturan ini beserta nomor dan tahunnya.",
+    "ground_truth": "Peraturan Presiden Republik Indonesia Nomor 76 Tahun 2013 tentang Pengelolaan Pengaduan Pelayanan Publik.",
+    "expected_pasal": [],
+    "expected_behavior": "answer",
+    "document_name": "Perpres 76 2013.pdf"
+  },
+  {
+    "id": "struktur-11",
+    "kategori": "struktur",
+    "question": "Siapa yang menetapkan peraturan ini dan siapa saja pejabat yang menandatanganinya?",
+    "ground_truth": "Peraturan ini ditetapkan oleh Presiden Republik Indonesia DR. H. Susilo Bambang Yudhoyono, diundangkan oleh Menteri Hukum dan Hak Asasi Manusia Amir Syamsudin, dan salinannya ditandatangani Deputi Bidang Politik, Hukum, dan Keamanan Sekretariat Kabinet Bistok Simbolon.",
+    "expected_pasal": [],
+    "expected_behavior": "answer",
+    "document_name": "Perpres 76 2013.pdf"
+  },
+  {
+    "id": "struktur-12",
+    "kategori": "struktur",
+    "question": "Kapan peraturan ini ditetapkan dan diundangkan, serta berapa nomor Lembaran Negaranya?",
+    "ground_truth": "Peraturan ini ditetapkan dan diundangkan di Jakarta pada tanggal 6 Desember 2013 dan ditempatkan dalam Lembaran Negara Republik Indonesia Tahun 2013 Nomor 191.",
+    "expected_pasal": [],
+    "expected_behavior": "answer",
+    "document_name": "Perpres 76 2013.pdf"
+  },
+  {
+    "id": "sintesis-13",
+    "kategori": "sintesis",
+    "question": "Sebutkan tahapan mekanisme dan tata cara pengelolaan pengaduan menurut Pasal 8.",
+    "ground_truth": "Mekanisme pengelolaan pengaduan meliputi empat tahap: penerimaan (pemeriksaan kelengkapan dokumen, pencatatan, dan pemberian tanggapan kepada pengadu), penelaahan dan pengklasifikasian (identifikasi masalah, pemeriksaan substansi, klarifikasi, evaluasi bukti, dan seleksi), penyaluran pengaduan kepada penyelenggara lain yang berwenang bila bukan kewenangannya, dan penyelesaian pengaduan (saran penyelesaian, pemantauan, pemberian informasi kepada pengadu, pelaporan tindak lanjut, dan pengarsipan); mekanisme disusun dengan memperhatikan kelompok rentan dan penyelesaiannya terbuka bagi publik melalui Sistem Informasi Pelayanan Publik.",
+    "expected_pasal": [8],
+    "expected_behavior": "answer",
+    "document_name": "Perpres 76 2013.pdf"
+  },
+  {
+    "id": "sintesis-14",
+    "kategori": "sintesis",
+    "question": "Apa saja larangan bagi pengelola pengaduan?",
+    "ground_truth": "Pengelola dilarang menggunakan fasilitas sarana prasarana pengaduan untuk kepentingan pribadi atau kelompok, dan dilarang menerima imbalan dalam bentuk apa pun untuk kegiatan yang berkaitan dengan pengelolaan pengaduan (Pasal 14).",
+    "expected_pasal": [14],
+    "expected_behavior": "answer",
+    "document_name": "Perpres 76 2013.pdf"
+  },
+  {
+    "id": "sintesis-15",
+    "kategori": "sintesis",
+    "question": "Bagaimana perlindungan yang wajib diberikan kepada pengadu?",
+    "ground_truth": "Dalam hal diperlukan atau pengadu meminta perlindungan, pimpinan penyelenggara wajib memberikan perlindungan kepada pengadu selama proses pengelolaan pengaduan, dan perlindungan tersebut dapat berupa jaminan kerahasiaan identitas pengadu (Pasal 15).",
+    "expected_pasal": [15],
+    "expected_behavior": "answer",
+    "document_name": "Perpres 76 2013.pdf"
+  },
+  {
+    "id": "outofbox-16",
+    "kategori": "outofbox",
+    "question": "Apa kewajiban yang harus dipenuhi dalam jangka waktu 1 tahun sejak peraturan ini berlaku?",
+    "ground_truth": "Dalam jangka waktu paling lama 1 (satu) tahun sejak mulai berlaku, penyelenggara wajib menyediakan sarana pengaduan, mekanisme dan tata cara pengelolaan pengaduan, serta menetapkan pengelola pengaduan, dan Menteri wajib menyusun road map penerapan sistem pengelolaan pengaduan nasional (Pasal 20).",
+    "expected_pasal": [20],
+    "expected_behavior": "answer",
+    "document_name": "Perpres 76 2013.pdf"
+  },
+  {
+    "id": "outofbox-17",
+    "kategori": "outofbox",
+    "question": "Apakah mengajukan pengaduan dikenakan biaya?",
+    "ground_truth": "Pengaduan tidak dikenakan biaya karena pengelola wajib memberikan pelayanan yang cepat, tepat, terbuka, adil, tidak diskriminatif, dan tidak memungut biaya (Pasal 13 huruf b).",
+    "expected_pasal": [13],
+    "expected_behavior": "answer",
+    "document_name": "Perpres 76 2013.pdf"
+  },
+  {
+    "id": "outofbox-18",
+    "kategori": "outofbox",
+    "question": "Bagaimana jika pengadu tidak mampu menulis atau membaca?",
+    "ground_truth": "Dalam hal pengadu tidak mampu menulis dan/atau membaca, pengelola wajib membantu mengisi formulir pengaduan (Pasal 6 ayat 2).",
+    "expected_pasal": [6],
+    "expected_behavior": "answer",
+    "document_name": "Perpres 76 2013.pdf"
+  },
+  {
+    "id": "edge-19",
+    "kategori": "edge",
+    "question": "Apa itu sepak bola dan bagaimana aturan liga nasionalnya?",
+    "ground_truth": "Pertanyaan di luar lingkup dokumen: sepak bola tidak dibahas dalam peraturan ini, sehingga sistem wajib menolak dengan menyatakan informasi tidak ditemukan, bukan menjelaskan aturan sepak bola.",
+    "expected_pasal": [],
+    "expected_behavior": "refuse",
+    "document_name": "Perpres 76 2013.pdf"
+  },
+  {
+    "id": "edge-20",
+    "kategori": "edge",
+    "question": "Apa isi Pasal 99 dalam dokumen ini?",
+    "ground_truth": "Dokumen hanya memuat 21 Pasal sehingga Pasal 99 tidak ada; sistem wajib menolak dengan menyatakan pasal tersebut tidak ditemukan dalam dokumen.",
+    "expected_pasal": [],
+    "expected_behavior": "refuse",
+    "document_name": "Perpres 76 2013.pdf"
+  },
+  {
+    "id": "edge-21",
+    "kategori": "edge",
+    "question": "halo, kamu bisa apa saja?",
+    "ground_truth": "Sapaan kecil dijawab sebagai small talk yang ramah tanpa retrieval dokumen, misalnya menjelaskan bahwa asisten siap membantu menjawab pertanyaan seputar isi dokumen.",
+    "expected_pasal": [],
+    "expected_behavior": "smalltalk",
+    "document_name": "Perpres 76 2013.pdf"
+  },
+  {
+    "id": "edge-22",
+    "kategori": "edge",
+    "question": "Berapa umur presiden yang menandatangani peraturan ini?",
+    "ground_truth": "Nama Presiden DR. H. Susilo Bambang Yudhoyono ada di dokumen, tetapi umurnya tidak pernah disebutkan sehingga sistem wajib menolak dengan menyatakan informasi tidak tersedia di dokumen.",
+    "expected_pasal": [],
+    "expected_behavior": "refuse",
+    "document_name": "Perpres 76 2013.pdf"
+  }
+]
