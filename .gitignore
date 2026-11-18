@@ -113,3 +113,9 @@ desktop.ini
 frontend/AGENTS.md
 frontend/CLAUDE.md
 
+
+# Artefak riset lokal dan berkas berhak cipta — jangan pernah di-commit.
+/.zcode/
+/*.pdf
+/perpres_76_2013.json
+/data/

@@ -34,7 +34,7 @@ memperbarui aplikasi.
 |---|---|
 | VPS Ubuntu | 2 GB RAM, 40 GB disk. Yang Anda punya sudah cukup |
 | Domain | Boleh gratis dari DuckDNS, lihat Langkah 2 |
-| Groq API key | Gratis di <https://console.groq.com/keys>, 1000 permintaan per hari |
+| Groq API key | Gratis di <https://console.groq.com/keys>, 1000 permintaan per hari. Dipakai untuk generation, fallback, dan prompt-guard |
 | Passcode | Buat sendiri, minimal 12 karakter |
 
 Soal RAM: aplikasi ini butuh sekitar 1,6 GB saat berjalan. Dengan 2 GB, skrip
@@ -176,6 +176,11 @@ layar**, itu normal dan disengaja.
 | Passcode | Buat sendiri, minimal 12 karakter. **Catat di tempat aman** |
 | Groq API key | Kunci dari <https://console.groq.com/keys>, diawali `gsk_` |
 
+Skrip setup hanya menanyakan Groq API key. Pengaturan lain, termasuk provider
+generation alternatif, diisi manual di `backend/.env` pada server seperti
+bagian [Menyetel variabel backend](#menyetel-variabel-backend) di bawah, lalu
+layanan di-restart.
+
 ### Apa yang akan terlihat, dan berapa lama
 
 Skrip menampilkan delapan langkah bernomor. Yang paling lama:
@@ -209,6 +214,66 @@ sia-sia. Pesannya menyebutkan penyebabnya. Lihat bagian
 
 Skrip ini **aman dijalankan ulang**. Langkah yang sudah selesai dilewati, dan
 konfigurasi yang sudah ada tidak ditimpa tanpa bertanya.
+
+### Menyetel variabel backend
+
+Semua pengaturan backend berada di `backend/.env` pada server. Sunting berkas
+itu dengan `sudo nano .env` dari `/opt/ida/backend`, simpan, lalu restart
+layanan supaya nilai baru terbaca:
+
+```bash
+cd /opt/ida/backend
+sudo nano .env
+sudo docker compose up -d --force-recreate api
+```
+
+| Variabel | Nilai contoh | Alasan |
+|---|---|---|
+| `LLM_PROVIDER` | `groq` | Provider default. Ganti ke `openai_compatible` hanya bila memakai endpoint sendiri |
+| `LLM_MODEL` | sesuai katalog provider | Model generation utama |
+| `GROQ_API_KEY` | `gsk_...` | Wajib untuk generation, fallback, dan prompt-guard |
+| `GROQ_MODEL` | `qwen/qwen3.8-27b` | Katalog Groq berbeda dari katalog provider utama, jadi modelnya dipisah |
+| `AUTH_OPEN_MODE` | `1` untuk demo publik, `0` untuk produksi | Menentukan apakah pengunjung melewati form passcode |
+| `OCR_ENGINE` | `paddle` | Mesin OCR untuk PDF hasil pindai |
+| `INGEST_PDF_MODE` | `auto` | Memilih jalur teks atau OCR sesuai isi PDF |
+| `PDF_RENDER_SCALE` | `3.0` | Resolusi render halaman sebelum OCR |
+| `PROMPT_GUARD_ENABLED` | `1` | Menyalakan pemeriksaan prompt injection |
+| `PROMPT_GUARD_MODEL` | `meta-llama/llama-prompt-guard-2-86m` | Model guard yang tersedia di katalog Groq |
+| `PROMPT_GUARD_THRESHOLD` | `0.5` | Ambang skor untuk menolak prompt |
+| `RERANK_ENABLED` | `0` untuk VPS 2 GB, `1` bila kualitas diutamakan | Reranker menambah pemakaian RAM |
+| `EMBEDDING_MODEL` | `intfloat/multilingual-e5-base` | Model embedding untuk indeks vektor |
+| `EMBEDDING_DIMENSION` | `768` | Harus cocok dengan model embedding yang dipakai |
+| `LEGAL_CHUNKING_ENABLED` | `1` | Memecah dokumen mengikuti struktur pasal/bab bila terdeteksi |
+| `WEAK_EVIDENCE_FLOOR` | `0.60` | Ambang minimum bukti sebelum menjawab "tidak ditemukan" |
+
+Tulis satu variabel per baris dengan format `NAMA=nilai`, tanpa spasi di sekitar
+`=`, misalnya `LLM_PROVIDER=groq` dan `GROQ_MODEL=qwen/qwen3.8-27b`.
+
+Untuk memakai endpoint sendiri yang kompatibel dengan API OpenAI, cukup isi
+tiga variabel: `LLM_PROVIDER=openai_compatible`, `OPENAI_COMPATIBLE_BASE_URL`,
+dan `OPENAI_COMPATIBLE_API_KEY`.
+
+Mengganti model embedding juga mengubah dimensi vektor, sehingga indeks lama
+tidak lagi cocok dan harus dibangun ulang. Pada pemasangan Docker:
+
+```bash
+cd /opt/ida/backend
+sudo docker compose run --rm -T api python -m scripts.reindex
+sudo docker compose up -d --force-recreate api
+```
+
+Pada pemasangan tanpa Docker, aktifkan venv lebih dulu, pasang dependensi, lalu
+jalankan reindex dan restart layanan backend seperti biasa:
+
+```bash
+cd /opt/ida/backend
+source .venv/bin/activate
+pip install -e ".[ocr]"
+python -m scripts.reindex
+```
+
+Dokumen lama perlu dihapus lalu diunggah ulang, karena chunk lama belum
+memiliki metadata pasal yang dipakai pemecahan dokumen versi baru.
 
 ---
 
@@ -250,10 +315,10 @@ Dari browser di komputer Anda, buka:
 https://ida-anda.duckdns.org
 ```
 
-Yang benar: halaman login muncul, dan ikon gembok di bilah alamat berwarna
-normal (bukan peringatan).
-
-Masuk dengan passcode yang Anda buat di Langkah 4.
+Yang benar: ikon gembok di bilah alamat berwarna normal (bukan peringatan).
+Kalau `AUTH_OPEN_MODE=1`, halaman root langsung membuka aplikasi tanpa form
+passcode. Dengan `AUTH_OPEN_MODE=0`, form passcode muncul; masuk dengan
+passcode yang Anda buat di Langkah 4.
 
 ### Kalau HTTPS belum bisa dibuka
 
@@ -439,7 +504,9 @@ aplikasinya.
 
 - **Passcode minimal 12 karakter.** Ini satu-satunya yang melindungi seluruh
   dokumen Anda. Jangan pakai `123456` atau nama sendiri.
-- **Jangan bagikan Groq API key.** Kalau bocor, orang lain bisa memakai kuota
+- **Jangan bagikan API key provider.** Baik Groq maupun endpoint sendiri,
+  kuncinya hanya disimpan di `backend/.env`, tidak boleh dibagikan, dan tidak
+  boleh di-commit ke repositori. Kalau bocor, orang lain bisa memakai kuota
   Anda.
 - **Perbarui berkala.** Jalankan Langkah 6 setiap beberapa minggu untuk
   mengambil perbaikan keamanan.

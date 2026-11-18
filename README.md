@@ -1,4 +1,4 @@
-# Intelligent Document Assistant
+﻿# Intelligent Document Assistant
 
 <!-- Stack teknologi. Versinya disamakan dengan pyproject.toml dan
      package.json, jadi badge ini ikut berubah saat dependency diperbarui. -->
@@ -10,16 +10,16 @@
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)](https://www.python.org)
 [![ChromaDB](https://img.shields.io/badge/ChromaDB-0.6+-FF6B35)](https://www.trychroma.com)
 [![SQLite](https://img.shields.io/badge/SQLite-metadata-003B57?logo=sqlite&logoColor=white)](https://www.sqlite.org)
-[![Groq](https://img.shields.io/badge/Groq-LLM-F55036)](https://groq.com)
-[![Ollama](https://img.shields.io/badge/Ollama-fallback-000000?logo=ollama&logoColor=white)](https://ollama.com)
+[![Groq](https://img.shields.io/badge/Groq-fallback-F55036)](https://groq.com)
+[![Ollama](https://img.shields.io/badge/Ollama-lokal-000000?logo=ollama&logoColor=white)](https://ollama.com)
 
 <!-- Status kualitas. Angkanya berasal dari perintah di bagian verifikasi,
      bukan klaim. Badge CI diambil langsung dari hasil GitHub Actions, jadi
      kalau ada yang rusak, badge-nya merah. -->
 [![CI](https://github.com/aldyardnsyh/IntelligenceDocumentSystem/actions/workflows/ci.yml/badge.svg)](https://github.com/aldyardnsyh/IntelligenceDocumentSystem/actions/workflows/ci.yml)
-[![pytest](https://img.shields.io/badge/pytest-534_passed-0A9EDC?logo=pytest&logoColor=white)](#verifikasi-dan-pengujian)
+[![pytest](https://img.shields.io/badge/pytest-623_passed-0A9EDC?logo=pytest&logoColor=white)](#verifikasi-dan-pengujian)
 [![Playwright](https://img.shields.io/badge/Playwright-59_specs-2EAD33?logo=playwright&logoColor=white)](#verifikasi-dan-pengujian)
-[![coverage](https://img.shields.io/badge/coverage-83%25-4C1)](#verifikasi-dan-pengujian)
+[![coverage](https://img.shields.io/badge/coverage-84%2C78%25-4C1)](#verifikasi-dan-pengujian)
 [![Lisensi](https://img.shields.io/badge/lisensi-PSHT-blue)](LICENSE.md)
 
 Asisten tanya jawab untuk dokumen pribadi Anda. Unggah berkas PDF, TXT, atau
@@ -34,18 +34,48 @@ supaya tidak tertukar dengan jawaban yang bersumber dokumen.
 ## Cara kerjanya
 
 ```
-Unggah -> parse -> potong jadi chunk -> embedding -> pencarian hybrid
-                                                            |
-                                                    ada yang lolos?
-                                                      |          |
-                                                     ya         tidak
-                                                      |          |
-                                          jawaban + sitasi   pilihan Anda:
-                                                             tolak menjawab,
-                                                             atau jawab dari
-                                                             pengetahuan umum
-                                                             dengan label
+Unggah -> parse -> [PDF scan? -> render halaman -> OCR: PP-OCR lokal, halaman
+        sulit dieskalasi ke model vision] -> potong jadi chunk per Pasal
+        -> embedding (e5-base) -> pencarian hybrid (BM25+Sastrawi & vektor)
+        -> rerank cross-encoder multilingual
+                                            |
+                                    bukti cukup?
+                                      |     |      |
+                                     ya   lemah   kosong
+                                      |     |      |
+                          jawaban +   jawaban  "tidak ditemukan" +
+                          sitasi      berlabel  saran kata kunci
+                                      "bukti terbatas"
 ```
+
+Dua jalur ingestion yang menentukan mutu retrieval, khususnya untuk dokumen
+legal hasil pindai (misal Lembaran Negara dari peraturan.bpk.go.id):
+
+1. **OCR hybrid PP-OCR + vision.** Text-layer PDF dinilai dulu (mode
+   `auto`). PDF pindai yang text-layer-nya kosong â€” atau rusak seperti PDF
+   BPK yang urutan bacanya kacau dan kata-katanya terpecah (`Undang-Undan g`)
+   â€” dirender per halaman menjadi gambar dan diekstraksi **PP-OCR lokal**
+   (model PP-OCR via RapidOCR/ONNX, tanpa biaya). Urutan baca dua kolom
+   dipulihkan dari bounding box, dan hanya halaman dengan confidence rendah
+   yang dieskalasi ke model vision Groq. Sinyal deteksi kerusakan text-layer
+   diukur, bukan ditebak (rasio token satu huruf, halaman kosong, baris
+   noise). Lihat `backend/app/services/ingestion/text_quality.py`,
+   `ocr_engine.py`, dan `ocr.py`.
+2. **Chunking struktur hukum.** Dokumen yang terdeteksi sebagai peraturan
+   (heading BAB/Bagian/Pasal) dipecah **per Pasal**, bukan per paragraf.
+   Baris pertama setiap chunk memuat konteksnya:
+   `BAB II â€“ PENGELOLAAN PENGADUAN Â· Bagian Kedua â€“ Sarana Pengaduan Â· Pasal 5`
+   â€” retrieval jadi tahu Pasal mana yang sedang dicari, dan halaman detail
+   menampilkan badge "Pasal N" di tiap chunk. Dokumen non-legal tetap memakai
+   chunking paragraf generik. Lihat `backend/app/services/ingestion/legal.py`.
+
+3. **Retrieval berlapis.** BM25 dengan stemmer Sastrawi (`pengaduan`,
+   `mengadu`, `diadukan` bertemu di bentuk dasar yang sama), embedding
+   `multilingual-e5-base`, dan reranker cross-encoder multilingual
+   (`bge-reranker-v2-m3`) yang menilai ulang kandidat. Jawaban tidak lagi
+   ditolak keras di batas ambang: kalau bukti lemah tapi ada, jawaban tetap
+   diberikan dengan label "bukti terbatas"; kalau benar-benar kosong,
+   penolakan disertai saran kata kunci.
 
 Tiga aturan yang menjaga sistem ini bisa dipercaya:
 
@@ -55,6 +85,108 @@ Tiga aturan yang menjaga sistem ini bisa dipercaya:
    hanya mencari di dokumen itu. Sesi lintas dokumen tetap tersedia.
 3. **Semua angka berasal dari server.** Jumlah chunk, ambang kemiripan,
    latensi, dan token semuanya hasil pengukuran, bukan nilai contoh.
+
+## Model dan provider LLM
+
+Jawaban dirangkai oleh satu provider utama dengan rantai fallback. Konfigurasi
+yang dipakai untuk demo dan produksi memakai **Groq** sebagai provider utama:
+
+```ini
+LLM_PROVIDER=groq
+LLM_MODEL=qwen/qwen3.8-27b
+GROQ_API_KEY=<kunci Anda>
+```
+
+Groq, Ollama, SGLang, dan endpoint OpenAI-compatible memakai protokol yang sama
+(`/chat/completions`). Karena itu provider bisa ditukar lewat konfigurasi saja:
+tidak ada kode khusus per vendor di jalur jawaban.
+
+Kalau Anda punya endpoint OpenAI-compatible sendiri (router, agregator, atau
+proxy internal), arahkan provider ke sana dan isi `LLM_MODEL` dengan nama model
+yang ada di katalog penyedia tersebut:
+
+```ini
+LLM_PROVIDER=openai_compatible
+LLM_MODEL=<nama model di katalog penyedia Anda>
+OPENAI_COMPATIBLE_BASE_URL=https://endpoint-anda/v1
+OPENAI_COMPATIBLE_API_KEY=<kunci Anda>
+
+LLM_FALLBACK_CHAIN=groq
+GROQ_API_KEY=<kunci Anda>
+GROQ_MODEL=qwen/qwen3.8-27b
+```
+
+`GROQ_MODEL` perlu diisi terpisah karena katalog model tiap penyedia berbeda.
+`LLM_MODEL` menunjuk model provider utama, dan nama itu belum tentu ada di
+katalog Groq; tanpa `GROQ_MODEL`, fallback akan meminta model yang tidak ada
+dan rantai gagal tepat saat dibutuhkan. Nilai `qwen/qwen3.8-27b` adalah model
+Groq yang diuji stabil sebagai cadangan ketika provider utama memakai katalog
+model yang berbeda.
+
+`LLM_FALLBACK_CHAIN` adalah daftar nama provider yang dipisah koma. Provider
+aktif selalu dicoba lebih dulu, lalu setiap nama di daftar dicoba berurutan
+ketika provider sebelumnya gagal karena kuota atau gangguan jaringan. Nama
+yang tidak dikenal menggagalkan start dengan pesan yang menyebut pilihan yang
+tersedia; salah ketik tidak dilewati diam-diam, karena provider yang dimaksud
+tidak akan pernah dipanggil dan tidak ada gejala yang menunjuk ke sana.
+
+Kunci API tidak pernah ditulis di repo. Isi hanya di `backend/.env`, yang sudah
+di-gitignore, atau lewat environment server.
+
+## Prompt-guard
+
+Aturan di prompt sistem saja tidak cukup untuk konteks dokumen yang tidak
+tepercaya. Setiap potongan yang akan masuk prompt dinilai lebih dulu oleh
+classifier `meta-llama/llama-prompt-guard-2-86m` (86 juta parameter). Skor
+risiko 0 sampai 1 di atas ambang membuat potongan itu dibuang dari konteks dan
+tidak ikut disitasi, sehingga instruksi terselubung di dalam dokumen tidak
+pernah sampai ke model generasi.
+
+| Variabel | Bawaan | Arti |
+|---|---|---|
+| `PROMPT_GUARD_ENABLED` | `1` | Menyalakan penyaringan |
+| `PROMPT_GUARD_MODEL` | `meta-llama/llama-prompt-guard-2-86m` | Nama classifier |
+| `PROMPT_GUARD_THRESHOLD` | `0.5` | Skor di atas nilai ini memblokir chunk |
+
+Ambang 0,5 dipilih karena pemisahannya lebar: percobaan injection yang nyata
+memberi skor 0,9 ke atas, sedangkan teks legal normal berada di 0,0 sampai 0,1.
+
+Guard bersifat **fail-open**: kalau classifier gagal, timeout, atau providernya
+tidak siap, konten tetap lolos tanpa skor dan jawaban tetap berjalan. Ini
+disengaja. Classifier adalah lapisan tambahan, bukan satu-satunya kontrol;
+menjatuhkan seluruh jawaban karena satu pemeriksaan tambahan gagal akan membuat
+gangguan kecil terasa seperti aplikasi mati.
+
+Guard **dipin ke Groq**, bukan mengikuti provider generation, karena model
+classifier hanya ada di katalog Groq. Konsekuensinya `GROQ_API_KEY` tetap perlu
+diisi walaupun generation berjalan di provider lain. Tanpa kunci itu, guard
+dimatikan dan alasannya dicatat di log server, bukan dibiarkan tampak aktif
+padahal tidak memeriksa apa pun.
+
+## Mode akses terbuka (demo publik)
+
+Untuk presentasi, dua sakelar harus dinyalakan bersamaan:
+
+```ini
+# backend/.env
+AUTH_OPEN_MODE=1
+
+# frontend/.env.local
+NEXT_PUBLIC_OPEN_MODE=1
+```
+
+Backend menerbitkan sesi otomatis untuk pengunjung yang belum punya cookie,
+lalu melewati verifikasi passcode pada request pertama. Frontend melewati gate
+halaman dan mengalihkan `/login` ke `/chat`, sehingga tautan dari landing page
+langsung mendarat di aplikasi tanpa satu klik tambahan.
+
+Ini **hanya untuk demo publik, bukan produksi**. Selama mode ini menyala,
+siapa pun yang menemukan URL dapat membaca dan mengunggah dokumen di server
+itu; tidak ada akun per pengunjung dan tidak ada isolasi data antar pengunjung.
+Untuk mengembalikan gerbang passcode, set `AUTH_OPEN_MODE=0` dan
+`NEXT_PUBLIC_OPEN_MODE=0` (atau hapus barisnya), lalu deploy ulang frontend
+karena nilai `NEXT_PUBLIC_*` dibekukan saat build. Logika login tidak dihapus,
+hanya dilewati.
 
 ## Mulai dari mana?
 
@@ -76,6 +208,9 @@ menjalankannya.
 
 ## Daftar isi
 
+- [Model dan provider LLM](#model-dan-provider-llm)
+- [Prompt-guard](#prompt-guard)
+- [Mode akses terbuka (demo publik)](#mode-akses-terbuka-demo-publik)
 - [Coba tanpa backend (2 menit)](#coba-tanpa-backend-2-menit)
 - [Jalankan lengkap (backend + frontend)](#jalankan-lengkap-backend--frontend)
 - [Dokumen contoh untuk pengujian](#dokumen-contoh-untuk-pengujian)
@@ -139,8 +274,12 @@ Cek dari terminal lain:
 Invoke-RestMethod http://127.0.0.1:8000/api/v1/health
 ```
 
-Yang diharapkan: `status: ok`, `fallback.mode: full`, dan
-`fallback.embedding: sentence-transformers`.
+Yang diharapkan: `status: ok`, `llm: ok`, dan `fallback.mode: full`. Kalau
+`LLM_PROVIDER` masih `mock` bawaan `.env.example`, statusnya sengaja
+`degraded`: tidak ada model bahasa yang benar-benar dipanggil, jadi health
+tidak boleh terlihat sehat. Isi provider seperti pada bagian
+[Model dan provider LLM](#model-dan-provider-llm) sebelum menganggap
+pemasangan selesai.
 
 ### Langkah 3: siapkan frontend
 
@@ -209,7 +348,7 @@ Buka `/settings`:
 - **Top K**: berapa banyak potongan dokumen yang diambil. Semakin besar,
   semakin banyak konteks, tapi jawaban bisa kurang fokus.
 - **Ambang kemiripan**: batas minimal skor agar sebuah potongan dipakai.
-  Rentang 0.75 sampai 0.92 diukur untuk model embedding yang dipakai. Nilai
+  Rentang 0,70 sampai 0,92 diukur untuk model embedding yang dipakai. Nilai
   lebih tinggi membuat sistem lebih sering menjawab "tidak ditemukan".
 
 ### Percakapan privat per dokumen
@@ -262,6 +401,65 @@ Anda pilih dan melaporkan:
 Evaluasi ini tidak memerlukan API key tambahan. Untuk skor RAGAS lengkap
 (termasuk faithfulness yang dinilai oleh model kedua), lihat bagian
 [Evaluasi dengan RAGAS](#evaluasi-dengan-ragas).
+
+### Menguji dokumen Anda sendiri dengan dataset berlabel
+
+Halaman `/analytics` memakai pertanyaan contoh bawaan. Untuk menguji dokumen
+Anda sendiri dari terminal, jalankan harness evaluasi end-to-end:
+
+```powershell
+cd backend
+python -m scripts.eval_perpres --pdf "dokumen-anda.pdf" --json-out hasil-eval.json
+```
+
+`--pdf` wajib dan harus menunjuk berkas Anda sendiri; tidak ada path lokal yang
+di-hardcode di repo, sehingga clone baru bisa langsung dipakai untuk dokumen
+apa pun. Dataset bawaan `evaluation/dataset-perpres.json` hanyalah **contoh**
+22 soal untuk Perpres 76 Tahun 2013 â€” 18 soal yang harus dijawab, 3 yang harus
+ditolak, dan 1 sapaan yang harus dijawab sebagai smalltalk â€” bukan keterikatan
+sistem pada korpus tersebut. Sistem berlaku untuk dokumen apa pun; buat dataset
+sendiri berisi pertanyaan dan `ground_truth` untuk dokumen Anda, lalu jalankan
+perintah yang sama.
+
+Harness menjalankan pipeline yang sama dengan pengguna: PDF diunggah, di-OCR
+bila perlu, dipotong per Pasal, diindeks, lalu setiap pertanyaan dijawab lewat
+`RagService`. Karena itu satu run bisa memakan beberapa menit, tergantung
+jumlah halaman dan provider yang aktif. Opsi lain: `--dataset` untuk berkas
+soal lain, `--limit` untuk mencoba beberapa soal lebih dulu, `--db` untuk
+lokasi basis data evaluasi, dan `--json-out` untuk menyimpan hasil lengkap.
+
+Penilaiannya **kasar dan sengaja diberi label**. Untuk soal `answer`, skor
+dihitung dari persentase kata kunci `ground_truth` yang muncul di jawaban;
+`refuse` lolos bila sistem menjawab "tidak ditemukan"; `smalltalk` lolos bila
+jawaban terisi dan bukan penolakan. Angka ini berguna untuk mendeteksi regresi
+antar run pada korpus yang sama, tetapi **bukan pengganti penilaian manusia**:
+model boleh memakai sinonim sehingga coverage rendah belum tentu salah, dan
+jawaban yang keliru bisa menyalin kata kunci sehingga coverage tinggi belum
+tentu benar. Baca jawabannya, jangan hanya melihat persentasenya.
+
+### Mengganti model embedding dan membangun ulang indeks
+
+Model bawaan adalah `intfloat/multilingual-e5-base` dengan
+`EMBEDDING_DIMENSION=768`. Vektor yang tersimpan dibuat oleh model tertentu,
+jadi mengganti `EMBEDDING_MODEL` atau `EMBEDDING_DIMENSION` membuat indeks
+Chroma lama tidak cocok dengan vektor baru. Gejalanya menipu: dokumen tetap
+berstatus siap, pertanyaan wajar, tetapi retrieval mengembalikan hasil acak
+atau tidak menemukan apa pun tanpa error yang menunjuk penyebabnya.
+
+Setelah mengubah kedua nilai itu di `.env`:
+
+```powershell
+cd backend
+python -m scripts.reindex
+```
+
+Skrip ini membaca ulang isi chunk dari database metadata, menghitung vektor
+baru dengan model yang aktif, lalu mengganti seluruh isi koleksi vektor.
+Dokumen tidak perlu diunggah ulang hanya untuk memperbaiki vektor. Akan tetapi,
+`reindex` tidak mengubah cara dokumen dipotong: chunk lama yang dibuat sebelum
+chunking legal aktif tidak punya metadata Pasal. Untuk mendapatkan header
+`BAB`/`Pasal` pada chunk, hapus dokumen lama lalu unggah ulang setelah reindex
+selesai.
 
 ## Tampilan dan halaman
 
@@ -384,7 +582,7 @@ orang lain: yang perlu dipahami ada di sini, bukan tersebar di kode.
 
 ```powershell
 cd backend
-python -m pytest                 # 534 test, coverage gate 70%
+python -m pytest                 # 623 test, coverage gate 70%
 python -m ruff check app tests scripts
 ```
 
@@ -421,10 +619,10 @@ npx playwright test
 
 E2E memakai **model embedding asli**, bukan stub, dan backend-nya harus
 berjalan dengan `USE_LOCAL_EMBEDDING=1`. Alasannya terukur: ambang kemiripan
-aplikasi (default 0,82, minimum 0,75) dikalibrasi untuk model
-`intfloat/multilingual-e5-small`, yang memberi skor 0,84 sampai 0,91 untuk
-pertanyaan relevan. Embedding stub hashing hanya memberi sekitar 0,49, sehingga
-setiap pertanyaan dijawab "tidak ditemukan" walaupun dokumennya berisi
+aplikasi (default 0,78, minimum 0,70) dikalibrasi untuk model
+`intfloat/multilingual-e5-base`, yang memberi skor di atas ambang minimum untuk
+pertanyaan yang relevan. Embedding stub hashing hanya memberi sekitar 0,49,
+sehingga setiap pertanyaan dijawab "tidak ditemukan" walaupun dokumennya berisi
 jawabannya. Dengan model asli, sitasi muncul sebagaimana di produksi.
 
 Suite ini membersihkan dokumen dan sesi sebelum berjalan, lalu memulihkan
@@ -595,9 +793,9 @@ untuk pratinjau statis. Backend FastAPI tetap hanya berjalan di VPS.
 
 ```
 frontend/             Next.js 16 + React 19 + Tailwind v4 (9 halaman)
-frontend/e2e/         46 skenario Playwright
+frontend/e2e/         59 skenario Playwright
 frontend/scripts/     Pembuat favicon dari logo aplikasi
-backend/              FastAPI + ChromaDB + SQLite + Groq atau Ollama
+backend/              FastAPI + ChromaDB + SQLite + Groq, endpoint OpenAI-compatible, Ollama, atau SGLang
 backend/samples/      Tiga dokumen contoh untuk uji manual
 backend/evaluation/   Golden dataset untuk mengukur kualitas retrieval
 backend/scripts/      Seed, reindex, uji ujung ke ujung, evaluasi RAGAS
@@ -611,11 +809,11 @@ Angka di badge atas bukan klaim, tapi hasil perintah berikut:
 
 | Pemeriksaan | Perintah | Hasil |
 |---|---|---|
-| Test backend | `python -m pytest` | 434 test, coverage 83% |
+| Test backend | `python -m pytest` | 623 test, coverage 84,78% |
 | Lint backend | `python -m ruff check app tests scripts` | Bersih |
 | Tipe dan lint frontend | `npx next typegen; npx tsc --noEmit; npm run lint` | Bersih |
 | Build frontend | `npm run build` | Sukses |
-| Uji browser | `npx playwright test` | 46 skenario |
+| Uji browser | `npx playwright test` | 59 skenario |
 | Uji ujung ke ujung | `python -m scripts.e2e_check` | 21 pemeriksaan |
 
 Empat baris pertama juga dijalankan otomatis oleh GitHub Actions pada
@@ -639,7 +837,7 @@ Yang sudah ditangani, dan alasannya:
 | Path traversal | Nama berkas disanitasi di server. Berkas asli disimpan dengan nama dari ID dokumen, bukan nama dari klien |
 | SQL injection | Semua nilai lewat parameter binding. Nama kolom di `UPDATE` diambil dari daftar putih |
 | XSS | Nama berkas dibersihkan dari markup di server. Frontend tidak memakai `dangerouslySetInnerHTML` |
-| Prompt injection | Isi dokumen diberi penanda batas, dan prompt sistem menyatakan bahwa konteks adalah data, bukan instruksi |
+| Prompt injection | Isi dokumen diberi penanda batas, prompt sistem menyatakan bahwa konteks adalah data bukan instruksi, dan setiap chunk dinilai classifier `llama-prompt-guard-2-86m` sebelum masuk prompt |
 | PDF berbahaya | Batas 10 MB, batas 3000 halaman, dan batas waktu 120 detik per dokumen |
 | Ukuran unggahan | Dibatasi tiga lapis: 16 MB di Caddy, `Content-Length` di route, lalu pembacaan bertahap |
 | Kuota penyimpanan | Maksimal 200 dokumen dan 1 GB total. Ditolak dengan 507 dan pesan yang menyebut tindakannya |
@@ -679,7 +877,8 @@ Sebelum menaruh aplikasi ini di internet, periksa daftar berikut:
 | `CORS_ORIGINS` | Domain Anda, tanpa `*` |
 | `ACCESS_PASSCODE_SHA256` | Diisi, dibuat dengan `python -m scripts.make_passcode` |
 | `API_DOCS_ENABLED` | `0`, kecuali ini demo publik |
-| `LLM_PROVIDER` | `groq` atau `ollama`, bukan `mock` |
+| `LLM_PROVIDER` | `groq`, `openai_compatible`, `ollama`, atau `sglang`; `mock` hanya untuk pengujian |
+| `AUTH_OPEN_MODE` | `0` di produksi; `1` hanya untuk demo publik tanpa passcode |
 | `TRUST_PROXY_HEADERS` | `1` kalau di balik Caddy, `0` kalau tidak |
 | `NEXT_PUBLIC_DEV_PASSCODE_HINT` | Kosong |
 
@@ -689,13 +888,13 @@ Sebelum menaruh aplikasi ini di internet, periksa daftar berikut:
 |---|---|
 | SQLite, bukan database terkelola | Satu instance tidak butuh database terpisah |
 | Penyimpanan sesi in-process, bukan Redis | Redis dibutuhkan saat banyak instance; di sini hanya satu |
-| `multilingual-e5-small`, bukan model Inggris | Model Inggris jauh lebih buruk untuk Bahasa Indonesia |
-| Ambang 0.82, bukan 0.5 | Diukur untuk model ini: teks tidak relevan pun berskor 0.72 sampai 0.81, jadi ambang rendah membuatnya lolos |
+| `multilingual-e5-base`, bukan model Inggris | Model Inggris jauh lebih buruk untuk Bahasa Indonesia |
+| Ambang 0.78 pada bukti mentah | Diukur untuk e5-base: kandidat relevan dan tidak relevan tumpang tindih, ambang tunggal tidak bisa memisahkan keduanya |
 | Jawaban tanpa konteks diberi label | Pengguna tetap mendapat jawaban, tapi tidak tertukar dengan yang bersumber dokumen |
 | Scope dokumen disimpan di sesi | Sesi yang dibuka ulang mencari di tempat yang sama tanpa perlu diingat frontend |
-| Ambang dinilai pada bukti mentah, bukan skor gabungan | Skor gabungan selalu punya nilai tertinggi 1.0, sehingga ambang tidak akan pernah menolak apa pun |
 | Proxy same-origin, bukan CORS | Cookie login hilang kalau browser dan backend berada di origin berbeda |
-| Reranking mati secara default | Mengukur dulu sebelum menyalakan: ketepatan posisi pertama naik 4/11 ke 7/11, tapi menambah 80 MB model dan latensi. Dipakai kalau kualitas lebih penting daripada kecepatan |
+| Reranking cross-encoder multilingual | Ambang tunggal tidak bisa memisahkan kandidat; menilai ulang pertanyaan+chunk bersamaan menaikkan ketepatan urutan. Bisa dimatikan (`RERANK_ENABLED=0`) di mesin ber-sumber daya terbatas |
+| Chunking per Pasal untuk dokumen hukum | Chunk berisi satu unit makna utuh dengan konteks BAB/Pasal, bukan potongan yang mulai dan berakhir di tengah kalimat |
 | Heading digabung dengan paragraf berikutnya | Chunk yang isinya hanya judul tidak bisa menjawab apa pun, dan paragraf di bawahnya kehilangan konteks |
 | Kunci kuota dari hash passcode, bukan token | Token berganti setiap login, jadi bucket ikut baru dan kuota bisa direset dengan login ulang |
 
@@ -736,3 +935,4 @@ PogungSoftwareHouseTeam (PSHT). Detail ketentuan penggunaan ada di
 
 Dependensi pihak ketiga tunduk pada lisensi masing-masing, bukan pada lisensi
 ini.
+

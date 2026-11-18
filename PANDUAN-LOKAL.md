@@ -267,6 +267,30 @@ Penjelasan dua baris itu:
   ingin jawaban yang disintesis model, ganti menjadi `groq` dan isi
   `GROQ_API_KEY` dari <https://console.groq.com/keys>.
 
+Satu hal lagi yang patut disetel sejak awal: **OCR lokal untuk PDF hasil
+pindai**. Pasang ekstra OCR sekali saja:
+
+```powershell
+pip install -e ".[ocr]"
+```
+
+Dengan `OCR_ENGINE=auto` (bawaan), halaman yang text-layer-nya tipis atau
+rusak dirender ke gambar lalu ditranskripsi PP-OCR secara lokal — tanpa API
+key dan tanpa biaya. PDF dengan text-layer bagus tetap diproses cepat tanpa
+OCR. Kalau ingin memaksa seluruh jalur tetap lokal, set `OCR_ENGINE=paddle`.
+
+Model vision dari Groq hanya dipakai sebagai penyelamat ketika keyakinan OCR
+lokal rendah. Opsional:
+
+```ini
+VISION_PROVIDER=groq
+# GROQ_API_KEY sama dengan yang dipakai LLM_PROVIDER=groq di atas.
+```
+
+Bila ekstra OCR belum dipasang dan vision juga tidak dikonfigurasi, halaman
+hasil pindai akan terindeks dengan teks minim. Semua opsi lengkapnya ada di
+`backend/.env.example`.
+
 Simpan berkasnya.
 
 #### Langkah 7: jalankan backend
