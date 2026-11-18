@@ -136,6 +136,8 @@ export interface HistoryResponse {
     not_found?: boolean;
     /** Jawaban dari pengetahuan umum model, bukan dari dokumen. */
     ungrounded?: boolean;
+    /** Jawaban dibuat dari bukti di bawah ambang normal (bukti lemah). */
+    weak_evidence?: boolean;
   }>;
 }
 

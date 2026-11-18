@@ -9,6 +9,8 @@ import type { Citation } from "@/types/api";
 
 interface CitationCardProps {
   citations: Citation[];
+  /** Judul kustom, mis. "Sumber terdekat yang ditemukan" saat jawaban tidak ditemukan. */
+  titleOverride?: string;
 }
 
 /**
@@ -17,7 +19,7 @@ interface CitationCardProps {
  * sumber adalah tautan nyata ke chunk asal di /documents/[id], bukan
  * pratinjau yang berdiri sendiri.
  */
-export function CitationCard({ citations }: CitationCardProps) {
+export function CitationCard({ citations, titleOverride }: CitationCardProps) {
   const [open, setOpen] = useState(false);
 
   if (citations.length === 0) return null;
@@ -33,9 +35,7 @@ export function CitationCard({ citations }: CitationCardProps) {
         }
       >
         <FileText className="size-3.5 shrink-0 text-brand" aria-hidden />
-        <span>
-          {citations.length} sumber ditemukan
-        </span>
+        <span>{titleOverride ?? `${citations.length} sumber ditemukan`}</span>
         <span className="ml-auto flex items-center gap-1 text-[12px] font-normal text-muted-foreground">
           Lihat sumber
           <ChevronRight
@@ -79,15 +79,30 @@ export function CitationCard({ citations }: CitationCardProps) {
 }
 
 /** Varian untuk jawaban "tidak ditemukan": menjelaskan, tidak menyalahkan. */
-export function NoAnswerNotice() {
+export function NoAnswerNotice({ suggestions }: { suggestions?: string[] }) {
   return (
     <div className="mt-3 flex items-start gap-2 rounded-md border border-warning/40 bg-warning/5 px-3 py-2.5">
       <SearchX className="mt-0.5 size-4 shrink-0 text-warning-ink" aria-hidden />
-      <p className="text-[12px] leading-relaxed text-foreground/85">
-        Sistem tidak menemukan chunk yang cukup mirip dengan pertanyaan Anda, jadi
-        jawaban tidak bisa disusun dari dokumen. Ini ditampilkan daripada
-        menebak, karena jawaban tanpa sumber berisiko menyesatkan.
-      </p>
+      <div className="text-[12px] leading-relaxed text-foreground/85">
+        <p>
+          Sistem tidak menemukan chunk yang cukup mirip dengan pertanyaan Anda,
+          jadi jawaban tidak bisa disusun dari dokumen. Ini ditampilkan daripada
+          menebak, karena jawaban tanpa sumber berisiko menyesatkan.
+        </p>
+        {suggestions && suggestions.length > 0 ? (
+          <p className="mt-2 flex flex-wrap items-center gap-1.5">
+            <span className="font-medium">Coba kata kunci:</span>
+            {suggestions.map((word) => (
+              <span
+                key={word}
+                className="rounded-full border border-warning/40 px-2 py-0.5 font-mono text-[11px]"
+              >
+                {word}
+              </span>
+            ))}
+          </p>
+        ) : null}
+      </div>
     </div>
   );
 }

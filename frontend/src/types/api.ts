@@ -32,6 +32,8 @@ export interface Chunk {
   content: string;
   /** token count opsional dari splitter */
   token_count?: number | null;
+  /** label struktur hukum (mis. "Pasal 5") bila chunking legal aktif */
+  section?: string | null;
 }
 
 /**
@@ -92,6 +94,8 @@ export interface ChatMessage {
   citations: Citation[];
   /** true bila retrieval tidak melewati similarity threshold */
   not_found?: boolean;
+  /** true bila jawaban dibuat dari bukti di bawah ambang normal */
+  weak_evidence?: boolean;
   /**
    * true bila jawaban datang dari pengetahuan umum model, bukan dari
    * dokumen. UI wajib menampilkan labelnya, termasuk saat riwayat dibuka
@@ -133,7 +137,13 @@ export type ChatStreamEvent =
   | { type: "session"; session_id: string }
   | { type: "token"; value: string }
   | { type: "citations"; value: Citation[] }
-  | { type: "not_found" }
+  /** Jawaban dibuat dari bukti di bawah ambang normal (tier bukti lemah). */
+  | { type: "weak_evidence" }
+  /**
+   * Tidak ada bukti sama sekali. `value` berisi saran kata kunci dari
+   * pertanyaan pengguna yang layak dicoba.
+   */
+  | { type: "not_found"; value?: string[] }
   | { type: "ungrounded" }
   | { type: "done"; response_time_ms: number }
   | { type: "error"; message: string; retry_after_seconds?: number };

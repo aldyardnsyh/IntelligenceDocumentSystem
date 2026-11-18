@@ -27,6 +27,24 @@ function UngroundedNotice() {
   );
 }
 
+/**
+ * Penanda jawaban dari bukti di bawah ambang normal (tier bukti lemah).
+ * Tetap bersumber dokumen dan punya sitasi, tapi kecocokannya tidak kuat,
+ * dan pengguna harus tahu itu sebelum menimbang klaimnya.
+ */
+function WeakEvidenceNotice() {
+  return (
+    <div className="mb-3 flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2.5">
+      <Info className="mt-0.5 size-4 shrink-0 text-warning-ink" aria-hidden />
+      <p className="text-[12px] leading-relaxed text-warning-ink">
+        <span className="font-medium">Bukti terbatas.</span> Tidak ada bagian
+        dokumen yang cocok kuat dengan pertanyaan ini; jawaban berikut disusun
+        dari bagian yang paling mendekati. Periksa sumbernya sebelum dipakai.
+      </p>
+    </div>
+  );
+}
+
 interface MessageBubbleProps {
   message: UiMessage;
   onRetry?: () => void;
@@ -75,9 +93,17 @@ export function MessageBubble({ message, onRetry }: MessageBubbleProps) {
           membuat pengguna memakai informasi yang tidak bisa diverifikasi.
         */}
         {message.ungrounded ? <UngroundedNotice /> : null}
+        {message.weakEvidence ? <WeakEvidenceNotice /> : null}
 
-        {message.notFound ? <NoAnswerNotice /> : null}
-        {message.citations.length > 0 ? <CitationCard citations={message.citations} /> : null}
+        {message.notFound ? <NoAnswerNotice suggestions={message.suggestions} /> : null}
+        {message.citations.length > 0 ? (
+          <CitationCard
+            citations={message.citations}
+            titleOverride={
+              message.notFound ? "Sumber terdekat yang ditemukan" : undefined
+            }
+          />
+        ) : null}
 
         {failed ? (
           <div role="alert" className="mt-3 flex flex-col items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2.5">

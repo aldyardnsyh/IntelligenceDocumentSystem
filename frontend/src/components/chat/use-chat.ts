@@ -24,6 +24,14 @@ export interface UiMessage {
    * jawabannya bersumber pada dokumennya.
    */
   ungrounded?: boolean;
+  /**
+   * Jawaban dibuat dari bukti di bawah ambang normal (tier bukti lemah).
+   * Tetap bersumber dokumen, tapi UI wajib menandainya supaya pengguna
+   * menimbang kepercayaannya sendiri.
+   */
+  weakEvidence?: boolean;
+  /** Saran kata kunci saat tidak ada bukti sama sekali. */
+  suggestions?: string[];
   state: MessageState;
   errorMessage?: string;
 }
@@ -132,6 +140,7 @@ export function useChat(
             // Kalau hilang setelah reload, jawaban lama terlihat bersumber
             // padahal tidak.
             ungrounded: message.ungrounded ?? false,
+            weakEvidence: message.weak_evidence ?? false,
             state: "done" as const,
           })),
         );
@@ -257,11 +266,13 @@ export function useChat(
             patchLastAssistant({ citations: event.value });
             break;
           case "not_found":
+            // Teks penolakan (beserta saran kata kunci) sudah di-stream oleh
+            // backend sebelum event ini; menimpa konten di sini justru
+            // menggulung balik teks yang sudah terbaca. Yang disimpan hanya
+            // saran kata kunci untuk tombol "coba kata ini".
             patchLastAssistant({
               notFound: true,
-              content:
-                "Informasi ini tidak ditemukan dalam dokumen yang diunggah. "
-                + "Coba dengan istilah yang dipakai di dalam dokumen, atau periksa daftar dokumen.",
+              suggestions: event.value ?? [],
               state: "done",
             });
             break;
@@ -269,6 +280,11 @@ export function useChat(
             // Ditandai sebelum token pertama dirender, supaya labelnya tidak
             // muncul terlambat di bawah jawaban yang sudah terbaca.
             patchLastAssistant({ ungrounded: true });
+            break;
+          case "weak_evidence":
+            // Sama seperti ungrounded: label bukti terbatas harus tiba sebelum
+            // token pertama, bukan sesudah jawabannya terbaca.
+            patchLastAssistant({ weakEvidence: true });
             break;
           case "error":
             patchLastAssistant({

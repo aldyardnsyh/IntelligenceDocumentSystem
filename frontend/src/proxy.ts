@@ -6,6 +6,16 @@ const SESSION_COOKIE = "ida_gate";
 const PUBLIC_EXACT = ["/", "/login"];
 
 /**
+ * Mode demo publik: gate dilewati, semua halaman terbuka.
+ *
+ * Diaktifkan lewat `NEXT_PUBLIC_OPEN_MODE=1` (backend juga butuh
+ * `AUTH_OPEN_MODE=1`). Tujuannya presentasi ke user tanpa passcode, bukan
+ * menghapus logika keamanan: backend tetap menerbitkan dan memeriksa sesi,
+ * dan mematikan env ini mengembalikan gate seperti semula.
+ */
+const OPEN_MODE = process.env.NEXT_PUBLIC_OPEN_MODE === "1";
+
+/**
  * Access gate di sisi server. Redirect terjadi sebelum
  * render, jadi isi /chat tidak pernah sampai ke browser tanpa sesi.
  *
@@ -17,6 +27,15 @@ const PUBLIC_EXACT = ["/", "/login"];
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const hasSession = request.cookies.has(SESSION_COOKIE);
+
+  if (OPEN_MODE) {
+    // Semua halaman terbuka. /login tetap diarahkan ke /chat supaya CTA
+    // landing (`/login?next=/chat`) mendarat langsung di aplikasi.
+    if (pathname === "/login") {
+      return NextResponse.redirect(new URL("/chat", request.url));
+    }
+    return NextResponse.next();
+  }
 
   if (PUBLIC_EXACT.some((path) => pathname === path || pathname.startsWith(`${path}/`))) {
     // Sudah punya sesi, tidak perlu melihat form login lagi.

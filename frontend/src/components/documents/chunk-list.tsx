@@ -86,6 +86,11 @@ export function ChunkList({ documentId, chunks, highlightChunkIndex }: ChunkList
                         ? `Halaman ${chunk.page_number}`
                         : "Bagian teks"}
                     </span>
+                    {chunk.section ? (
+                      <Badge variant="outline" className="shrink-0 font-medium">
+                        {chunk.section}
+                      </Badge>
+                    ) : null}
                     {isHighlighted ? (
                       <Badge variant="secondary" className="bg-brand/15 text-brand-ink">
                         Dari sitasi
