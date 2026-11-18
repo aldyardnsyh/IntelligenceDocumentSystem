@@ -38,11 +38,8 @@ export default function PublicLandingPage() {
             <span className="text-[14px] font-semibold">Intelligent Document Assistant</span>
           </span>
           <nav aria-label="Navigasi landing" className="ml-auto flex items-center gap-2">
-            <LinkButton variant="ghost" href="/login">
-              Masuk
-            </LinkButton>
             <LinkButton href="/login?next=/chat">
-              Mulai
+              Masuk &amp; mulai
               <ArrowRight className="size-4" aria-hidden />
             </LinkButton>
           </nav>
