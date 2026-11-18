@@ -68,6 +68,9 @@ class MetadataRepository(Protocol):
         page_size: int,
         search: str | None,
     ) -> tuple[list[object], int]: ...
+    def get_chunk_by_indices(
+        self, document_id: str, chunk_indices: list[int]
+    ) -> list[object]: ...
     def delete_chunks(self, document_id: str) -> None: ...
     def all_chunks(self) -> list[object]:
         """Semua chunk yang tersimpan, dengan nama dokumen.
@@ -128,7 +131,8 @@ CREATE TABLE IF NOT EXISTS chunks (
     page_number INTEGER,
     token_count INTEGER,
     char_start INTEGER NOT NULL DEFAULT 0,
-    char_end INTEGER NOT NULL DEFAULT 0
+    char_end INTEGER NOT NULL DEFAULT 0,
+    section TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_chunks_document ON chunks(document_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_index ON chunks(document_id, chunk_index);
@@ -206,6 +210,11 @@ class SqliteRepository:
             # banyak 20 id dan selalu dibaca utuh bersama sesinya, jadi tabel
             # terpisah hanya menambah join tanpa memberi keuntungan.
             connection.execute("ALTER TABLE sessions ADD COLUMN document_ids TEXT")
+        chunk_columns = {row["name"] for row in connection.execute("PRAGMA table_info(chunks)")}
+        if "section" not in chunk_columns:
+            # Label struktur hukum ("Pasal 5") untuk badge UI. Nullable: chunk
+            # lama dan chunking paragraf generik memang tidak punya label.
+            connection.execute("ALTER TABLE chunks ADD COLUMN section TEXT")
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self._path, check_same_thread=False)
@@ -277,6 +286,7 @@ class SqliteRepository:
                 chunk.token_count,
                 getattr(chunk, "char_start", 0),
                 getattr(chunk, "char_end", 0),
+                getattr(chunk, "section", None),
             )
             for chunk in chunks
         ]
@@ -286,8 +296,8 @@ class SqliteRepository:
             connection.executemany(
                 "INSERT OR REPLACE INTO chunks "
                 "(id, document_id, chunk_index, content, page_number, "
-                "token_count, char_start, char_end) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "token_count, char_start, char_end, section) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 rows,
             )
 
@@ -324,6 +334,26 @@ class SqliteRepository:
     def delete_chunks(self, document_id: str) -> None:
         with self._lock, self._connect() as connection:
             connection.execute("DELETE FROM chunks WHERE document_id = ?", (document_id,))
+
+    def get_chunk_by_indices(
+        self, document_id: str, chunk_indices: list[int]
+    ) -> list[object]:
+        """Ambil chunk tertentu berdasarkan indeksnya dalam satu dokumen.
+
+        Dipakai untuk konteks sekitar (tetangga chunk yang di-retrieve). Query
+        berbasis indeks eksplisit, bukan OFFSET, karena indeks chunk tidak
+        berurutan di tabel dan yang dicari memang posisi logisnya.
+        """
+        if not chunk_indices:
+            return []
+        placeholders = ",".join("?" for _ in chunk_indices)
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"SELECT * FROM chunks WHERE document_id = ? AND chunk_index IN ({placeholders}) "
+                "ORDER BY chunk_index ASC",  # noqa: S608 - nilai placeholder dikontrol
+                (document_id, *chunk_indices),
+            ).fetchall()
+        return [_row_to_chunk(row) for row in rows]
 
     def all_chunks(self) -> list[object]:
         """Semua chunk, digabung dengan nama dokumennya.
@@ -628,6 +658,9 @@ def _row_to_chunk(row: sqlite3.Row) -> object:
         token_count=row["token_count"],
         char_start=int(row["char_start"] or 0),
         char_end=int(row["char_end"] or 0),
+        # Kolom section ditambah belakangan; kalau ada database lama yang
+        # lolos migrasi, baca dengan guard alih-alih KeyError.
+        section=row["section"] if "section" in columns else None,
         # LEFT JOIN bisa menghasilkan NULL kalau dokumen induknya sudah
         # dihapus. Nama cadangan dipakai supaya sitasi tetap punya sumber yang
         # bisa ditampilkan, meski label aslinya tidak ada lagi.

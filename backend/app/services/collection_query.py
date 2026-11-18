@@ -12,6 +12,10 @@ Modul ini sengaja sederhana dan bisa diuji: pola kata kunci, bukan model.
 Deteksi yang salah tebak hanya mengubah cara menjawab, bukan isi jawaban,
 jadi risikonya kecil. Sebaliknya, melewatkan deteksi berarti halusinasi
 referensi lolos.
+
+Modul ini juga mendeteksi sapaan kecil (``is_smalltalk``): pertanyaan yang
+bukan tentang dokumen sama sekali, sehingga pipeline dokumen tidak perlu
+disentuh untuk menjawabnya.
 """
 
 from __future__ import annotations
@@ -65,6 +69,61 @@ def is_collection_question(question: str) -> bool:
         return False
     # Kalau ada penanda pertanyaan isi yang jelas, itu pertanyaan isi.
     return not any(marker in text for marker in _CONTENT_MARKERS)
+
+
+#: Batas panjang pertanyaan yang masih dianggap sapaan. Pertanyaan isi
+#: dokumen bisa saja dibuka "halo", tapi pertanyaan yang layak dijawab dari
+#: dokumen hampir selalu lebih panjang dari ini.
+_MAX_SMALLTALK_LEN = 90
+
+#: Sapaan dan ucapan terima kasih. Dicocokkan di AWAL pertanyaan saja:
+#: "halo" di depan adalah sapaan, "informasi halal" bukan.
+_GREETING_PREFIX = re.compile(
+    r"^(halo|hai|hi|hello|hey|hallo|selamat\s+(pagi|siang|sore|malam)"
+    r"|assalamualaikum|salam|terima\s*kasih|makasih|makasi|thanks|thank\s+you)\b",
+    re.IGNORECASE,
+)
+
+#: Pertanyaan tentang identitas dan kemampuan aplikasi. Ini tidak bisa
+#: dijawab dari dokumen mana pun, jadi jalannya beda dari pertanyaan isi.
+_CAPABILITY_PATTERNS = (
+    re.compile(r"\b(?:siapa|siapakah)\s+(?:kamu|anda|kalian)\b"),
+    re.compile(r"\b(?:kamu|anda)\s+siapa\b"),
+    re.compile(r"\bapa\s+(?:kamu|anda)\b"),
+    re.compile(r"\b(?:kamu|anda)\s+bisa\b"),
+    re.compile(r"\bapa\s+(?:yang\s+)?bisa\s+(?:kamu|anda|lo)\b"),
+    re.compile(r"\bkemampuan\s+(?:kamu|anda)\b"),
+    re.compile(r"\bcara\s+(?:pakai|memakai|gunakan|menggunakan)\b"),
+    re.compile(r"\bbantu\s+apa\b"),
+    re.compile(r"\bbisa\s+bantu\b"),
+)
+
+
+def is_smalltalk(question: str) -> bool:
+    """True kalau pertanyaannya sapaan atau tanya kemampuan, bukan isi dokumen.
+
+    Pengguna demo hampir selalu menyapa dulu: "halo", "kamu bisa apa?",
+    "terima kasih". Menyambut sapaan itu dengan penolakan robotik "tidak
+    ditemukan dalam dokumen" adalah blunder presentasi yang paling mudah
+    dicegah. Pertanyaan seperti ini tidak ada di dokumen mana pun, jadi
+    embedding dan retrieval tidak punya apa-apa untuk dikerjakan; lebih baik
+    dijawab hangat langsung tanpa menyentuh pipeline dokumen.
+
+    Pencocokan sengaja konservatif:
+
+    - Sapaan hanya dihitung kalau berada di AWAL pertanyaan. Kata yang
+      kebetulan memuat huruf yang sama di tengah kalimat bukan sapaan.
+    - Pertanyaan lebih panjang dari ``_MAX_SMALLTALK_LEN`` tidak pernah
+      dianggap sapaan, berapa pun kata sapaan yang muncul di depannya:
+      pertanyaan isi yang serius hampir selalu lebih panjang.
+    """
+    text = question.strip()
+    if not text or len(text) > _MAX_SMALLTALK_LEN:
+        return False
+    lowered = text.lower()
+    if _GREETING_PREFIX.match(lowered):
+        return True
+    return any(pattern.search(lowered) for pattern in _CAPABILITY_PATTERNS)
 
 
 #: Kata umum yang dibuang saat mencocokkan topik ke nama dokumen.

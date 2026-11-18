@@ -86,6 +86,10 @@ class ChunkResponse(BaseModel):
     page_number: int | None = None
     content: str
     token_count: int | None = None
+    #: Label struktur hukum ("Pasal 5") bila chunk berasal dari chunking
+    #: legal; None untuk chunking paragraf generik. UI menampilkannya sebagai
+    #: badge di samping nomor halaman.
+    section: str | None = None
 
 
 class ChunkPage(BaseModel):
@@ -185,6 +189,8 @@ class ChatMessageResponse(BaseModel):
     not_found: bool = False
     #: Jawaban dari pengetahuan umum, bukan dari dokumen (lihat ChatMessage).
     ungrounded: bool = False
+    #: Jawaban dari bukti di bawah ambang kelayakan (tier bukti lemah).
+    weak_evidence: bool = False
 
 
 class SessionRenameRequest(BaseModel):
@@ -242,9 +248,16 @@ class EvalRequest(BaseModel):
     bawaan). Kalau diisi, pertanyaan dataset dijalankan terhadap dokumen
     itu saja, sehingga evaluasi bisa dipakai untuk korpus sendiri, bukan
     hanya dokumen contoh.
+
+    ``dataset_path`` opsional untuk memilih berkas dataset lain di folder
+    evaluasi backend (mis. ``evaluation/dataset-perpres.json``). ``top_k``
+    opsional untuk membandingkan konfigurasi retrieval tanpa mengubah
+    pengaturan yang aktif di UI.
     """
 
     document_ids: list[str] = Field(default_factory=list, max_length=20)
+    dataset_path: str | None = Field(default=None, max_length=200)
+    top_k: int | None = Field(default=None, ge=1, le=10)
 
 
 class EvalRunResponse(BaseModel):
@@ -357,6 +370,7 @@ def chunk_to_response(chunk: Chunk) -> ChunkResponse:
         page_number=chunk.page_number,
         content=chunk.content,
         token_count=chunk.token_count,
+        section=chunk.section,
     )
 
 
@@ -380,6 +394,7 @@ def message_to_response(message: ChatMessage) -> ChatMessageResponse:
         citations=[citation_to_response(item) for item in message.citations],
         not_found=message.not_found,
         ungrounded=message.ungrounded,
+        weak_evidence=message.weak_evidence,
     )
 
 

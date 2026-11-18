@@ -174,6 +174,10 @@ class SupabaseRepository:
                 "token_count": chunk.token_count,
                 "char_start": getattr(chunk, "char_start", 0),
                 "char_end": getattr(chunk, "char_end", 0),
+                # Label struktur hukum. Kolomnya nullable juga di Postgres:
+                # instalasi lama cukup menjalankan
+                # `alter table chunks add column section text` sekali.
+                "section": getattr(chunk, "section", None),
             }
             for chunk in chunks
         ]
@@ -228,6 +232,35 @@ class SupabaseRepository:
 
     def delete_chunks(self, document_id: str) -> None:
         self._request("DELETE", "chunks", params={"document_id": f"eq.{document_id}"})
+
+    def get_chunk_by_indices(
+        self, document_id: str, chunk_indices: list[int]
+    ) -> list[object]:
+        """Chunk tertentu berdasarkan indeks, untuk konteks sekitar di prompt."""
+        from app.models.domain import Chunk  # noqa: PLC0415
+
+        if not chunk_indices:
+            return []
+        params = {
+            "document_id": f"eq.{document_id}",
+            "chunk_index": f"in.({','.join(str(i) for i in chunk_indices)})",
+            "order": "chunk_index.asc",
+        }
+        rows = self._request("GET", "chunks", params=params)
+        return [
+            Chunk(
+                id=row["id"],
+                document_id=row["document_id"],
+                chunk_index=int(row["chunk_index"]),
+                content=row["content"],
+                page_number=row.get("page_number"),
+                token_count=row.get("token_count"),
+                char_start=int(row.get("char_start") or 0),
+                char_end=int(row.get("char_end") or 0),
+                section=row.get("section"),
+            )
+            for row in rows or []
+        ]
 
     def all_chunks(self) -> list[object]:
         """Semua chunk dengan nama dokumennya, untuk rebuild indeks saat startup.

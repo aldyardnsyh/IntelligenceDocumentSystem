@@ -3,6 +3,9 @@
 Ini inti RAG-nya, dan urutannya penting:
 
 1. Cek cache.
+1b. Sapaan kecil ("halo", "kamu bisa apa?") dijawab langsung dengan prompt
+    ramah, tanpa embedding dan retrieval: pertanyaan itu tidak ada di
+    dokumen mana pun, dan penolakan robotik untuk sapaan merusak demo.
 2. Embedding pertanyaan.
 3. Retrieval hybrid (vektor + BM25).
 4. Kalau tidak ada chunk yang lolos ambang, berhenti di sini. LLM tidak
@@ -27,6 +30,7 @@ from app.core.config import Settings
 from app.models.domain import (
     ChatMessage,
     ChatSession,
+    Chunk,
     Citation,
     DocumentStatus,
     MessageRole,
@@ -39,15 +43,20 @@ from app.providers.embedding import EmbeddingProvider
 from app.repositories.sqlite_repo import MetadataRepository, new_id, utc_now
 from app.services.collection_query import (
     is_collection_question,
+    is_smalltalk,
     matches_topic,
     topic_terms,
 )
 from app.services.generation.generator import LLMChain
+from app.services.generation.injection_guard import InjectionGuard
 from app.services.generation.prompts import (
     NOT_FOUND_RESPONSE,
+    SMALLTALK_SYSTEM_PROMPT,
     UNGROUNDED_SYSTEM_PROMPT,
+    WEAK_EVIDENCE_SYSTEM_PROMPT,
     build_citations,
     build_context_prompt,
+    build_smalltalk_prompt,
     build_ungrounded_prompt,
 )
 from app.services.memory.store import (
@@ -58,12 +67,22 @@ from app.services.memory.store import (
     dict_to_message,
     message_to_dict,
 )
-from app.services.retrieval.retriever import HybridRetriever
+from app.services.retrieval.retriever import HybridRetriever, _normalized_keyword
+from app.services.retrieval.text_processing import keyword_suggestions
 from app.services.tracing import TraceContext, Tracer
 
 logger = logging.getLogger(__name__)
 
-EventType = Literal["session", "token", "citations", "not_found", "ungrounded", "done", "error"]
+EventType = Literal[
+    "session",
+    "token",
+    "citations",
+    "not_found",
+    "ungrounded",
+    "weak_evidence",
+    "done",
+    "error",
+]
 
 
 @dataclass(slots=True)
@@ -92,9 +111,13 @@ class StreamEvent:
         if self.type == "session":
             return {"type": "session", "session_id": self.session_id}
         if self.type == "not_found":
-            return {"type": "not_found"}
+            # ``value`` berisi saran kata kunci bila ada, supaya penolakan
+            # selalu disertai sesuatu yang bisa ditindaklanjuti pengguna.
+            return {"type": "not_found", "value": list(self.value or [])}
         if self.type == "ungrounded":
             return {"type": "ungrounded"}
+        if self.type == "weak_evidence":
+            return {"type": "weak_evidence"}
         if self.type == "error":
             return {
                 "type": "error",
@@ -131,6 +154,7 @@ class RagService:
         embedding: EmbeddingProvider,
         chain: LLMChain,
         tracer: Tracer | None = None,
+        guard: InjectionGuard | None = None,
     ) -> None:
         self._settings = settings
         self._repository = repository
@@ -142,6 +166,9 @@ class RagService:
         # tidak wajib menyediakan tracer. Tanpa itu, trace_id selalu None,
         # perilaku yang sama seperti tracing dimatikan.
         self._tracer = tracer
+        # Classifier anti-injection. None berarti screening tidak berjalan;
+        # keamanan bertahan pada aturan prompt, bukan hilang.
+        self._guard = guard
 
     # ------------------------------------------------------------- aksesor
     # Diekspos sebagai properti supaya test dan health check tidak perlu
@@ -187,9 +214,17 @@ class RagService:
         question: str,
         settings: RetrievalSettings,
         document_ids: list[str] | None,
+        query_embedding: list[float] | None = None,
     ) -> list[RetrievedChunk]:
-        """Ambil chunk yang relevan, sudah disaring ambang kemiripan."""
-        embedding = await asyncio.to_thread(self._embedding.embed_query, question)
+        """Ambil chunk yang relevan, sudah disaring ambang kemiripan.
+
+        ``query_embedding`` opsional: pemanggil yang sudah menghitung vektor
+        pertanyaan (misal ``answer``, supaya vektor yang sama dipakai lagi di
+        tier bukti lemah) tidak perlu memanggil model embedding dua kali.
+        """
+        embedding = query_embedding
+        if embedding is None:
+            embedding = await asyncio.to_thread(self._embedding.embed_query, question)
         return await asyncio.to_thread(
             self._retriever.retrieve,
             question,
@@ -252,16 +287,19 @@ class RagService:
             answer_text = str(cached.get("answer", ""))
             citations = [_citation_from_payload(item) for item in cached.get("citations", [])]  # type: ignore[union-attr]
             not_found = bool(cached.get("not_found", False))
+            weak_evidence = bool(cached.get("weak_evidence", False))
             elapsed = int((time.perf_counter() - started) * 1000)
 
             if session_id is None:
                 session_id = new_id("ses")
                 yield StreamEvent(type="session", session_id=session_id)
 
+            if weak_evidence:
+                yield StreamEvent(type="weak_evidence")
             for token in _slice(answer_text):
                 yield StreamEvent(type="token", value=token)
             if not_found:
-                yield StreamEvent(type="not_found")
+                yield StreamEvent(type="not_found", value=_not_found_suggestions(question))
             if citations:
                 yield StreamEvent(type="citations", value=citations)
 
@@ -276,6 +314,7 @@ class RagService:
                 trace_id=trace.trace_id,
                 document_id=document_id,
                 document_ids=document_ids,
+                weak_evidence=weak_evidence,
             )
             if self._tracer is not None:
                 await asyncio.to_thread(
@@ -290,13 +329,76 @@ class RagService:
             yield StreamEvent(type="done", response_time_ms=elapsed)
             return
 
+        # 1b. Sapaan kecil (small talk) dijawab tanpa menyentuh pipeline
+        # dokumen. Pengguna demo hampir selalu menyapa dulu ("halo", "kamu
+        # bisa apa?"); menyambutnya dengan penolakan robotik "tidak
+        # ditemukan" merusak demo, dan menjalankan embedding plus retrieval
+        # untuk sapaan hanya membuang biaya dan latensi, karena jawabannya
+        # tidak ada di dokumen mana pun. `is_smalltalk` menjaga jalur ini:
+        # pertanyaan isi dokumen tidak pernah masuk ke sini.
+        if is_smalltalk(question):
+            if session_id is None:
+                session_id = new_id("ses")
+                yield StreamEvent(type="session", session_id=session_id)
+            history = await self._load_history(session_id)
+            prompt = build_smalltalk_prompt(
+                question, history, self._settings.history_message_count
+            )
+            smalltalk_parts: list[str] = []
+            degraded = False
+            # System prompt diganti supaya model tidak terikat aturan kutipan:
+            # dengan SYSTEM_PROMPT biasa, model menjawab "tidak ditemukan"
+            # untuk sapaan, persis kegagalan yang jalur ini ada untuk
+            # mencegahnya.
+            try:
+                async for chunk in self._chain.stream(
+                    prompt, system=SMALLTALK_SYSTEM_PROMPT
+                ):
+                    if chunk.degraded:
+                        degraded = True
+                        continue
+                    smalltalk_parts.append(chunk.token)
+                    yield StreamEvent(type="token", value=chunk.token)
+            except ProviderError as exc:
+                elapsed = int((time.perf_counter() - started) * 1000)
+                message = "Layanan bahasa sedang tidak tersedia. Coba lagi sebentar lagi."
+                logger.warning("Generasi sapaan gagal: %s", exc)
+                yield StreamEvent(type="error", value=message, retry_after_seconds=30)
+                yield StreamEvent(type="done", response_time_ms=elapsed)
+                return
+
+            answer_text = "".join(smalltalk_parts).strip()
+            elapsed = int((time.perf_counter() - started) * 1000)
+            await self._persist(
+                session_id=session_id,
+                question=question,
+                answer=answer_text,
+                citations=[],
+                not_found=False,
+                elapsed=elapsed,
+                from_cache=False,
+                trace_id=trace.trace_id,
+                document_id=document_id,
+                document_ids=document_ids,
+                ungrounded=False,
+            )
+            yield StreamEvent(type="done", response_time_ms=elapsed)
+            return
+
         # 2. Retrieval. Scope dokumen (untuk chat privat per dokumen) dipetakan ke
         # filter `document_ids` di retriever, bukan dengan menyetel ulang
-        # retriever global.
+        # retriever global. Vektor pertanyaan dihitung sekali di sini dan
+        # dipakai ulang oleh tier bukti lemah di bawah.
         effective_document_ids: list[str] | None = document_ids
         if document_id:
             effective_document_ids = [document_id]
-        retrieved = await self.retrieve(question, retrieval_settings, effective_document_ids)
+        query_embedding = await asyncio.to_thread(self._embedding.embed_query, question)
+        retrieved = await self.retrieve(
+            question,
+            retrieval_settings,
+            effective_document_ids,
+            query_embedding=query_embedding,
+        )
         if self._tracer is not None:
             await asyncio.to_thread(
                 self._tracer.span_retrieval,
@@ -332,7 +434,13 @@ class RagService:
                 yield event
             return
 
-        # 4. Ambang: tidak ada chunk yang cukup mirip.
+        # 4. Screening anti-injection. Classifier menilai setiap konten yang
+        # akan masuk prompt; yang terdeteksi membawa instruksi diblokir di
+        # sini, sebelum pernah sampai ke LLM. Kalau semuanya terblokir,
+        # penanganan jatuh ke jalur "tidak ditemukan" di bawah.
+        retrieved = await self._screen_context(retrieved)
+
+        # 5. Ambang: tidak ada chunk yang cukup mirip.
         if not retrieved:
             history = await self._load_history(session_id)
 
@@ -346,6 +454,105 @@ class RagService:
             # bersitasi di riwayat. Kalau ada, konteks percakapan itu yang
             # dipakai, bukan pengetahuan umum model.
             has_grounded_history = _history_has_grounded_answer(history)
+
+            # 4a. Tier bukti lemah: gate ambang menolak semua, tapi masih ada
+            # kandidat yang menyentuh topiknya. Menolak keras di sini terasa
+            # seperti aplikasi yang tidak berguna; mengarang jauh lebih buruk.
+            # Jalan tengahnya: jawab dari kandidat terbaik dengan label
+            # "bukti terbatas", dan hanya kalau buktinya benar-benar di atas
+            # floor — di bawah floor, kandidat hampir pasti bukan tentang
+            # pertanyaan ini.
+            #
+            # Urutannya sengaja SEBELUM mode pengetahuan umum: bukti dokumen
+            # yang lemah tetap lebih bisa ditelusuri daripada pengetahuan umum
+            # model, dan SEBELUM jalur riwayat: pertanyaan lanjutan ("berapa
+            # lama itu?") tidak boleh dijawab dari kandidat samar-samar.
+            if not has_grounded_history:
+                best = await asyncio.to_thread(
+                    self._retriever.best_candidates,
+                    question,
+                    query_embedding,
+                    effective_document_ids,
+                    3,
+                )
+                bukti_terkuat = max(
+                    (
+                        max(
+                            item.vector_score,
+                            _normalized_keyword(item.keyword_score),
+                        )
+                        for item in best
+                    ),
+                    default=0.0,
+                )
+                if best and bukti_terkuat >= self._settings.weak_evidence_floor:
+                    prompt = build_context_prompt(
+                        question=question,
+                        retrieved=best,
+                        history=history,
+                        max_history=self._settings.history_message_count,
+                        neighbors=await asyncio.to_thread(
+                            self._gather_neighbors, best
+                        ),
+                        max_context_chars=self._settings.max_context_chars,
+                    )
+                    weak_parts: list[str] = []
+                    degraded_weak = False
+                    # Label dikirim sebelum token pertama, alasan sama dengan
+                    # label ungrounded: pengguna harus tahu asal jawaban sebelum
+                    # membacanya, bukan sesudah.
+                    yield StreamEvent(type="weak_evidence")
+                    try:
+                        async for chunk in self._chain.stream(
+                            prompt, system=WEAK_EVIDENCE_SYSTEM_PROMPT
+                        ):
+                            if chunk.degraded:
+                                degraded_weak = True
+                                continue
+                            weak_parts.append(chunk.token)
+                            yield StreamEvent(type="token", value=chunk.token)
+                    except ProviderError as exc:
+                        elapsed = int((time.perf_counter() - started) * 1000)
+                        logger.warning("Generasi bukti lemah gagal: %s", exc)
+                        yield StreamEvent(
+                            type="error",
+                            value="Layanan bahasa sedang tidak tersedia. Coba lagi sebentar lagi.",
+                            retry_after_seconds=30,
+                        )
+                        yield StreamEvent(type="done", response_time_ms=elapsed)
+                        return
+
+                    weak_text = _clean_answer("".join(weak_parts).strip())
+                    weak_citations = build_citations(best)
+                    elapsed = int((time.perf_counter() - started) * 1000)
+                    if weak_citations:
+                        yield StreamEvent(type="citations", value=weak_citations)
+                    if weak_text and not degraded_weak:
+                        await self._memory.set_cached(
+                            cache_id,
+                            {
+                                "answer": weak_text,
+                                "citations": [asdict(c) for c in weak_citations],
+                                "not_found": False,
+                                "weak_evidence": True,
+                            },
+                            self._settings.cache_ttl_seconds,
+                        )
+                    await self._persist(
+                        session_id=session_id,
+                        question=question,
+                        answer=weak_text,
+                        citations=weak_citations,
+                        not_found=False,
+                        elapsed=elapsed,
+                        from_cache=False,
+                        trace_id=trace.trace_id,
+                        document_id=document_id,
+                        document_ids=document_ids,
+                        weak_evidence=True,
+                    )
+                    yield StreamEvent(type="done", response_time_ms=elapsed)
+                    return
 
             if allow_ungrounded and not has_grounded_history:
                 prompt = build_ungrounded_prompt(
@@ -432,13 +639,16 @@ class RagService:
                 elapsed = int((time.perf_counter() - started) * 1000)
                 if _is_refusal(answer_text):
                     # Model menilai riwayatnya pun tidak memuat jawaban.
-                    for token in _slice(NOT_FOUND_RESPONSE):
+                    tolak = _not_found_answer(question)
+                    for token in _slice(tolak):
                         yield StreamEvent(type="token", value=token)
-                    yield StreamEvent(type="not_found")
+                    yield StreamEvent(
+                        type="not_found", value=_not_found_suggestions(question)
+                    )
                     await self._persist(
                         session_id=session_id,
                         question=question,
-                        answer=NOT_FOUND_RESPONSE,
+                        answer=tolak,
                         citations=[],
                         not_found=True,
                         elapsed=elapsed,
@@ -465,16 +675,21 @@ class RagService:
                 yield StreamEvent(type="done", response_time_ms=elapsed)
                 return
 
-            # --- gerbang anti-halusinasi: tanpa konteks, LLM tidak dipanggil
+            # --- gerbang anti-halusinasi: tanpa konteks, LLM tidak dipanggil.
+            # Penolakan tetap disertai saran kata kunci: pengguna diberi
+            # sesuatu yang bisa dicoba, bukan buntu total.
             elapsed = int((time.perf_counter() - started) * 1000)
-            for token in _slice(NOT_FOUND_RESPONSE):
+            tolak = _not_found_answer(question)
+            for token in _slice(tolak):
                 yield StreamEvent(type="token", value=token)
-            yield StreamEvent(type="not_found")
+            yield StreamEvent(
+                type="not_found", value=_not_found_suggestions(question)
+            )
 
             await self._persist(
                 session_id=session_id,
                 question=question,
-                answer=NOT_FOUND_RESPONSE,
+                answer=tolak,
                 citations=[],
                 not_found=True,
                 elapsed=elapsed,
@@ -487,7 +702,7 @@ class RagService:
                 await asyncio.to_thread(
                     self._tracer.end_trace,
                     trace,
-                    answer=NOT_FOUND_RESPONSE,
+                    answer=tolak,
                     citations=0,
                     provider_name=None,
                     from_cache=False,
@@ -503,6 +718,11 @@ class RagService:
             retrieved=retrieved,
             history=history,
             max_history=self._settings.history_message_count,
+            # Ayat dan butir sering dirujuk silang ke Pasal di sebelahnya;
+            # tanpa konteks sekitar, LLM melihat Pasal 5 tanpa tahu isi
+            # Pasal 4 dan akhirnya mengarang sambungannya.
+            neighbors=await asyncio.to_thread(self._gather_neighbors, retrieved),
+            max_context_chars=self._settings.max_context_chars,
         )
 
         # 6. Generation
@@ -546,11 +766,9 @@ class RagService:
 
         # Model bisa menyimpulkan "tidak ada di konteks" meski retrieval
         # meloloskan chunk (topiknya menyerempet tapi jawabannya tidak ada).
-        # Dalam kasus itu sitasi tidak boleh dikirim: jawabannya tidak memakai
-        # sumber itu, dan menampilkan sumber membuatnya terlihat bersumber
-        # padahal bukan, persis kebingungan yang sitasi ada untuk mencegah.
-        if _is_refusal(answer_text):
-            citations = []
+        # Sitasi tetap dikirim sebagai "sumber terdekat": mereka benar-benar
+        # lolos ambang dan pengguna bisa menilai sendiri kecocokannya.
+        # Menghapusnya diam-diam hanya membuat penolakan terasa buntu.
 
         if citations:
             yield StreamEvent(type="citations", value=citations)
@@ -566,6 +784,7 @@ class RagService:
                     # ``slots=True`` dan tidak punya ``__dict__``.
                     "citations": [asdict(citation) for citation in citations],
                     "not_found": False,
+                    "weak_evidence": False,
                 },
                 self._settings.cache_ttl_seconds,
             )
@@ -694,6 +913,77 @@ class RagService:
         )
         yield StreamEvent(type="done", response_time_ms=elapsed)
 
+    async def _screen_context(
+        self, retrieved: list[RetrievedChunk]
+    ) -> list[RetrievedChunk]:
+        """Buang chunk yang terdeteksi membawa instruksi terselubung.
+
+        Classifier 86M jauh lebih murah daripada risiko konteks yang mengarang
+        instruksi ke model generasi. Chunk yang diblokir juga hilang dari
+        sitasi: konten yang dianggap berbahaya tidak boleh tetap tampil
+        sebagai "sumber".
+        """
+        if self._guard is None or not retrieved:
+            return retrieved
+        try:
+            scores = await self._guard.screen(
+                [item.chunk.content for item in retrieved]
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("Screening injection gagal; konten lolos tanpa nilai.")
+            return retrieved
+        kept = [
+            item
+            for item, score in zip(retrieved, scores, strict=True)
+            if score is None or score < self._guard.threshold
+        ]
+        blocked = len(retrieved) - len(kept)
+        if blocked:
+            logger.warning(
+                "%d chunk diblokir prompt-guard (threshold %.2f).",
+                blocked,
+                self._guard.threshold,
+            )
+        return kept
+
+    def _gather_neighbors(
+        self, retrieved: list[RetrievedChunk]
+    ) -> dict[int, list[Chunk]]:
+        """Ambil chunk tetangga tiap hasil retrieval sebagai konteks sekitar.
+
+        Kuncinya nomor sumber (1-based, sama dengan penanda [SUMBER n] di
+        prompt), supaya tetangga menempel pada blok sumbernya. Tetangga tidak
+        ikut disitasi: mereka konteks untuk menenun jawaban, bukan bukti.
+        """
+        window = self._settings.context_window_chunks
+        if window <= 0 or not retrieved:
+            return {}
+        neighbors: dict[int, list[Chunk]] = {}
+        for sumber, item in enumerate(retrieved, start=1):
+            chunk = item.chunk
+            indices = [
+                chunk.chunk_index + offset
+                for offset in range(-window, window + 1)
+                if offset != 0 and chunk.chunk_index + offset >= 0
+            ]
+            if not indices:
+                continue
+            try:
+                found = self._repository.get_chunk_by_indices(
+                    chunk.document_id, indices
+                )
+            except Exception:  # noqa: BLE001
+                # Konteks sekitar adalah penambah kualitas, bukan kewajiban:
+                # kegagalannya tidak boleh menjatuhkan jawaban.
+                logger.debug("Gagal mengambil konteks sekitar", exc_info=True)
+                continue
+            neighbors[sumber] = [
+                candidate
+                for candidate in found
+                if getattr(candidate, "id", "") != chunk.id
+            ]
+        return neighbors
+
     async def _load_history(self, session_id: str) -> list[tuple[str, str]]:
         """Ambil N pesan terakhir."""
         stored = await self._memory.load_session(session_id)
@@ -716,6 +1006,7 @@ class RagService:
         document_id: str | None = None,
         document_ids: list[str] | None = None,
         ungrounded: bool = False,
+        weak_evidence: bool = False,
     ) -> None:
         """Simpan ke memori sesi, metadata sesi, cache, dan log."""
         now = utc_now()
@@ -744,6 +1035,7 @@ class RagService:
                     citations=citations,
                     not_found=not_found,
                     ungrounded=ungrounded,
+                    weak_evidence=weak_evidence,
                 )
             )
         )
@@ -835,31 +1127,28 @@ class RagService:
 
 
 def _clean_answer(text: str) -> str:
-    r"""Bersihkan markup dan tanda pisah yang tidak pantas di jawaban.
+    r"""Rapikan jawaban tanpa menghapus markdown yang memang disengaja.
 
-    Prompt sudah meminta model menulis ulang dengan kalimatnya sendiri, tapi
-    instruksi saja tidak cukup dapat diandalkan, terutama pada model kecil.
-    Lapisan ini memastikan pengguna tidak pernah melihat `**tebal**`, `#`
-    judul, garis `====`, atau em dash di jawaban, apa pun yang dilakukan
-    model.
+    Jawaban sekarang sengaja berformat markdown ringan (poin, tebal, sub-
+    judul) dan frontend merendernya dengan react-markdown, jadi penanda
+    format TIDAK dibuang lagi. Yang tetap dibersihkan hanya tanda pisah
+    panjang (em/en dash, hubung ganda): prompt sudah melarangnya, tapi model
+    kecil kadang tetap memakainya, dan jawaban yang penuh tanda pisah terbaca
+    seperti template, bukan seperti asisten yang sedang menjelaskan.
 
-    Sengaja hanya membuang penanda dan mengganti tanda pisah, bukan mengubah
-    kata: isi jawaban tetap apa adanya, jadi tidak ada risiko mengubah makna.
+    Sengaja tidak mengubah kata apa pun: isi jawaban tetap apa adanya, jadi
+    tidak ada risiko mengubah makna.
     """
     cleaned = text
-    # Penanda tebal/miring: **teks** -> teks, __teks__ -> teks.
-    cleaned = re.sub(r"\*\*(.+?)\*\*", r"\1", cleaned, flags=re.DOTALL)
-    cleaned = re.sub(r"__(.+?)__", r"\1", cleaned, flags=re.DOTALL)
-    # Garis pemisah dari dokumen (==== atau ----) dibuang seluruhnya.
-    cleaned = re.sub(r"^[=\-]{3,}\s*$", "", cleaned, flags=re.MULTILINE)
-    # Heading markdown di awal baris: "## Judul" -> "Judul".
-    cleaned = re.sub(r"^#{1,6}\s+", "", cleaned, flags=re.MULTILINE)
+    # Garis pemisah horizontal dari dokumen (==== atau ----) dibuang
+    # seluruhnya; markdown merendernya sebagai garis yang tidak bermakna di
+    # gelembung chat.
+    cleaned = re.sub(r"^[=\-_]{3,}\s*$", "", cleaned, flags=re.MULTILINE)
     # Em dash dan en dash diganti koma. Tanda pisah panjang adalah penanda
-    # gaya tulisan mesin, dan jawaban yang memakainya terbaca seperti
-    # template, bukan seperti asisten yang sedang menjelaskan.
+    # gaya tulisan mesin.
     cleaned = cleaned.replace(" \u2014 ", ", ").replace("\u2014", ", ")
     cleaned = cleaned.replace(" \u2013 ", ", ").replace("\u2013", ", ")
-    # Tanda hubung ganda sebagai pengganti tanda pisah juga dibuang.
+    # Tanda hubung ganda sebagai pengganti tanda pisah juga diganti.
     cleaned = re.sub(r"\s-{2,}\s", ", ", cleaned)
     # Koma beruntun dirapikan.
     cleaned = re.sub(r",\s*,", ",", cleaned)
@@ -899,6 +1188,24 @@ def _history_has_grounded_answer(history: list[tuple[str, str]]) -> bool:
 def _slice(text: str, size: int = 24) -> list[str]:
     """Potong teks jadi potongan supaya respons non-LLM tetap terasa streaming."""
     return [text[index : index + size] for index in range(0, len(text), size)] or [""]
+
+
+def _not_found_suggestions(question: str) -> list[str]:
+    """Kata kunci dari pertanyaan, untuk disertakan saat tidak ada hasil."""
+    return list(keyword_suggestions(question))
+
+
+def _not_found_answer(question: str) -> str:
+    """Teks penolakan yang disertai saran kata kunci yang bisa dicoba."""
+    saran = _not_found_suggestions(question)
+    if not saran:
+        return NOT_FOUND_RESPONSE
+    return (
+        NOT_FOUND_RESPONSE
+        + " Coba kata kunci seperti "
+        + ", ".join(f"'{kata}'" for kata in saran[:3])
+        + "."
+    )
 
 
 #: Frasa yang menandakan model menyimpulkan jawabannya tidak ada di konteks.

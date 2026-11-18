@@ -41,7 +41,7 @@ from app.dependencies import (
     get_rate_limiter,
     get_repository,
 )
-from app.models.domain import DocumentStatus
+from app.models.domain import DocumentStatus, RetrievalSettings
 from app.models.schemas import (
     AnalyticsLogsResponse,
     AnalyticsSummaryResponse,
@@ -200,27 +200,36 @@ async def verify_passcode_endpoint(
     Pesan kegagalan sengaja tidak membedakan "passcode salah" dari
     "passcode tidak terdaftar", supaya tidak ada yang bisa menebak.
     """
-    bucket = f"auth:{client_ip(request, config)}"
-    limiter: SlidingWindowLimiter = request.app.state.auth_limiter
+    # Gate dilewati untuk demo publik, semua logika sesi tetap berjalan.
+    # ``AUTH_OPEN_MODE`` ditujukan untuk demo portofolio: passcode dan rate
+    # limit auth tidak diperiksa, tapi penerbitan token di bawah tetap
+    # memakai ``SessionStore`` yang sama, sehingga sesi tetap kedaluwarsa,
+    # tetap bisa dicabut lewat logout, dan kepemilikan percakapan tetap
+    # terikat ke token yang diterbitkan. Melewati gate di sini bukan
+    # menghapus gate: mematikan env var mengembalikan pemeriksaan apa adanya.
+    if not config.auth_open_mode:
+        bucket = f"auth:{client_ip(request, config)}"
+        limiter: SlidingWindowLimiter = request.app.state.auth_limiter
 
-    if limiter.is_blocked(bucket):
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Terlalu banyak percobaan gagal.",
-            headers={"Retry-After": str(limiter.retry_after(bucket))},
-        )
+        if limiter.is_blocked(bucket):
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Terlalu banyak percobaan gagal.",
+                headers={"Retry-After": str(limiter.retry_after(bucket))},
+            )
 
-    if not verify_passcode(payload.passcode, config):
-        limiter.record(bucket)
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Passcode salah.",
-            # Sisa jendela sebenarnya, bukan konfigurasi statis: klien yang
-            # benar-benar melihat countdown harus tahu kapan bisa mencoba lagi.
-            headers={"Retry-After": str(limiter.retry_after(bucket))},
-        )
+        if not verify_passcode(payload.passcode, config):
+            limiter.record(bucket)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Passcode salah.",
+                # Sisa jendela sebenarnya, bukan konfigurasi statis: klien
+                # yang benar-benar melihat countdown harus tahu kapan bisa
+                # mencoba lagi.
+                headers={"Retry-After": str(limiter.retry_after(bucket))},
+            )
 
-    limiter.clear(bucket)
+        limiter.clear(bucket)
 
     response.set_cookie(
         SESSION_COOKIE_NAME,
@@ -424,7 +433,14 @@ async def get_document(
     return document_to_detail(
         document,
         IngestionInfo(
-            splitter="Paragraf-Kalimat-BatasKarakter",
+            # Label mengikuti strategi yang benar-benar aktif di konfigurasi:
+            # chunking legal memotong per Pasal, bukan per paragraf, dan itu
+            # informasi yang perlu terlihat di halaman detail.
+            splitter=(
+                "Struktur-Hukum-Pasal"
+                if config.legal_chunking_enabled
+                else "Paragraf-Kalimat-BatasKarakter"
+            ),
             chunk_size=config.chunk_size,
             chunk_overlap=config.chunk_overlap,
             embedding_model=config.embedding_model,
@@ -991,7 +1007,21 @@ async def run_retrieval_evaluation(
     Hasilnya disimpan ke tabel yang sama dengan RAGAS, jadi halaman analitik
     langsung terisi.
     """
-    dataset_path = Path(config.evaluation_dataset_path)
+    # Dataset bisa dipilih per request (mis. dataset-perpres.json), tapi hanya
+    # dari folder evaluasi backend: path traversal di luar itu ditolak.
+    requested_path = (
+        payload.dataset_path if payload is not None and payload.dataset_path else None
+    )
+    if requested_path:
+        base_dir = Path(config.evaluation_dataset_path).resolve().parent
+        dataset_path = (base_dir / requested_path).resolve()
+        if not str(dataset_path).startswith(str(base_dir)):
+            raise HTTPException(
+                status_code=422,
+                detail="Dataset harus berada di folder evaluasi backend.",
+            )
+    else:
+        dataset_path = Path(config.evaluation_dataset_path)
     if not dataset_path.exists():
         raise HTTPException(
             status_code=409,
@@ -1075,6 +1105,19 @@ async def run_retrieval_evaluation(
             )
 
     settings_row = await asyncio.to_thread(repository.get_settings)
+    # top_k per request untuk membandingkan konfigurasi retrieval tanpa
+    # mengubah pengaturan aktif di UI.
+    requested_top_k = (
+        payload.top_k if payload is not None and payload.top_k else None
+    )
+    eval_settings = (
+        RetrievalSettings(
+            top_k=requested_top_k,
+            similarity_threshold=settings_row.similarity_threshold,
+        )
+        if requested_top_k
+        else settings_row
+    )
     report = RetrievalEvalReport()
 
     for entry in dataset:
@@ -1082,7 +1125,7 @@ async def run_retrieval_evaluation(
         target = expected_document(entry)
         must_refuse = expects_refusal(entry)
 
-        retrieved = await rag.retrieve(question, settings_row, scoped_ids)
+        retrieved = await rag.retrieve(question, eval_settings, scoped_ids)
         names = [item.document_name for item in retrieved]
 
         # Pada mode dokumen pilihan, yang dinilai adalah "apakah retrieval

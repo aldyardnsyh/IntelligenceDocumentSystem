@@ -6,6 +6,8 @@ Fokus file ini adalah perilaku yang harus tidak bisa balik lagi:
 - Rate limit tidak boleh bisa dilewati dengan ``session_id`` acak.
 - Nama berkas dari klien disanitasi sebelum disimpan.
 - Ukuran berkas ditegakkan saat dibaca, bukan setelah memorinya terpakai.
+- Mode demo publik (``AUTH_OPEN_MODE``) hanya menurunkan gate passcode,
+  bukan menghapus logika sesi di baliknya.
 
 Test keamanan yang tidak menguji respons HTTP saja kurang berguna: yang perlu
 dikunci adalah *kenapa* penolakan terjadi, jadi sebagian besar kasus di sini
@@ -18,8 +20,10 @@ import time
 
 import pytest
 
-from app.core.security import SessionStore, owner_of_token
+from app.core.config import Settings
+from app.core.security import SessionStore, hash_passcode, owner_of_token, verify_passcode
 from app.services.ingestion.parser import ParseError, sanitize_filename
+from tests.conftest import TEST_PASSCODE
 
 
 class TestSessionOwnership:
@@ -136,3 +140,57 @@ class TestFilenameSanitation:
     def test_nama_sangat_panjang_dipotong(self) -> None:
         result = sanitize_filename("a" * 500 + ".pdf")
         assert len(result) <= 200
+
+
+class TestOpenMode:
+    """Mode demo publik (``AUTH_OPEN_MODE``).
+
+    Mode ini menurunkan gate passcode untuk demo, tapi tidak boleh
+    mengubah mekanisme sesi di baliknya: token tetap diterbitkan lewat
+    ``SessionStore`` yang sama dan ``verify_passcode`` sendiri tidak
+    disentuh sama sekali. Yang diuji di sini justru bagian yang membuat
+    mode ini aman dipakai untuk demo dan mudah dimatikan lagi.
+
+    Perilaku endpoint dan middleware-nya diuji lewat HTTP di
+    ``test_api.py``; file ini fokus pada kontrak unit di bawahnya,
+    mengikuti pembagian cakupan antar berkas test yang sudah ada.
+    """
+
+    def test_flag_dapat_dinyalakan(self) -> None:
+        assert Settings(auth_open_mode=True).auth_open_mode is True
+
+    def test_flag_default_mati(self) -> None:
+        # Nilai default harus tetap False: mode terbuka yang menyala sendiri
+        # di produksi berarti gate passcode hilang tanpa ada yang sadar.
+        assert Settings(auth_open_mode=False).auth_open_mode is False
+
+    def test_verify_passcode_tetap_menolak_tanpa_hash(self) -> None:
+        # Fungsi gate-nya tidak diubah oleh mode terbuka; bypass terjadi di
+        # level endpoint dan middleware, bukan di sini.
+        config = Settings(auth_open_mode=True, access_passcode_sha256=None)
+        assert verify_passcode("apapun", config) is False
+
+    def test_verify_passcode_tetap_menerima_hash_yang_benar(self) -> None:
+        # Konfigurasi open mode tidak merusak verifikasi normal: kalau env
+        # dimatikan, passcode yang benar harus langsung diterima lagi.
+        config = Settings(
+            auth_open_mode=True,
+            access_passcode_sha256=hash_passcode(TEST_PASSCODE),
+        )
+        assert verify_passcode(TEST_PASSCODE, config) is True
+        assert verify_passcode("apapun", config) is False
+
+    def test_session_store_issue_is_valid_roundtrip(self) -> None:
+        # Inilah jangkar open mode: token yang diterbitkan otomatis oleh
+        # middleware tetap terdaftar di SessionStore yang sama, sehingga
+        # require_session, kepemilikan percakapan, dan logout bekerja
+        # persis seperti mode normal.
+        store = SessionStore(ttl_seconds=60)
+        token = store.issue()
+        assert store.is_valid(token) is True
+
+    def test_cookie_asal_pengunjung_tidak_dianggap_sah(self) -> None:
+        # Predikat yang membuat middleware menerbitkan token baru: cookie
+        # karangan atau sisa proses lama tidak boleh lolos begitu saja.
+        store = SessionStore(ttl_seconds=60)
+        assert store.is_valid("cookie-karangan") is False

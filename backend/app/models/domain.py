@@ -67,6 +67,10 @@ class Chunk:
     char_start: int = 0
     char_end: int = 0
     document_name: str | None = None
+    #: Label struktur hukum bila chunk berasal dari chunking legal (mis.
+    #: "Pasal 5"). None untuk chunking paragraf generik. UI menampilkannya
+    #: sebagai badge di samping nomor halaman.
+    section: str | None = None
 
 
 @dataclass(slots=True)
@@ -120,6 +124,10 @@ class ChatMessage:
     #: label yang hilang setelah reload membuat jawaban lama terlihat
     #: bersumber, dan itu persis salah paham yang labelnya mencegah.
     ungrounded: bool = False
+    #: Jawaban dibuat dari bukti di bawah ambang kelayakan (tier bukti
+    #: lemah). Tetap bersumber dokumen, tapi pengguna harus tahu bahwa
+    #: kecocokannya tidak kuat, sehingga bisa menilai ulang klaimnya.
+    weak_evidence: bool = False
 
 
 @dataclass(slots=True)

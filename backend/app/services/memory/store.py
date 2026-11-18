@@ -448,6 +448,7 @@ def dict_to_message(payload: dict[str, object]) -> ChatMessage:
         citations=citations,
         not_found=bool(payload.get("not_found", False)),
         ungrounded=bool(payload.get("ungrounded", False)),
+        weak_evidence=bool(payload.get("weak_evidence", False)),
     )
 
 
