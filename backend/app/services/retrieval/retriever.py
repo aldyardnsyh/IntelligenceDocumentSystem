@@ -29,7 +29,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from app.models.domain import Chunk, RetrievedChunk
-from app.services.retrieval.text_processing import tokenize_for_search
+from app.services.retrieval.text_processing import (
+    QUERY_SYNONYMS,
+    tokenize_for_search,
+)
 from app.services.retrieval.vector_store import VectorStore
 
 if TYPE_CHECKING:
@@ -44,6 +47,20 @@ COLLECTION = "chunks"
 RRF_K = 60
 VECTOR_WEIGHT = 1.0
 KEYWORD_WEIGHT = 0.6
+
+#: Bar bukti untuk kecocokan kata kunci MURNI (skor vektor di bawah ambang).
+#:
+#: Nilai lama secara efektif sama dengan ``similarity_threshold`` (0.78 ≈
+#: skor BM25 mentah 11.6 pada saturasi 4.0) — terlalu rendah: satu-dua kata
+#: kunci yang cocok sudah cukup melewati gate dan jawaban disusun tanpa ada
+#: bukti kemiripan makna sama sekali, tanpa label apa pun. Itulah gejala
+#: "asal ada kata kuncinya, langsung dijawab".
+#:
+#: 0.85 berarti skor BM25 mentah ≈ 22.7 — kecocokan leksikal yang benar-benar
+#: spesifik (nomor klausul, istilah dokumen yang jarang). Kecocokan kata
+#: kunci di bawah bar ini TIDAK hilang: ia jatuh ke tier bukti lemah dan
+#: terjawab dengan label jujur "bukti terbatas", bukan tanpa label.
+KEYWORD_STRONG_BAR_DEFAULT = 0.85
 
 
 def tokenize(text: str) -> list[str]:
@@ -74,6 +91,10 @@ class KeywordIndex:
     doc_freqs: dict[str, Counter[str]] = None  # type: ignore[assignment]
     doc_lengths: dict[str, int] = None  # type: ignore[assignment]
     postings: dict[str, set[str]] = None  # type: ignore[assignment]
+    #: Toleransi typo: token query ≥ ``FUZZY_MIN_TOKEN_LEN`` yang tidak ada di
+    #: indeks dicocokkan ke kata indeks terdekat (edit distance ≤ 1). Mati
+    #: secara default; diaktifkan lewat ``bm25_fuzzy_enabled``.
+    enable_fuzzy: bool = False
 
     def __post_init__(self) -> None:
         if self.doc_freqs is None:
@@ -118,6 +139,50 @@ class KeywordIndex:
                 del self.postings[token]
         self.doc_lengths.pop(document_id, None)
 
+    def _query_token_weights(self, query_tokens: list[str]) -> list[tuple[str, float]]:
+        """Token query beserta bobotnya, setelah ekspansi padanan & fuzzy.
+
+        Token asli berbobot 1.0. Ekspansi (sinonim domain, kandidat fuzzy)
+        berbobot ``QUERY_EXPANSION_WEIGHT`` — kontribusinya nyata tapi selalu
+        di bawah token aslinya, supaya pertanyaan tidak "berubah topik" hanya
+        karena satu katanya salah tik.
+
+        Sinonim selalu aktif dan hanya untuk ~20 pasang istilah domain yang
+        dikalibrasi; fuzzy hanya untuk token yang tidak punya postingan sama
+        sekali (kata yang sudah ketemu tidak perlu ditebak).
+        """
+        weighted: dict[str, float] = {}
+        for token in query_tokens:
+            weighted[token] = 1.0
+            for alternative in QUERY_SYNONYMS.get(token, ()):
+                weighted.setdefault(alternative, QUERY_EXPANSION_WEIGHT)
+            if (
+                self.enable_fuzzy
+                and token not in self.postings
+                and len(token) >= FUZZY_MIN_TOKEN_LEN
+            ):
+                for near in self._fuzzy_candidates(token):
+                    weighted.setdefault(near, QUERY_EXPANSION_WEIGHT)
+        return list(weighted.items())
+
+    def _fuzzy_candidates(self, token: str) -> list[str]:
+        """Kata indeks yang paling dekat dengan token (edit distance ≤ 1).
+
+        Prefilter panjang (±1) membuat jumlah kandidat kecil, jadi pemindaian
+        kosakata penuh masih jauh lebih murah dari memanggil pustaka fuzzy.
+        Batas ``FUZZY_MAX_EXPANSIONS`` mencegah satu typo menarik setengah
+        kosakata; urutan penilaian berhenti dini pada perbedaan kedua.
+        """
+        candidates: list[str] = []
+        for word in self.postings:
+            if abs(len(word) - len(token)) > 1:
+                continue
+            if _edit_distance_within(word, token, 1):
+                candidates.append(word)
+                if len(candidates) >= FUZZY_MAX_EXPANSIONS:
+                    break
+        return candidates
+
     def search(
         self,
         query: str,
@@ -147,7 +212,7 @@ class KeywordIndex:
         k1, b = 1.5, 0.75
 
         scores: dict[str, float] = defaultdict(float)
-        for token in set(query_tokens):
+        for token, weight in self._query_token_weights(query_tokens):
             matching = self.postings.get(token)
             if not matching:
                 continue
@@ -168,7 +233,7 @@ class KeywordIndex:
                     continue
                 length = self.doc_lengths[identifier]
                 denominator = frequency + k1 * (1 - b + b * length / average_length)
-                scores[identifier] += idf * (frequency * (k1 + 1)) / denominator
+                scores[identifier] += weight * idf * (frequency * (k1 + 1)) / denominator
 
         ranked = sorted(scores.items(), key=lambda item: item[1], reverse=True)
         return ranked[:top_k]
@@ -234,6 +299,45 @@ def _normalized_keyword(score: float) -> float:
     return score / (score + BM25_SATURATION)
 
 
+#: Bobot token hasil ekspansi (sinonim/fuzzy) relatif terhadap token asli.
+QUERY_EXPANSION_WEIGHT = 0.8
+
+#: Token lebih pendek dari ini tidak di-fuzzy: typo pada kata pendek justru
+#: sering adalah kata lain yang sah ("di" vs "dari"), dan toleransinya harus
+#: lebih ketat daripada kata panjang yang salah tik jelas.
+FUZZY_MIN_TOKEN_LEN = 6
+
+#: Maksimum kata pengganti per token query. Tanpa batas, satu typo bisa
+#: menarik banyak kandidat dan skor BM25 kehilangan maknanya.
+FUZZY_MAX_EXPANSIONS = 3
+
+
+def _edit_distance_within(first: str, second: str, limit: int) -> bool:
+    """True kalau jarak edit ``first`` → ``second`` ≤ ``limit``.
+
+    Implementasi dua baris dengan henti dini: kolom di luar ``limit``
+    tidak mungkin pulih lagi, jadi pemindaian boleh berhenti lebih cepat.
+    Dipakai hanya pada pasangan yang sudah lolos prefilter panjang, jadi
+    biayanya kecil.
+    """
+    if first == second:
+        return True
+    if abs(len(first) - len(second)) > limit:
+        return False
+    previous = list(range(len(second) + 1))
+    for row, char in enumerate(first, start=1):
+        current = [row]
+        for column, other in enumerate(second, start=1):
+            substitution = previous[column - 1] + (char != other)
+            current.append(
+                min(previous[column] + 1, current[column - 1] + 1, substitution)
+            )
+        if min(current) > limit:
+            return False
+        previous = current
+    return previous[-1] <= limit
+
+
 @dataclass(slots=True)
 class IndexEntry:
     """Satu chunk yang sudah masuk indeks, lengkap dengan metadata-nya.
@@ -250,6 +354,12 @@ class IndexEntry:
     content: str
     chunk_index: int
     page_number: int | None
+    #: Penanda kualitas ekstraksi ("ok"/"low"/None). Dibawa sampai ke prompt
+    #: lewat ``_chunk_for`` agar jawaban bisa mencantumkan catatan berbahasa
+    #: awam ketika sumbernya hasil pembacaan halaman yang meragukan.
+    quality_flag: str | None = None
+    #: Badan Pasal utuh bila chunk ini pecahan Pasal panjang (small-to-big).
+    parent_text: str | None = None
 
 
 class HybridRetriever:
@@ -260,9 +370,10 @@ class HybridRetriever:
         store: VectorStore,
         reranker: Reranker | None = None,
         rerank_candidates: int = 8,
+        fuzzy_enabled: bool = False,
     ) -> None:
         self._store = store
-        self._keyword_index = KeywordIndex()
+        self._keyword_index = KeywordIndex(enable_fuzzy=fuzzy_enabled)
         self._entries: dict[str, IndexEntry] = {}
         # Opsional, supaya test dan pemanggil lama tidak perlu tahu soal
         # reranking. Kalau None, perilakunya sama seperti sebelumnya.
@@ -308,7 +419,7 @@ class HybridRetriever:
 
     def clear(self) -> None:
         """Kosongkan seluruh indeks. Dipakai test dan reset penuh."""
-        self._keyword_index = KeywordIndex()
+        self._keyword_index = KeywordIndex(enable_fuzzy=self._keyword_index.enable_fuzzy)
         self._entries = {}
 
     def remove_document(self, document_id: str) -> int:
@@ -354,23 +465,29 @@ class HybridRetriever:
         top_k: int,
         threshold: float,
         document_ids: Sequence[str] | None = None,
+        keyword_strong_bar: float = KEYWORD_STRONG_BAR_DEFAULT,
     ) -> list[RetrievedChunk]:
-        """Ambil chunk yang relevan, sudah disaring ambang kelayakan.
+        """Ambil chunk yang layak jadi **bukti kuat**.
 
         Args:
             query: Pertanyaan pengguna, dipakai untuk pencarian BM25.
             query_embedding: Vektor dari pertanyaan yang sama, dipakai untuk
                 pencarian vektor.
             top_k: Berapa banyak chunk maksimum yang dikembalikan.
-            threshold: Ambang kelayakan, diterapkan pada **bukti mentah**:
-                cosine similarity vektor dan/atau skor BM25 yang sudah
-                diskalakan. Tidak diterapkan pada skor RRF, karena skor itu
-                dinormalisasi terhadap kandidat terbaik sehingga selalu ada
-                satu bernilai 1.0. Kalau ambang dipasang di situ, ambang 0.7
-                tidak akan pernah menolak apa pun, dan sistem akan menjawab
-                dengan sumber yang tidak relevan.
+            threshold: Ambang bukti **semantik**: cosine similarity vektor
+                harus mencapainya. Tidak diterapkan pada skor RRF, karena
+                skor itu dinormalisasi terhadap kandidat terbaik sehingga
+                selalu ada satu bernilai 1.0. Kalau ambang dipasang di situ,
+                ambang 0.7 tidak akan pernah menolak apa pun.
             document_ids: Batasi hasil ke dokumen-dokumen ini saja. Kalau
                 ``None``, pencarian memakai seluruh dokumen.
+            keyword_strong_bar: Ambang bukti **leksikal murni** — kecocokan
+                kata kunci tanpa dukungan kemiripan vektor harus mencapai
+                bar ini (skala ``s/(s+k)``) untuk dianggap bukti kuat.
+                Kecocokan leksikal di bawah bar tidak ditolak keras: ia
+                jatuh ke tier bukti lemah di pemanggil dan terjawab berlabel
+                "bukti terbatas". Itulah yang memisahkan "asal ada kata
+                kuncinya, dijawab" dari "kata kuncinya benar-benar spesifik".
 
         Returns:
             Chunk yang layak, terurut dari paling relevan. List kosong berarti
@@ -424,8 +541,11 @@ class HybridRetriever:
         }
 
         results: list[RetrievedChunk] = []
+        # Kedalaman pool kandidat gate-passed: sedalam rerank_candidates bila
+        # reranker aktif (ia yang memilih top_k akhir), minimal top_k.
+        pool_size = max(top_k, self._rerank_candidates)
         # Batasi kontribusi satu dokumen. Tanpa batas ini, satu dokumen yang
-        # chunk-nya banyak bisa memenuhi seluruh jatah `top_k`, dan jawaban
+        # chunk-nya banyak bisa memenuhi seluruh jatah pool, dan jawaban
         # hanya melihat satu sumber padahal ada dokumen lain yang relevan,
         # pengguna melihat "8 sumber" yang sebenarnya dari satu berkas yang
         # sama.
@@ -433,16 +553,16 @@ class HybridRetriever:
         # Tapi cap tidak boleh menyeseki scope satu dokumen: chat privat per
         # dokumen (kasus utama) hanya punya satu dokumen, dan cap 2 membuang
         # Pasal yang benar hanya karena ia kandidat ketiga. Jatah per dokumen
-        # = pembagian rata top_k ke dokumen yang dicari, dengan lantai 2 untuk
+        # = pembagian rata pool ke dokumen yang dicari, dengan lantai 2 untuk
         # kasus multi-dokumen.
         per_document_limit = (
-            max(2, -(-top_k // len(document_ids)))
+            max(2, -(-pool_size // len(document_ids)))
             if document_ids
-            else max(2, top_k // 2)
+            else max(2, pool_size // 2)
         )
         per_document_count: dict[str, int] = {}
 
-        for chunk_id, score in sorted(
+        for chunk_id, _score in sorted(
             fused.items(), key=lambda item: item[1], reverse=True
         ):
             entry = self._entries.get(chunk_id)
@@ -458,22 +578,29 @@ class HybridRetriever:
 
             vector_score = vector_scores.get(chunk_id, 0.0)
             keyword_score = keyword_scores.get(chunk_id, 0.0)
+            keyword_evidence = _normalized_keyword(keyword_score)
 
-            # Ambang dinilai pada bukti mentah, bukan pada skor RRF. Skor RRF
-            # dinormalisasi terhadap kandidat terbaik, jadi selalu ada satu
-            # chunk bernilai 1.0 dan ambang di bawah 1.0 tidak akan pernah
+            # Gate bukti kuat dinilai pada bukti mentah, bukan pada skor RRF.
+            # Skor RRF dinormalisasi terhadap kandidat terbaik, jadi selalu ada
+            # satu chunk bernilai 1.0 dan ambang di bawah 1.0 tidak akan pernah
             # menolak apa pun.
             #
-            # Sebuah chunk layak kalau **salah satu** sumbernya cukup kuat:
-            # relevan secara leksikal saja sudah layak (nomor klausul tidak
-            # pernah mirip secara vektor), dan relevan secara semantik saja
-            # juga layak (paragraf yang benar tapi tanpa kata kunci yang
-            # sama). Menggabungkan dengan maksimum mempertahankan kedua jenis
-            # kegunaan itu, yang justru alasan retrieval hybrid ada.
-            strongest_evidence = max(
-                vector_score, _normalized_keyword(keyword_score)
-            )
-            if strongest_evidence < threshold:
+            # Dua jalur masuk, dengan dua bar yang berbeda:
+            # - **Semantik** (vektor ≥ threshold): paragraf yang benar walau
+            #   tanpa satu kata pun yang sama — itulah alasan vektor ada.
+            # - **Leksikal murni** (keyword ≥ keyword_strong_bar): nomor
+            #   klausul dan istilah spesifik yang tidak pernah mirip secara
+            #   vektor, tapi kecocokannya harus benar-benar kuat. Versi lama
+            #   memakai satu ambang untuk keduanya, sehingga dua-dua kata
+            #   kunci yang cocok sudah cukup menjawab tanpa label — persis
+            #   perilaku "asal ada kata kuncinya, langsung dijawab".
+            #
+            # Kecocokan leksikal di bawah bar sengaja TIDAK dibuang di sini:
+            # ia jatuh ke tier bukti lemah (``best_candidates`` + floor) dan
+            # terjawab dengan label jujur.
+            semantic_ok = vector_score >= threshold
+            lexical_ok = keyword_evidence >= keyword_strong_bar
+            if not (semantic_ok or lexical_ok):
                 continue
 
             metadata = metadata_by_id.get(chunk_id)
@@ -490,16 +617,26 @@ class HybridRetriever:
                     document_name=str(
                         (metadata or {}).get("document_name") or entry.document_name
                     ),
-                    # Skor yang ditampilkan ke pengguna adalah fusi, karena
-                    # itulah yang benar-benar menentukan peringkat akhir.
-                    score=score,
+                    # Skor yang ditampilkan = bukti terkuat, bukan fusi. RRF
+                    # ternormalisasi selalu 1.0 untuk kandidat terbaik, jadi
+                    # angka itu tidak bercerita seberapa mirip sumbernya;
+                    # cosine dan BM25 terskalakan keduanya rentang 0..1 yang
+                    # bisa dibandingkan langsung dengan ambang.
+                    score=max(vector_score, keyword_evidence),
                     vector_score=vector_score,
                     keyword_score=keyword_score,
                 )
             )
-            if len(results) >= top_k:
+            if len(results) >= pool_size:
                 break
 
+        # Pool dikumpulkan sedalam ``pool_size`` dulu, BUKAN langsung top_k:
+        # reranker harus menilai SEMUA kandidat gate-passed sebelum memilih
+        # top_k. Versi lama memotong di top_k sebelum rerank — cross-encoder
+        # hanya mengurutkan ulang lima kandidat teratas RRF, dan kandidat yang
+        # benar di posisi 6-7 (mis. chunk Penetapan untuk "siapa yang
+        # menandatangani") tidak pernah terlihat; setting
+        # ``rerank_candidates`` jadi tidak berfungsi untuk peringkat.
         return self._rerank(query, results, top_k)
 
     def best_candidates(
@@ -558,7 +695,7 @@ class HybridRetriever:
         # Tanpa ambang dan tanpa batas per dokumen: tujuannya memberi pemanggil
         # gambaran jujur atas apa yang paling dekat, bukan kandidat terkurasi.
         candidates: list[RetrievedChunk] = []
-        for chunk_id, score in sorted(
+        for chunk_id, _score in sorted(
             fused.items(), key=lambda item: item[1], reverse=True
         ):
             entry = self._entries.get(chunk_id)
@@ -573,7 +710,13 @@ class HybridRetriever:
                         (metadata_by_id.get(chunk_id) or {}).get("document_name")
                         or entry.document_name
                     ),
-                    score=score,
+                    # Bukti terkuat juga di sini, bukan fusi: skor yang
+                    # dibandingkan pemanggil dengan ``weak_evidence_floor``
+                    # harus punya arti yang sama dengan ambangnya.
+                    score=max(
+                        vector_scores.get(chunk_id, 0.0),
+                        _normalized_keyword(keyword_scores.get(chunk_id, 0.0)),
+                    ),
                     vector_score=vector_scores.get(chunk_id, 0.0),
                     keyword_score=keyword_scores.get(chunk_id, 0.0),
                 )
@@ -600,7 +743,9 @@ class HybridRetriever:
         kuota.
         """
         if self._reranker is None or len(results) < 2:
-            return results
+            # Tanpa reranker, urutan fusi yang dipakai — dan pool lebih dalam
+            # dari top_k harus dipotong di sini, bukan di loop pengumpulan.
+            return results[:top_k]
 
         kandidat = [item.chunk.content for item in results]
         try:
@@ -634,6 +779,8 @@ def _chunk_for(
     if metadata:
         page = metadata.get("page_number")
         token_count = metadata.get("token_count")
+        quality = metadata.get("quality_flag")
+        parent = metadata.get("parent_text")
         return _Chunk(
             id=chunk_id,
             document_id=str(metadata.get("document_id", entry.document_id)),
@@ -645,6 +792,8 @@ def _chunk_for(
             token_count=(
                 int(token_count) if isinstance(token_count, int | float) else None
             ),
+            quality_flag=str(quality) if quality else None,
+            parent_text=str(parent) if parent else entry.parent_text,
         )
 
     return _Chunk(
@@ -653,4 +802,6 @@ def _chunk_for(
         chunk_index=entry.chunk_index,
         content=entry.content,
         page_number=entry.page_number,
+        quality_flag=entry.quality_flag,
+        parent_text=entry.parent_text,
     )

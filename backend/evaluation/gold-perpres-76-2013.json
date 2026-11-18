@@ -1,0 +1,686 @@
+{
+  "metadata": {
+    "jenis_peraturan": "Peraturan Presiden Republik Indonesia",
+    "nomor": 76,
+    "tahun": 2013,
+    "judul": "Pengelolaan Pengaduan Pelayanan Publik",
+    "judul_lengkap": "PERATURAN PRESIDEN REPUBLIK INDONESIA NOMOR 76 TAHUN 2013 TENTANG PENGELOLAAN PENGADUAN PELAYANAN PUBLIK",
+    "ditetapkan_tanggal": "2013-12-06",
+    "ditetapkan_di": "Jakarta",
+    "diundangkan_tanggal": "2013-12-06",
+    "diundangkan_di": "Jakarta",
+    "lembaran_negara": "Lembaran Negara Republik Indonesia Tahun 2013 Nomor 191",
+    "mulai_berlaku": "pada tanggal diundangkan",
+    "jumlah_halaman": 14,
+    "jumlah_bab": 3,
+    "jumlah_pasal": 21,
+    "bahasa": "id",
+    "memuat_penjelasan": false
+  },
+  "pembukaan": {
+    "frasa_pembuka": "DENGAN RAHMAT TUHAN YANG MAHA ESA",
+    "pejabat_penetap": "PRESIDEN REPUBLIK INDONESIA",
+    "halaman": [1, 2],
+    "menimbang": [
+      {
+        "kode": "a",
+        "teks": "bahwa sesuai dengan ketentuan Pasal 36 dan Pasal 37 Undang-Undang Nomor 25 Tahun 2009 tentang Pelayanan Publik diwajibkan bagi penyelenggara pelayanan publik untuk menyediakan sarana pengaduan dan menugaskan Pelaksana yang kompeten dalam pengelolaan pengaduan;"
+      },
+      {
+        "kode": "b",
+        "teks": "bahwa pembentukan sarana pengaduan dan penugasan kepada pengelola pengaduan pelayanan publik bertujuan untuk memenuhi kebutuhan masyarakat dalam memperoleh pelayanan publik yang berkualitas, wajar, dan adil;"
+      },
+      {
+        "kode": "c",
+        "teks": "bahwa berdasarkan pertimbangan sebagaimana dimaksud dalam huruf a dan b, perlu menetapkan Peraturan Presiden tentang Pengelolaan Pengaduan Pelayanan Publik;"
+      }
+    ],
+    "mengingat": [
+      {
+        "nomor": 1,
+        "teks": "Pasal 4 ayat (1) Undang-Undang Dasar Negara Republik Indonesia Tahun 1945;"
+      },
+      {
+        "nomor": 2,
+        "teks": "Undang-Undang Nomor 32 Tahun 2004 tentang Pemerintahan Daerah (Lembaran Negara Republik Indonesia Tahun 2004 Nomor 125, Tambahan Lembaran Negara Republik Indonesia Nomor 4437) sebagaimana telah dua kali diubah, terakhir dengan Undang-Undang Nomor 12 Tahun 2008 tentang Pemerintah Daerah (Lembaran Negara Republik Indonesia Tahun 2008 Nomor 59, Tambahan Lembaran Negara Republik Indonesia Nomor 4844);"
+      },
+      {
+        "nomor": 3,
+        "teks": "Undang-Undang Nomor 37 Tahun 2008 tentang Ombudsman Republik Indonesia (Lembaran Negara Republik Indonesia Tahun 2008 Nomor 139, Tambahan Lembaran Negara Republik Indonesia Nomor 4899);"
+      },
+      {
+        "nomor": 4,
+        "teks": "Undang-Undang Nomor 25 Tahun 2009 tentang Pelayanan Publik (Lembaran Negara Republik Indonesia Tahun 2009 Nomor 112, Tambahan Lembaran Negara Republik Indonesia Nomor 5038);"
+      },
+      {
+        "nomor": 5,
+        "teks": "Peraturan Pemerintah Nomor 96 Tahun 2012 tentang Pelaksanaan Undang-Undang Nomor 25 tahun 2009 tentang Pelayanan Publik (Lembaran Negara Republik Indonesia Tahun 2012 Nomor 215, Tambahan Lembaran Negara Republik Indonesia Nomor 5357);"
+      }
+    ],
+    "memutuskan": {
+      "kata_kunci": "MEMUTUSKAN",
+      "menetapkan": "PERATURAN PRESIDEN TENTANG PENGELOLAAN PENGADUAN PELAYANAN PUBLIK."
+    }
+  },
+  "batang_tubuh": [
+    {
+      "bab": "I",
+      "judul_bab": "KETENTUAN UMUM",
+      "bagian": null,
+      "judul_bagian": null,
+      "nomor_pasal": 1,
+      "halaman": [2, 3, 4],
+      "pengantar": "Dalam Peraturan Presiden ini yang dimaksud dengan:",
+      "teks": null,
+      "ayat": [],
+      "butir": [
+        {
+          "kode": "1",
+          "teks": "Pelayanan publik adalah kegiatan atau rangkaian kegiatan dalam rangka pemenuhan kebutuhan pelayanan sesuai dengan peraturan perundang-undangan bagi setiap warga Negara dan penduduk atas barang, jasa, dan/atau pelayanan administratif yang disediakan oleh penyelenggara pelayanan publik."
+        },
+        {
+          "kode": "2",
+          "teks": "Penyelenggara pelayanan publik yang selanjutnya disebut Penyelenggara adalah setiap institusi penyelenggara negara, korporasi, lembaga independen yang dibentuk berdasarkan undang-undang untuk kegiatan pelayanan publik, dan badan hukum lain yang dibentuk semata-mata untuk kegiatan pelayanan publik."
+        },
+        {
+          "kode": "3",
+          "teks": "Organisasi penyelenggara pelayanan publik yang selanjutnya disebut Organisasi Penyelenggara adalah satuan kerja penyelenggara pelayanan publik yang berada di lingkungan institusi penyelenggara negara, korporasi, lembaga independen yang dibentuk berdasarkan undang-undang untuk kegiatan pelayanan publik, dan badan hukum lain yang dibentuk semata-mata untuk kegiatan pelayanan publik."
+        },
+        {
+          "kode": "4",
+          "teks": "Pelaksana pelayanan publik yang selanjutnya disebut Pelaksana adalah pejabat, pegawai, petugas, dan setiap orang yang bekerja di dalam organisasi penyelenggara yang bertugas melaksanakan tindakan atau serangkaian tindakan pelayanan publik."
+        },
+        {
+          "kode": "5",
+          "teks": "Pengelolaan pengaduan adalah kegiatan penanganan pengaduan sesuai dengan mekanisme dan tata cara pengelolaan pengaduan."
+        },
+        {
+          "kode": "6",
+          "teks": "Pengelola pengaduan pelayanan publik yang selanjutnya disebut Pengelola adalah pejabat, pegawai, atau orang yang ditugaskan oleh penyelenggara untuk mengelola pengaduan masyarakat pada setiap penyelenggara pelayanan publik."
+        },
+        {
+          "kode": "7",
+          "teks": "Pengadu adalah seluruh pihak baik warga negara maupun penduduk baik orang perseorangan, kelompok maupun badan hukum yang menyampaikan pengaduan kepada pengelola pengaduan pelayanan publik."
+        },
+        {
+          "kode": "8",
+          "teks": "Pengaduan adalah penyampaian keluhan yang disampaikan pengadu kepada pengelola pengaduan pelayanan publik atas pelayanan pelaksana yang tidak sesuai dengan standar pelayanan, atau pengabaian kewajiban dan/atau pelanggaran larangan oleh penyelenggara."
+        },
+        {
+          "kode": "9",
+          "teks": "Standar pelayanan adalah tolok ukur yang dipergunakan sebagai pedoman penyelenggaraan pelayanan dan acuan penilaian kualitas pelayanan sebagai kewajiban dan janji penyelengara kepada masyarakat dalam rangka pelayanan yang berkualitas, cepat, mudah, terjangkau, dan terukur."
+        },
+        {
+          "kode": "10",
+          "teks": "Sarana pengaduan adalah tempat atau ruangan dan segala kelengkapannya yang disediakan secara khusus untuk menerima pengaduan dari pengadu atau penerima pelayanan."
+        },
+        {
+          "kode": "11",
+          "teks": "Menteri adalah menteri yang bertanggung jawab di bidang pendayagunaan aparatur negara reformasi birokrasi."
+        }
+      ]
+    },
+    {
+      "bab": "II",
+      "judul_bab": "PENGELOLAAN PENGADUAN",
+      "bagian": "Kesatu",
+      "judul_bagian": "Hak Pengadu dan Kewajiban Penyelenggara",
+      "nomor_pasal": 2,
+      "halaman": [5],
+      "pengantar": null,
+      "teks": null,
+      "ayat": [
+        {
+          "nomor": 1,
+          "pengantar": null,
+          "teks": "Pengadu mempunyai hak untuk menyampaikan pengaduan atas pelayanan pelaksana yang tidak sesuai dengan standar pelayanan atau pengabaian kewajiban dan/atau pelanggaran larangan oleh penyelenggara.",
+          "butir": []
+        },
+        {
+          "nomor": 2,
+          "pengantar": "Dalam pengelolaan pengaduan, penyelenggara wajib:",
+          "teks": null,
+          "butir": [
+            { "kode": "a", "teks": "mengumumkan nama dan alamat kantor penanggung jawab pengelola pengaduan;" },
+            { "kode": "b", "teks": "mensosialisasikan mekanisme dan prosedur pengelolaan pengaduan;" },
+            { "kode": "c", "teks": "menerima, menanggapi, memproses, dan menyelesaikan setiap pengaduan;" },
+            { "kode": "d", "teks": "menyalurkan pengaduan yang bukan kewenangannya kepada penyelenggara lain yang berwenang;" },
+            { "kode": "e", "teks": "melakukan pencatatan dan pelaporan pengelolaan pengaduan; dan" },
+            { "kode": "f", "teks": "melakukan pemantauan dan evaluasi atas pengelolaan pengaduan." }
+          ]
+        }
+      ],
+      "butir": []
+    },
+    {
+      "bab": "II",
+      "judul_bab": "PENGELOLAAN PENGADUAN",
+      "bagian": "Kedua",
+      "judul_bagian": "Sarana Pengaduan",
+      "nomor_pasal": 3,
+      "halaman": [5, 6],
+      "pengantar": null,
+      "teks": null,
+      "ayat": [
+        {
+          "nomor": 1,
+          "pengantar": null,
+          "teks": "Setiap penyelenggara wajib menyediakan sarana pengaduan untuk mengelola pengaduan pelayanan publik.",
+          "butir": []
+        },
+        {
+          "nomor": 2,
+          "pengantar": null,
+          "teks": "Penyediaan sarana pengaduan sebagaimana dimaksud pada ayat (1) memperhatikan kepentingan kelompok rentan atau berkebutuhan khusus.",
+          "butir": []
+        }
+      ],
+      "butir": []
+    },
+    {
+      "bab": "II",
+      "judul_bab": "PENGELOLAAN PENGADUAN",
+      "bagian": "Kedua",
+      "judul_bagian": "Sarana Pengaduan",
+      "nomor_pasal": 4,
+      "halaman": [6],
+      "pengantar": null,
+      "teks": "Pada setiap sarana pengaduan harus tersedia informasi tentang mekanisme atau tata cara pengaduan secara langsung, tidak langsung, dan/atau elektronik yang mudah diperoleh dan dipahami oleh penerima pelayanan.",
+      "ayat": [],
+      "butir": []
+    },
+    {
+      "bab": "II",
+      "judul_bab": "PENGELOLAAN PENGADUAN",
+      "bagian": "Kedua",
+      "judul_bagian": "Sarana Pengaduan",
+      "nomor_pasal": 5,
+      "halaman": [6],
+      "pengantar": null,
+      "teks": null,
+      "ayat": [
+        {
+          "nomor": 1,
+          "pengantar": "Penyelenggara wajib menyediakan formulir pengaduan yang memuat sekurang-kurangnya:",
+          "teks": null,
+          "butir": [
+            { "kode": "a", "teks": "identitas pengadu yang terdiri atas nama dan alamat lengkap;" },
+            { "kode": "b", "teks": "uraian keluhan atas pelayanan; dan" },
+            { "kode": "c", "teks": "tempat, waktu penyampaian, dan tanda tangan." }
+          ]
+        },
+        {
+          "nomor": 2,
+          "pengantar": null,
+          "teks": "Formulir sebagaimana dimaksud pada ayat (1) digunakan untuk pengaduan yang disampaikan secara langsung.",
+          "butir": []
+        },
+        {
+          "nomor": 3,
+          "pengantar": null,
+          "teks": "Penyelenggara wajib menyediakan kotak pengaduan untuk pengaduan yang disampaikan secara tidak langsung.",
+          "butir": []
+        },
+        {
+          "nomor": 4,
+          "pengantar": null,
+          "teks": "Penyelenggara dapat menyediakan media untuk pengaduan yang disampaikan secara elektronik antara lain surat elektronik, pesan layanan singkat, dan telepon.",
+          "butir": []
+        }
+      ],
+      "butir": []
+    },
+    {
+      "bab": "II",
+      "judul_bab": "PENGELOLAAN PENGADUAN",
+      "bagian": "Kedua",
+      "judul_bagian": "Sarana Pengaduan",
+      "nomor_pasal": 6,
+      "halaman": [6, 7],
+      "pengantar": null,
+      "teks": null,
+      "ayat": [
+        {
+          "nomor": 1,
+          "pengantar": null,
+          "teks": "Formulir sebagaimana dimaksud dalam Pasal 5 ayat (1) wajib diisi oleh pengadu.",
+          "butir": []
+        },
+        {
+          "nomor": 2,
+          "pengantar": null,
+          "teks": "Dalam hal pengadu tidak mampu menulis dan/atau membaca, pengelola wajib membantu mengisi formulir.",
+          "butir": []
+        }
+      ],
+      "butir": []
+    },
+    {
+      "bab": "II",
+      "judul_bab": "PENGELOLAAN PENGADUAN",
+      "bagian": "Ketiga",
+      "judul_bagian": "Pengelola",
+      "nomor_pasal": 7,
+      "halaman": [7],
+      "pengantar": null,
+      "teks": null,
+      "ayat": [
+        {
+          "nomor": 1,
+          "pengantar": null,
+          "teks": "Setiap penyelenggara wajib memberi tugas kepada pengelola yang kompeten untuk melaksanakan fungsi pengelolaan pengaduan.",
+          "butir": []
+        },
+        {
+          "nomor": 2,
+          "pengantar": null,
+          "teks": "Pengelola sebagaimana dimaksud pada ayat (1) berasal dari lingkungan penyelenggara yang diangkat sesuai dengan ketentuan peraturan perundang-undangan.",
+          "butir": []
+        },
+        {
+          "nomor": 3,
+          "pengantar": null,
+          "teks": "Pengelola sebagaimana dimaksud pada ayat (2) merupakan pejabat struktural atau fungsional yang memiliki kompetensi sesuai dengan ketentuan peraturan perundang-undangan.",
+          "butir": []
+        },
+        {
+          "nomor": 4,
+          "pengantar": null,
+          "teks": "Dalam hal penyelenggara merupakan korporasi atau badan hukum lain, jabatan pengelola sebagaimana dimaksud pada ayat (2) dilaksanakan sesuai dengan ketentuan peraturan perundang-undangan.",
+          "butir": []
+        },
+        {
+          "nomor": 5,
+          "pengantar": null,
+          "teks": "Penyelenggara wajib melakukan pembinaan terhadap pengelola.",
+          "butir": []
+        }
+      ],
+      "butir": []
+    },
+    {
+      "bab": "II",
+      "judul_bab": "PENGELOLAAN PENGADUAN",
+      "bagian": "Keempat",
+      "judul_bagian": "Mekanisme Pengelolaan Pengaduan",
+      "nomor_pasal": 8,
+      "halaman": [7, 8],
+      "pengantar": null,
+      "teks": null,
+      "ayat": [
+        {
+          "nomor": 1,
+          "pengantar": null,
+          "teks": "Penyelenggara wajib menyusun mekanisme dan tata cara pengelolaan pengaduan.",
+          "butir": []
+        },
+        {
+          "nomor": 2,
+          "pengantar": "Mekanisme dan tata cara pengelolaan pengaduan sebagaimana dimaksud pada ayat (1) meliputi:",
+          "teks": null,
+          "butir": [
+            { "kode": "a", "teks": "penerimaan, terdiri dari pemeriksaan kelengkapan dokumen pengaduan dan pencatatan serta pemberian tanggapan kepada pengadu." },
+            { "kode": "b", "teks": "penelaahan dan pengklasifikasian, terdiri dari identifikasi masalah, pemeriksaan substansi pengaduan, klarifikasi, evaluasi bukti, dan seleksi." },
+            { "kode": "c", "teks": "penyaluran pengaduan yaitu meneruskan pengaduan kepada penyelenggara lain yang berwenang, dalam hal substansi pengaduan tidak menjadi kewenangannya." },
+            { "kode": "d", "teks": "penyelesaian pengaduan, terdiri dari penyampaian saran penyelesaian kepada pejabat terkait di lingkungan penyelenggara, pemantauan, pemberian informasi kepada pengadu, pelaporan tindak lanjut, dan pengarsipan." }
+          ]
+        },
+        {
+          "nomor": 3,
+          "pengantar": null,
+          "teks": "Mekanisme dan tata cara pengelolaan pengaduan sebagaimana dimaksud pada ayat (2) disusun dengan memperhatikan kelompok rentan atau berkebutuhan khusus.",
+          "butir": []
+        },
+        {
+          "nomor": 4,
+          "pengantar": null,
+          "teks": "Penyelesaian pengaduan dan tindakan korektif harus terbuka bagi publik dan diinformasikan melalui Sistem Informasi Pelayanan Publik pada setiap penyelenggara.",
+          "butir": []
+        }
+      ],
+      "butir": []
+    },
+    {
+      "bab": "II",
+      "judul_bab": "PENGELOLAAN PENGADUAN",
+      "bagian": "Kelima",
+      "judul_bagian": "Pelaporan, Pemantauan, dan Evaluasi",
+      "nomor_pasal": 9,
+      "halaman": [8, 9],
+      "pengantar": null,
+      "teks": null,
+      "ayat": [
+        {
+          "nomor": 1,
+          "pengantar": null,
+          "teks": "Pengelola wajib menyusun dan melaporkan pengelolaan pengaduan kepada penyelenggara secara berkala.",
+          "butir": []
+        },
+        {
+          "nomor": 2,
+          "pengantar": null,
+          "teks": "Laporan pengelolaan pengaduan sebagaimana dimaksud pada ayat (1) meliputi materi dan kategori pengaduan, waktu penerimaan, status penyelesaian, hasil penanganan, serta tanggapan pengadu.",
+          "butir": []
+        }
+      ],
+      "butir": []
+    },
+    {
+      "bab": "II",
+      "judul_bab": "PENGELOLAAN PENGADUAN",
+      "bagian": "Kelima",
+      "judul_bagian": "Pelaporan, Pemantauan, dan Evaluasi",
+      "nomor_pasal": 10,
+      "halaman": [9],
+      "pengantar": null,
+      "teks": null,
+      "ayat": [
+        {
+          "nomor": 1,
+          "pengantar": null,
+          "teks": "Penyelenggara wajib melakukan pemantauan dan evaluasi terhadap pengelolaan pengaduan secara berkala sekurang-kurangnya jumlah dan jenis pengaduan yang diterima, penyebab pengaduan, serta penyelesaian terhadap pengaduan.",
+          "butir": []
+        },
+        {
+          "nomor": 2,
+          "pengantar": null,
+          "teks": "Hasil pemantauan dan evaluasi wajib ditindaklanjuti oleh penyelenggara untuk peningkatan penyelenggaraan pelayanan publik.",
+          "butir": []
+        }
+      ],
+      "butir": []
+    },
+    {
+      "bab": "II",
+      "judul_bab": "PENGELOLAAN PENGADUAN",
+      "bagian": "Keenam",
+      "judul_bagian": "Penyelesaian Pengaduan",
+      "nomor_pasal": 11,
+      "halaman": [9],
+      "pengantar": null,
+      "teks": null,
+      "ayat": [
+        {
+          "nomor": 1,
+          "pengantar": null,
+          "teks": "Penyelesaian pengaduan harus dilaksanakan secara cepat, tepat, tertib, tuntas, dan dapat dipertanggungjawabkan.",
+          "butir": []
+        },
+        {
+          "nomor": 2,
+          "pengantar": null,
+          "teks": "Penyelenggara wajib menunjuk pelaksana yang bertanggung jawab atas pelaksanaan tindak lanjut pengaduan yang diterima di lingkungan kerjanya.",
+          "butir": []
+        }
+      ],
+      "butir": []
+    },
+    {
+      "bab": "II",
+      "judul_bab": "PENGELOLAAN PENGADUAN",
+      "bagian": "Keenam",
+      "judul_bagian": "Penyelesaian Pengaduan",
+      "nomor_pasal": 12,
+      "halaman": [9, 10],
+      "pengantar": null,
+      "teks": null,
+      "ayat": [
+        {
+          "nomor": 1,
+          "pengantar": null,
+          "teks": "Pengaduan dapat dilakukan oleh setiap orang yang dirugikan atau pihak lain yang menerima kuasa untuk mewakilinya.",
+          "butir": []
+        },
+        {
+          "nomor": 2,
+          "pengantar": null,
+          "teks": "Pengaduan sebagaimana dimaksud pada ayat (1) dilakukan paling lambat 30 (tiga puluh) hari sejak pengadu menerima layanan.",
+          "butir": []
+        },
+        {
+          "nomor": 3,
+          "pengantar": null,
+          "teks": "Penyelenggara wajib menyelesaikan setiap pengaduan paling lambat 60 (enam puluh) hari sejak berkas pengaduan dinyatakan lengkap.",
+          "butir": []
+        }
+      ],
+      "butir": []
+    },
+    {
+      "bab": "II",
+      "judul_bab": "PENGELOLAAN PENGADUAN",
+      "bagian": "Ketujuh",
+      "judul_bagian": "Kewajiban dan Larangan Bagi Pengelola",
+      "nomor_pasal": 13,
+      "halaman": [10],
+      "pengantar": "Pengelola wajib memberikan pelayanan dengan:",
+      "teks": null,
+      "ayat": [],
+      "butir": [
+        { "kode": "a", "teks": "empati, hormat dan santun, tanpa pamrih, dan tanpa unsur pemaksaan;" },
+        { "kode": "b", "teks": "cepat, tepat, terbuka, adil, tidak diskriminatif, dan tidak memungut biaya;" },
+        { "kode": "c", "teks": "menjamin kerahasiaan identitas pelapor sesuai dengan ketentuan peraturan perundang-undangan;" },
+        { "kode": "d", "teks": "memberikan penjelasan secara transparan tentang perkembangan proses pengaduan yang ditangani;" },
+        { "kode": "e", "teks": "mengedepankan prinsip profesionalitas dan independensi dalam mengelola pengaduan; dan" },
+        { "kode": "f", "teks": "memperhatikan kelompok rentan dan berkebutuhan khusus." }
+      ]
+    },
+    {
+      "bab": "II",
+      "judul_bab": "PENGELOLAAN PENGADUAN",
+      "bagian": "Ketujuh",
+      "judul_bagian": "Kewajiban dan Larangan Bagi Pengelola",
+      "nomor_pasal": 14,
+      "halaman": [10, 11],
+      "pengantar": "Pengelola dilarang:",
+      "teks": null,
+      "ayat": [],
+      "butir": [
+        { "kode": "a", "teks": "menggunakan fasilitas sarana prasarana pengaduan untuk kepentingan pribadi atau kelompok; dan" },
+        { "kode": "b", "teks": "menerima imbalan dalam bentuk apapun untuk kegiatan yang berkaitan dengan pengelolaan pengaduan." }
+      ]
+    },
+    {
+      "bab": "II",
+      "judul_bab": "PENGELOLAAN PENGADUAN",
+      "bagian": "Kedelapan",
+      "judul_bagian": "Perlindungan Pengaduan",
+      "nomor_pasal": 15,
+      "halaman": [11],
+      "pengantar": null,
+      "teks": null,
+      "ayat": [
+        {
+          "nomor": 1,
+          "pengantar": null,
+          "teks": "Dalam hal diperlukan atau pengadu meminta perlindungan, pimpinan penyelenggara wajib memberikan perlindungan kepada pengadu selama proses pengelolaan pengaduan.",
+          "butir": []
+        },
+        {
+          "nomor": 2,
+          "pengantar": null,
+          "teks": "Perlindungan sebagaimana dimaksud pada ayat (1) dapat berupa jaminan kerahasiaan identitas pengadu.",
+          "butir": []
+        }
+      ],
+      "butir": []
+    },
+    {
+      "bab": "II",
+      "judul_bab": "PENGELOLAAN PENGADUAN",
+      "bagian": "Kedelapan",
+      "judul_bagian": "Perlindungan Pengaduan",
+      "nomor_pasal": 16,
+      "halaman": [11],
+      "pengantar": null,
+      "teks": "Penyelenggara atau atasan dari pihak yang diadukan wajib memperlakukan pihak yang diadukan sebagai pihak yang tidak bersalah sampai proses pembuktian selesai.",
+      "ayat": [],
+      "butir": []
+    },
+    {
+      "bab": "II",
+      "judul_bab": "PENGELOLAAN PENGADUAN",
+      "bagian": "Kesembilan",
+      "judul_bagian": "Penilaian Kinerja",
+      "nomor_pasal": 17,
+      "halaman": [11, 12],
+      "pengantar": null,
+      "teks": null,
+      "ayat": [
+        {
+          "nomor": 1,
+          "pengantar": null,
+          "teks": "Penyelenggara wajib melakukan penilaian kinerja atas pengelolaan pengaduan pelayanan publik.",
+          "butir": []
+        },
+        {
+          "nomor": 2,
+          "pengantar": null,
+          "teks": "Penilaian kinerja sebagaimana dimaksud pada ayat (1) dilakukan dengan menggunakan indikator kinerja berdasarkan mekanisme dan tata cara pengelolaan pengaduan sebagaimana dimaksud dalam Pasal 8.",
+          "butir": []
+        },
+        {
+          "nomor": 3,
+          "pengantar": null,
+          "teks": "Penilaian kinerja pengelolaan pengaduan dilaksanakan dalam rangka penilaian kinerja pelayanan publik secara menyeluruh.",
+          "butir": []
+        }
+      ],
+      "butir": []
+    },
+    {
+      "bab": "II",
+      "judul_bab": "PENGELOLAAN PENGADUAN",
+      "bagian": "Kesepuluh",
+      "judul_bagian": "Sistem Pengelolaan Pengaduan Pelayanan Publik Nasional",
+      "nomor_pasal": 18,
+      "halaman": [12],
+      "pengantar": null,
+      "teks": null,
+      "ayat": [
+        {
+          "nomor": 1,
+          "pengantar": null,
+          "teks": "Menteri melakukan koordinasi pengelolaan pengaduan secara nasional.",
+          "butir": []
+        },
+        {
+          "nomor": 2,
+          "pengantar": null,
+          "teks": "Pengelolaan pengaduan secara nasional merupakan integrasi pengelolaan pengaduan secara berjenjang pada setiap penyelenggara dalam kerangka sistem informasi pelayanan publik.",
+          "butir": []
+        },
+        {
+          "nomor": 3,
+          "pengantar": null,
+          "teks": "Ketentuan mengenai penyelenggaraan pengelolaan pengaduan secara nasional dan integrasi pengelolaan pengaduan secara berjenjang sebagaimana dimaksud pada ayat (1) dan ayat (2) diatur dengan Peraturan Menteri.",
+          "butir": []
+        }
+      ],
+      "butir": []
+    },
+    {
+      "bab": "II",
+      "judul_bab": "PENGELOLAAN PENGADUAN",
+      "bagian": "Kesebelas",
+      "judul_bagian": "Pembinaan dan Pengawasan",
+      "nomor_pasal": 19,
+      "halaman": [12, 13],
+      "pengantar": null,
+      "teks": null,
+      "ayat": [
+        {
+          "nomor": 1,
+          "pengantar": null,
+          "teks": "Pimpinan kementerian/lembaga atau pemerintah daerah melakukan pembinaan dan pengawasan pelaksanaan pengelolaan pengaduan pelayanan publik dalam lingkup tanggung jawab masing-masing.",
+          "butir": []
+        },
+        {
+          "nomor": 2,
+          "pengantar": null,
+          "teks": "Pembinaan dan pengawasan pelaksanaan pengelolaan pengaduan pelayanan publik sebagaimana dimaksud pada ayat (1) dikoordinasikan oleh penanggung jawab penyelenggaraan pelayanan publik pada masing-masing kementerian/lembaga atau pemerintah daerah.",
+          "butir": []
+        },
+        {
+          "nomor": 3,
+          "pengantar": null,
+          "teks": "Menteri melakukan pembinaan dan pengawasan terhadap pelaksanaan pengelolaan pengaduan pelayanan publik dalam rangka penyelenggaraan sistem informasi pelayanan publik secara nasional.",
+          "butir": []
+        },
+        {
+          "nomor": 4,
+          "pengantar": null,
+          "teks": "Menteri menyusun road map pengembangan sistem pengelolaan pengaduan.",
+          "butir": []
+        },
+        {
+          "nomor": 5,
+          "pengantar": null,
+          "teks": "Ketentuan lebih lanjut mengenai pembinaan, pengawasan, dan penyusunan road map pengembangan sistem pengelolaan pengaduan sebagaimana dimaksud pada ayat (2) dan ayat (3) diatur dengan Peraturan Menteri.",
+          "butir": []
+        }
+      ],
+      "butir": []
+    },
+    {
+      "bab": "III",
+      "judul_bab": "KETENTUAN PENUTUP",
+      "bagian": null,
+      "judul_bagian": null,
+      "nomor_pasal": 20,
+      "halaman": [13],
+      "pengantar": "Pada saat mulai berlakunya Peraturan Presiden ini, dalam jangka waktu paling lama 1 (satu) tahun:",
+      "teks": null,
+      "ayat": [],
+      "butir": [
+        { "kode": "a", "teks": "penyelenggara wajib menyediakan sarana pengaduan, mekanisme dan tata cara pengelolaan pengaduan, serta menetapkan pengelola pengaduan pelayanan publik; dan" },
+        { "kode": "b", "teks": "Menteri menyusun road map penerapan sistem pengelolaan pengaduan nasional." }
+      ]
+    },
+    {
+      "bab": "III",
+      "judul_bab": "KETENTUAN PENUTUP",
+      "bagian": null,
+      "judul_bagian": null,
+      "nomor_pasal": 21,
+      "halaman": [13],
+      "pengantar": null,
+      "teks": "Peraturan Presiden ini mulai berlaku pada tanggal diundangkan.",
+      "ayat": [],
+      "butir": []
+    }
+  ],
+  "penutup": {
+    "halaman": [13, 14],
+    "perintah_pengundangan": "Agar setiap orang mengetahuinya, memerintahkan pengundangan Peraturan Presiden ini dengan penempatannya dalam Lembaran Negara Republik Indonesia.",
+    "penetapan": {
+      "tempat": "Jakarta",
+      "tanggal": "6 Desember 2013",
+      "jabatan": "PRESIDEN REPUBLIK INDONESIA",
+      "nama": "DR. H. SUSILO BAMBANG YUDHOYONO"
+    },
+    "pengundangan": {
+      "tempat": "Jakarta",
+      "tanggal": "6 Desember 2013",
+      "jabatan": "MENTERI HUKUM DAN HAK ASASI MANUSIA REPUBLIK INDONESIA",
+      "nama": "AMIR SYAMSUDIN"
+    },
+    "lembaran_negara": "LEMBARAN NEGARA REPUBLIK INDONESIA TAHUN 2013 NOMOR 191",
+    "pengesahan_salinan": {
+      "keterangan": "Salinan sesuai dengan aslinya",
+      "instansi": "SEKRETARIAT KABINET RI",
+      "jabatan": "Deputi Bidang Politik, Hukum, dan Keamanan",
+      "nama": "Bistok Simbolon"
+    }
+  },
+  "catatan_ekstraksi": [
+    "Teks diambil dari hasil OCR dan dikoreksi terhadap citra halaman; ejaan dan redaksi asli dipertahankan.",
+    "Kata sambung penanda halaman (misal 'dalam ...', 'BAB II ...') pada pojok bawah halaman tidak dimasukkan.",
+    "Pasal 1 butir 9: kata 'penyelengara' adalah salah ketik pada dokumen asli dan dipertahankan apa adanya.",
+    "Pasal 1 butir 11: frasa 'negara reformasi birokrasi' (tanpa kata 'dan') sesuai dokumen asli.",
+    "Pasal 13 huruf c menggunakan istilah 'pelapor' (bukan 'pengadu') sesuai dokumen asli.",
+    "Pasal 3 ayat (2) dan Pasal 14 huruf b melintasi batas halaman; nilai 'halaman' memuat semua halaman terkait.",
+    "Struktur pasal: 'teks' dipakai untuk pasal tanpa ayat/butir; 'pengantar' + 'butir' untuk pasal berbutir tanpa ayat; 'ayat' untuk pasal berayat.",
+    "Dokumen tidak memuat bagian Penjelasan."
+  ]
+}

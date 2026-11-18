@@ -23,6 +23,8 @@ from app.services.ingestion.ocr import HybridOcrService, OcrError
 from app.services.ingestion.ocr_engine import paddle_available
 from app.services.ingestion.parser import ParsedDocument, ParseError, parse_document
 from app.services.ingestion.render import RenderError, render_pdf_pages
+from app.services.ingestion.text_quality import assess_chunk_quality
+from app.services.ingestion.visuals import build_visual_chunks
 from app.services.memory.store import ANSWER_CACHE_PREFIX, CACHE_PREFIX, MemoryStore
 from app.services.retrieval.retriever import COLLECTION, HybridRetriever, IndexEntry
 from app.services.retrieval.vector_store import VectorRecord, VectorStore, build_vector_store
@@ -256,7 +258,30 @@ class IngestionService:
                 parsed = await self._extract_scanned(document, parsed, pdf_data)
 
             spans = await asyncio.to_thread(self.build_spans, parsed)
-            chunks = self.to_chunks(document.id, spans)
+            chunks = self.to_chunks(document.id, spans, parsed.page_confidences)
+            if parsed.visuals:
+                # Chunk visual multimodal: caption template menjelaskan jenis,
+                # posisi, dan teks terdekat — cukup untuk retrieval pertanyaan
+                # tentang lambang/materai/penandatangan tanpa panggilan VLM.
+                for chunk_id, content, page_number in build_visual_chunks(
+                    document.id, parsed.visuals
+                ):
+                    chunks.append(
+                        Chunk(
+                            id=chunk_id,
+                            document_id=document.id,
+                            chunk_index=len(chunks),
+                            content=content,
+                            page_number=page_number,
+                            section="Visual",
+                            quality_flag="ok",
+                        )
+                    )
+                logger.info(
+                    "Dokumen %s: %d chunk visual ditambahkan",
+                    document.id,
+                    len(parsed.visuals),
+                )
 
             if not chunks:
                 await asyncio.to_thread(
@@ -266,6 +291,15 @@ class IngestionService:
                     error_message="Pemecahan teks tidak menghasilkan chunk yang bisa diindeks.",
                 )
                 return
+
+            low_count = sum(1 for chunk in chunks if chunk.quality_flag == "low")
+            if low_count:
+                logger.info(
+                    "Dokumen %s: %d dari %d chunk ditandai kualitas rendah",
+                    document.id,
+                    low_count,
+                    len(chunks),
+                )
 
             embeddings = await asyncio.to_thread(
                 self._embedding.embed_documents, [chunk.content for chunk in chunks]
@@ -283,6 +317,10 @@ class IngestionService:
                         "content": chunk.content,
                         "token_count": chunk.token_count,
                         "section": chunk.section,
+                        "quality_flag": chunk.quality_flag,
+                        # Hanya pecahan Pasal panjang yang membawa badan utuh;
+                        # metadata tanpa parent_text = chunk mandiri.
+                        "parent_text": chunk.parent_text,
                     },
                 )
                 for chunk, embedding in zip(chunks, embeddings, strict=True)
@@ -305,6 +343,8 @@ class IngestionService:
                         content=chunk.content,
                         chunk_index=chunk.chunk_index,
                         page_number=chunk.page_number,
+                        quality_flag=chunk.quality_flag,
+                        parent_text=chunk.parent_text,
                     )
                     for chunk in chunks
                 ],
@@ -380,7 +420,12 @@ class IngestionService:
 
         ocr = HybridOcrService(self._settings, vision_provider=provider)
         try:
-            pages = await ocr.ocr_pages(rendered)
+            crop_dir = (
+                self._original_files.root / "visuals" / document.id
+                if self._settings.ocr_visual_chunks_enabled
+                else None
+            )
+            pages, visuals = await ocr.ocr_pages(rendered, visual_crop_dir=crop_dir)
         except OcrError as exc:
             if parsed.looks_empty():
                 # Tidak ada text-layer untuk kembali; kegagalan OCR berarti
@@ -396,6 +441,15 @@ class IngestionService:
         ocr_document = ParsedDocument(
             pages=pages, page_count=len(pages), is_pdf=True
         )
+        if visuals and self._settings.ocr_visual_chunks_enabled:
+            # Crop sudah disimpan di samping berkas asli (oleh deteksi);
+            # daftarnya dibawa ke _process untuk menjadi chunk terindeks.
+            ocr_document.visuals = visuals
+            logger.info(
+                "Dokumen %s: %d elemen visual terdeteksi",
+                document.id,
+                len(visuals),
+            )
         ocr_document.empty_pages = [
             page.page_number
             for page in pages
@@ -446,21 +500,48 @@ class IngestionService:
         return spans
 
     @staticmethod
-    def to_chunks(document_id: str, spans: list[TextSpan]) -> list[Chunk]:
-        return [
-            Chunk(
-                id=f"{document_id}_c{index + 1}",
-                document_id=document_id,
-                chunk_index=index,
-                content=span.content,
-                page_number=span.page_number,
-                token_count=span.token_estimate(),
-                char_start=span.char_start,
-                char_end=span.char_end,
-                section=span.section,
+    def to_chunks(
+        document_id: str,
+        spans: list[TextSpan],
+        page_confidences: dict[int, float] | None = None,
+    ) -> list[Chunk]:
+        r"""Bangun Chunk dari span, lengkap dengan penanda kualitasnya.
+
+        Karakter ``\f`` (pemisah halaman di ``full_text``) diganti newline di
+        sini — satu-satunya titik sebelum chunk tersimpan, supaya konten yang
+        melintasi batas halaman tidak membawa karakter kontrol ke UI dan ke
+        prompt. Confidence halaman (kalau halamannya diekstraksi via OCR
+        lokal) ikut dinilai: chunk di halaman ber-confidence rendah ditandai
+        meragukan tanpa melihat teksnya.
+        """
+        confidences = page_confidences or {}
+        chunks: list[Chunk] = []
+        for index, span in enumerate(spans):
+            content = span.content.replace("\f", "\n")
+            quality = assess_chunk_quality(
+                content,
+                page_confidence=(
+                    confidences.get(span.page_number)
+                    if span.page_number is not None
+                    else None
+                ),
             )
-            for index, span in enumerate(spans)
-        ]
+            chunks.append(
+                Chunk(
+                    id=f"{document_id}_c{index + 1}",
+                    document_id=document_id,
+                    chunk_index=index,
+                    content=content,
+                    page_number=span.page_number,
+                    token_count=span.token_estimate(),
+                    char_start=span.char_start,
+                    char_end=span.char_end,
+                    section=span.section,
+                    quality_flag=quality.flag,
+                    parent_text=getattr(span, "parent_text", None),
+                )
+            )
+        return chunks
 
     async def delete(self, document_id: str) -> None:
         """Hapus dokumen beserta chunk, indeks vektor, dan cache yang merujuknya.

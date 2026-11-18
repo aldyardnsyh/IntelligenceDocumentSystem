@@ -342,9 +342,13 @@ def _chunks_for_body(
     "Hal. 5" harus menunjuk halaman tempat Pasal itu diumumkan.
     """
     spans: list[TextSpan] = []
-    for piece_index, (piece_start, piece_end) in enumerate(
-        _body_pieces(document, body_start, body_end, max_chars, overlap)
-    ):
+    pieces = _body_pieces(document, body_start, body_end, max_chars, overlap)
+    # Small-to-big: kalau badan terpecah jadi lebih dari satu potongan, setiap
+    # potongan membawa badan PASAL utuhnya sebagai parent_text. Potongan tetap
+    # yang diindeks (ringkas, akurat untuk retrieval); pasal utuh dipakai saat
+    # menjawab sebagai konteks ekspansi — satu Pasal adalah unit maknanya.
+    parent = document[body_start:body_end] if len(pieces) > 1 else None
+    for piece_index, (piece_start, piece_end) in enumerate(pieces):
         body = document[piece_start:piece_end]
         page_offset = (
             first_page_offset if piece_index == 0 and first_page_offset is not None else piece_start
@@ -356,6 +360,7 @@ def _chunks_for_body(
                 char_end=piece_end,
                 page_number=_page_number_for(page_starts, page_offset),
                 section=section_label,
+                parent_text=parent,
             )
         )
     return spans

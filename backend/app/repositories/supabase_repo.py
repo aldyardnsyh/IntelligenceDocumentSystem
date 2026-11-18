@@ -178,6 +178,10 @@ class SupabaseRepository:
                 # instalasi lama cukup menjalankan
                 # `alter table chunks add column section text` sekali.
                 "section": getattr(chunk, "section", None),
+                # Penanda kualitas ekstraksi, nullable dengan penanganan yang
+                # sama: `alter table chunks add column quality_flag text`.
+                "quality_flag": getattr(chunk, "quality_flag", None),
+                "parent_text": getattr(chunk, "parent_text", None),
             }
             for chunk in chunks
         ]
@@ -258,6 +262,8 @@ class SupabaseRepository:
                 char_start=int(row.get("char_start") or 0),
                 char_end=int(row.get("char_end") or 0),
                 section=row.get("section"),
+                quality_flag=row.get("quality_flag"),
+                parent_text=row.get("parent_text"),
             )
             for row in rows or []
         ]

@@ -148,21 +148,21 @@ class TestHybridPipeline:
     def test_halaman_percaya_diri_tidak_ke_vision(self) -> None:
         lines = [_line(f"baris {i}", 10, i * 24) for i in range(8)]
         service, vision = _make_hybrid(lines)
-        pages = asyncio.run(service.ocr_pages([(1, b"png")]))
+        pages, _visuals = asyncio.run(service.ocr_pages([(1, b"png")]))
         assert pages[0].text.startswith("baris 0")
         assert vision.calls == 0
 
     def test_halaman_confidence_rendah_dieskalasi(self) -> None:
         lines = [_line(f"baris {i}", 10, i * 24, conf=0.3) for i in range(8)]
         service, vision = _make_hybrid(lines)
-        pages = asyncio.run(service.ocr_pages([(3, b"png")]))
+        pages, _visuals = asyncio.run(service.ocr_pages([(3, b"png")]))
         assert pages[0].text == "teks vision halaman 3"
         assert vision.calls == 1
 
     def test_mode_paddle_tidak_pernah_ke_vision(self) -> None:
         lines = [_line(f"baris {i}", 10, i * 24, conf=0.2) for i in range(8)]
         service, vision = _make_hybrid(lines, engine="paddle")
-        pages = asyncio.run(service.ocr_pages([(1, b"png")]))
+        pages, _visuals = asyncio.run(service.ocr_pages([(1, b"png")]))
         assert "baris" in pages[0].text
         assert vision.calls == 0
 
@@ -386,7 +386,7 @@ class TestVariantVotingIntegration:
         service._vision = None  # type: ignore[assignment]  # noqa: SLF001
         service._rescue_enabled = False  # noqa: SLF001
 
-        pages = asyncio.run(service.ocr_pages([(1, b"halaman")]))
+        pages, _visuals = asyncio.run(service.ocr_pages([(1, b"halaman")]))
         assert "penerimaan yang benar" in pages[0].text
         assert service._paddle.variants_seen == [  # noqa: SLF001
             "as_is",
@@ -408,7 +408,7 @@ class TestVariantVotingIntegration:
         service._vision = None  # type: ignore[assignment]  # noqa: SLF001
         service._rescue_enabled = False  # noqa: SLF001
 
-        pages = asyncio.run(service.ocr_pages([(1, b"halaman")]))
+        pages, _visuals = asyncio.run(service.ocr_pages([(1, b"halaman")]))
         assert "pasal biasa" in pages[0].text
         # Flag mati: jalur satu tahap; tanpa recognize_page_voted dipanggil.
         assert engine.variants_seen == []

@@ -71,7 +71,10 @@ from app.services.memory.store import (
     message_to_dict,
 )
 from app.services.retrieval.retriever import HybridRetriever, _normalized_keyword
-from app.services.retrieval.text_processing import keyword_suggestions
+from app.services.retrieval.text_processing import (
+    keyword_suggestions,
+    normalize_query,
+)
 from app.services.tracing import TraceContext, Tracer
 
 logger = logging.getLogger(__name__)
@@ -226,15 +229,21 @@ class RagService:
         tier bukti lemah) tidak perlu memanggil model embedding dua kali.
         """
         embedding = query_embedding
+        # Pertanyaan dinormalkan sebelum masuk embedding dan BM25: teks
+        # tempel dari dokumen membawa kutipan keriting/dash panjang yang di
+        # sisi indeks sudah menjadi ASCII. Pertanyaan asli tetap dipakai
+        # untuk tampilan, cache, dan log.
+        query_text = normalize_query(question)
         if embedding is None:
-            embedding = await asyncio.to_thread(self._embedding.embed_query, question)
+            embedding = await asyncio.to_thread(self._embedding.embed_query, query_text)
         return await asyncio.to_thread(
             self._retriever.retrieve,
-            question,
+            query_text,
             embedding,
             settings.top_k,
             settings.similarity_threshold,
             document_ids,
+            keyword_strong_bar=self._settings.keyword_strong_bar,
         )
 
     # ------------------------------------------------------------------ ask
@@ -426,7 +435,9 @@ class RagService:
                 yield event
             return
 
-        query_embedding = await asyncio.to_thread(self._embedding.embed_query, question)
+        query_embedding = await asyncio.to_thread(
+            self._embedding.embed_query, normalize_query(question)
+        )
         retrieved = await self.retrieve(
             question,
             retrieval_settings,
@@ -1148,6 +1159,23 @@ class RagService:
         neighbors: dict[int, list[Chunk]] = {}
         for sumber, item in enumerate(retrieved, start=1):
             chunk = item.chunk
+            # Small-to-big: pecahan Pasal panjang membawa badan Pasal utuhnya.
+            # Parent itu SUPERIOR dari tetangga ±1: rujukan silang "ayat (2)"
+            # ke Pasal lain ada di dalam badan yang sama, dan satu look-up
+            # repository tersubsidi. Tetangga indeks hanya dipakai bila chunk
+            # mandiri (tanpa parent).
+            parent = getattr(chunk, "parent_text", None)
+            if parent:
+                neighbors[sumber] = [
+                    Chunk(
+                        id=f"{chunk.id}-parent",
+                        document_id=chunk.document_id,
+                        chunk_index=chunk.chunk_index,
+                        content=parent,
+                        page_number=chunk.page_number,
+                    )
+                ]
+                continue
             indices = [
                 chunk.chunk_index + offset
                 for offset in range(-window, window + 1)

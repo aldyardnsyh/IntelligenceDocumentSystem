@@ -238,3 +238,55 @@ def keyword_suggestions(question: str, limit: int = 6) -> tuple[str, ...]:
     # jadi list.
     unique = list(dict.fromkeys(words))
     return tuple(unique[:limit])
+
+
+# --------------------------------------------------------------------------
+# Padanan kata (query expansion) & normalisasi query.
+#
+# Stemming menyatukan bentuk morfologi satu kata ("mengadu" ↔ "pengaduan"),
+# tapi tidak menyatukan DUA kata yang berbeda akar untuk arti yang sama di
+# dokumen legal: "pengaduan" ↔ "keluhan", "ketentuan" ↔ "aturan". Jalur
+# vektor seharusnya menangkap ini, tapi pada istilah teknis ia sering gagal
+# juga (embedding umum memakai kedua kata jarang dalam konteks hukum). BM25
+# yang murni leksikal tidak akan pernah menyamakan keduanya tanpa bantuan.
+#
+# Ekspansi hanya diterapkan di sisi QUERY, dengan bobot 0.8 di retriever —
+# dokumen tidak pernah diubah. Kunci kamus HARUS bentuk stem Sastrawi (token
+# query sudah di-stem saat tiba di sini): "pengaduan"→"adu", "keluhan"→"keluh",
+# "ketentuan"→"tentu", "layanan"→"layan" (diverifikasi dengan Sastrawi asli).
+# Padanan yang salah arah atau terlalu luas (mis. "hukum" ↔ "sanksi": "hukum"
+# muncul di setiap halaman dengan makna hukum, bukan hukuman) lebih merusak
+# daripada tidak memasang apa-apa — kamusnya sengaja tetap kecil.
+# --------------------------------------------------------------------------
+
+QUERY_SYNONYMS: dict[str, tuple[str, ...]] = {
+    "adu": ("keluh", "komplain"),
+    "keluh": ("adu", "komplain"),
+    "komplain": ("adu", "keluh"),
+    "atur": ("tentu",),
+    "tentu": ("atur",),
+    "wajib": ("harus",),
+    "izin": ("ijin",),
+    "ijin": ("izin",),
+    "batas": ("tenggat",),
+    "tenggat": ("batas",),
+    "layan": ("jasa",),
+    "jasa": ("layan",),
+    "lapor": ("adu",),
+    "sanksi": ("penalti",),
+    "penalti": ("sanksi",),
+}
+
+
+def normalize_query(question: str) -> str:
+    """Rapikan pertanyaan sebelum masuk embedding dan BM25.
+
+    Pertanyaan pengguna sering berisi teks tempel dari dokumen — lengkap
+    dengan kutipan keriting dan dash panjang yang tidak cocok dengan bentuk
+    ASCII di indeks. Peta simbolnya sama dengan pembersih ingestion, jadi
+    sumber dan pertanyaan bertemu di bentuk tanda baca yang sama. Isi kata
+    tidak pernah diubah.
+    """
+    from app.services.ingestion.cleanup import normalize_symbols  # noqa: PLC0415
+
+    return normalize_symbols(question)

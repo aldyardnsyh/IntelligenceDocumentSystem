@@ -19,18 +19,21 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 
 from app.core.config import Settings
 from app.providers.base import LLMProvider, ProviderError
-from app.services.ingestion.cleanup import clean_page_text
+from app.services.ingestion.cleanup import clean_page_text, repair_document_pages
 from app.services.ingestion.ocr_engine import (
     PaddleOcrEngine,
     lines_to_page_text,
     paddle_available,
     page_confidence,
     reconstruct_reading_order,
+    strip_catchwords,
 )
 from app.services.ingestion.parser import ParsedPage
+from app.services.ingestion.visuals import cv2_available, detect_visuals
 
 logger = logging.getLogger(__name__)
 
@@ -189,9 +192,16 @@ class HybridOcrService:
         self._rescue_enabled = mode == "auto" and self._vision is not None
 
     async def ocr_pages(
-        self, rendered: list[tuple[int, bytes]]
-    ) -> list[ParsedPage]:
+        self,
+        rendered: list[tuple[int, bytes]],
+        visual_crop_dir: Path | None = None,
+    ) -> tuple[list[ParsedPage], list]:
         """Ekstraksi setiap halaman sesuai konfigurasi mesin.
+
+        Returns:
+            Pasangan ``(halaman, elemen_visual)``. Elemen visual (lambang,
+            tanda tangan, stempel, paraf) terdeteksi hanya bila OpenCV
+            tersedia; kosong selain itu.
 
         Raises:
             OcrError: Halaman gagal di semua mesin yang tersedia.
@@ -202,13 +212,40 @@ class HybridOcrService:
                 "belum terpasang dan provider vision tidak siap."
             )
 
+        detect_visuals_enabled = (
+            self._settings.ocr_visual_chunks_enabled and cv2_available()
+        )
+        if not detect_visuals_enabled:
+            logger.info("Deteksi elemen visual dilewati (OpenCV tidak tersedia atau dimatikan).")
         pages: list[ParsedPage] = []
+        visuals: list = []
         rescue_count = 0
         paddle_count = 0
         vision_count = 0
         for index, (page_number, image) in enumerate(rendered):
-            text, source = await self._extract_page(page_number, image)
-            pages.append(ParsedPage(text=text, page_number=page_number))
+            text, source, confidence, lines = await self._extract_page(page_number, image)
+            pages.append(
+                ParsedPage(text=text, page_number=page_number, ocr_confidence=confidence)
+            )
+            if detect_visuals_enabled and lines:
+                # Deteksi visual butuh baris OCR untuk menyingkirkan piksel
+                # teks, dan citra halaman aslinya untuk crop.
+                try:
+                    import io  # noqa: PLC0415
+
+                    import numpy  # noqa: PLC0415
+                    from PIL import Image  # noqa: PLC0415
+
+                    pil_image = Image.open(io.BytesIO(image))
+                    arr = numpy.asarray(pil_image.convert("RGB"))[:, :, ::-1]
+                    visuals.extend(
+                        detect_visuals(arr, page_number, lines, crop_dir=visual_crop_dir)
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.warning(
+                        "Deteksi visual halaman %d gagal; dilewati.", page_number,
+                        exc_info=True,
+                    )
             if source == "paddle":
                 paddle_count += 1
             elif source == "vision":
@@ -238,18 +275,48 @@ class HybridOcrService:
                 rescue_count,
                 vision_count,
             )
-        return pages
+
+        # Pass level dokumen: koreksi typo leksikon korpus dan perbaikan
+        # penanda butir/ayat. Keduanya butuh pandangan lintas halaman — leksikon
+        # kebenaran dokumen cuma bermakna kalau seluruh dokumen sudah terbaca,
+        # dan butir/daftar definisi sering menyeberang halaman. Menjalankannya
+        # di sini (bukan per halaman di _extract_page) adalah satu-satunya
+        # titik yang punya seluruh teks.
+        pages = [
+            ParsedPage(text=text, page_number=page.page_number, ocr_confidence=page.ocr_confidence)
+            for page, text in zip(
+                pages,
+                repair_document_pages(
+                    [page.text for page in pages],
+                    typo_correction=self._settings.ocr_typo_correction_enabled,
+                    repair_markers=self._settings.ocr_repair_markers_enabled,
+                ),
+                strict=True,
+            )
+        ]
+        return pages, visuals
 
     async def _extract_page(
         self, page_number: int, image: bytes
-    ) -> tuple[str, str]:
-        """Ekstraksi satu halaman; kembalikan (teks, sumber hasil)."""
+    ) -> tuple[str, str, float, list]:
+        """Ekstraksi satu halaman; kembalikan (teks, sumber, confidence, baris).
+
+        Baris OCR mentah ikut dikembalikan untuk deteksi elemen visual:
+        piksel baris teks ber-confidence tinggi harus disingkirkan dulu agar
+        blob lambang/stempel tidak menyatu dengan paragraf di sekitarnya.
+        Baris dikosongkan untuk jalur vision (tidak tersedia).
+
+        Confidence hanya terukur di jalur PP-OCR lokal (rata-rata confidence
+        per baris). Halaman vision diberi 1.0 — bukan klaim kemurnian, tapi
+        penanda "sumber teks ini bukan OCR lokal": kualitas teksnya dinilai
+        dari sinyal statistik, bukan dari confidence.
+        """
         if self._paddle is None:
             assert self._vision is not None
             text = clean_page_text(
                 await self._vision.transcribe_page(page_number, image)
             )
-            return text, "vision"
+            return text, "vision", 1.0, []
 
         if self._settings.ocr_variant_voting_enabled and hasattr(
             self._paddle, "recognize_page_voted"
@@ -266,6 +333,7 @@ class HybridOcrService:
             )
         else:
             lines = await asyncio.to_thread(self._paddle.recognize_page, image)
+
         if self._settings.ocr_gap_rescan_enabled and lines:
             # Pass kedua: baris yang tertutup cap tinta sering lolos dari
             # detektor; celah antar baris di-crop dan dibaca ulang dengan zoom.
@@ -279,10 +347,13 @@ class HybridOcrService:
                     len(extra),
                 )
                 lines = lines + extra
-        ordered = reconstruct_reading_order(lines)
+        ordered = reconstruct_reading_order(strip_catchwords(lines))
         # PP-OCR mentranskripsi cap kaki halaman juga ("PRESIDEN REPUBLIK
         # INDONESIA", nomor halaman); pembersih yang sama dengan jalur
-        # text-layer membuangnya sebelum teks masuk ke chunk.
+        # text-layer membuangnya sebelum teks masuk ke chunk. Catchword
+        # ("(2) Penyediaan..." di sudut kanan-bawah) dibuang lebih dulu
+        # berbasis posisi: bentuknya seperti isi biasa sehingga pembersih
+        # teks tidak bisa membedakannya.
         text = clean_page_text(lines_to_page_text(ordered))
         confidence = page_confidence(lines)
 
@@ -291,10 +362,12 @@ class HybridOcrService:
             or len(text) < MIN_RESCUE_CHARS
         )
         if not needs_rescue or not self._rescue_enabled:
-            return text, "paddle"
+            return text, "paddle", confidence, lines
 
         try:
-            text = await self._vision.transcribe_page(page_number, image)
+            text = clean_page_text(
+                await self._vision.transcribe_page(page_number, image)
+            )
         except OcrError as exc:
             # Rescue gagal bukan alasan menggagalkan halaman: teks PP-OCR yang
             # kurang percaya diri tetap jauh lebih berguna daripada halaman
@@ -305,5 +378,5 @@ class HybridOcrService:
                 page_number,
                 exc,
             )
-            return text, "paddle"
-        return text, "vision-rescue"
+            return text, "paddle", confidence, lines
+        return text, "vision-rescue", 1.0, []

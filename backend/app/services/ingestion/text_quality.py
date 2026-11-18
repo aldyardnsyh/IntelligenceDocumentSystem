@@ -179,3 +179,121 @@ def assess_text_layer(pages: Iterable[PageLike]) -> TextQualityReport:
     # apa pun. Nilainya tetap dilaporkan untuk audit.
 
     return report
+
+
+# --------------------------------------------------------------------------
+# Penilaian kualitas per chunk (flag-only).
+#
+# Sinyal level dokumen di atas hanya memutuskan "perlu OCR atau tidak", dan
+# keputusannya per dokumen: dokumen yang lolos masih bisa menyimpan beberapa
+# halaman buruk, dan halaman hasil OCR pun bisa berisi potongan rusak. Tanpa
+# penilaian level chunk, potongan itu masuk indeks tanpa jejak dan jawaban
+# dibangun di atas sumber yang kotor tanpa ada yang tahu.
+#
+# Kebijakannya FLAG-ONLY: tidak ada chunk yang dibuang. Chunk meragukan tetap
+# diindeks (memangkasnya berisiko menghilangkan satu-satunya sumber yang
+# benar), tapi diberi penanda ``quality_flag="low"`` yang mengalir sampai ke
+# prompt, di mana model diminta mencantumkan catatan berbahasa awam.
+# --------------------------------------------------------------------------
+
+CHUNK_FLAG_OK = "ok"
+CHUNK_FLAG_LOW = "low"
+
+#: Rasio karakter di luar huruf/digit/tanda baca lazim. Teks Indonesia yang
+#: utuh praktis nol; artefak OCR (glyph CJK sisa, kotak unicode, simbol
+#: aneh) menaikkannya dengan cepat.
+_GARBAGE_CHAR_RE = re.compile(
+    r"[^0-9A-Za-zÀ-ÿ\s.,;:()'\"\-?%&+=<>[\]{}§$#@!_/\\*~^|]"
+)
+
+#: Rasio token satu huruf level chunk. Ambangnya lebih longgar dari level
+#: dokumen (5%) karena chunk kecil jauh lebih berisik secara statistik dan
+#: butir "a."-"f." sah bisa mendominasi chunk pendek.
+_CHUNK_SINGLE_CHAR_RATIO_MAX = 0.12
+
+#: Panjang rata-rata token huruf. Bahasa Indonesia utuh punya rata-rata
+#: sekitar 7-8 huruf per kata; kata terpecah OCR ("Tah un", "Undang-Undan g")
+#: menurunkannya ke bawah 4. Diukur hanya pada chunk cukup besar supaya
+#: sampelnya bermakna.
+_CHUNK_AVG_TOKEN_LEN_MIN = 4.0
+
+#: Chunk lebih pendek dari ini nyaris pasti fragmen, bukan unit makna.
+_CHUNK_MIN_CHARS = 40
+
+#: Confidence OCR halaman di bawah ini menandai chunk-nya meragukan, apa pun
+#: sinyal teksnya. Nilai 0.45 sengaja lebih rendah dari ambang rescue VLM
+#: (0.55): halaman yang sudah lewat rescue tapi tetap rendah confidence-nya
+#: tetap layak ditandai, bukan dianggap pulih total.
+_CHUNK_PAGE_CONFIDENCE_MIN = 0.45
+
+#: Sinyal panjang (rasio sampah, token satu huruf, panjang token) hanya
+#: dipakai pada chunk dengan minimal token sebanyak ini — di bawah itu
+#: sampelnya terlalu kecil untuk membedakan rusak dari pendek yang sah.
+_CHUNK_MIN_TOKENS_FOR_STATS = 20
+
+_CHUNK_TOKEN_RE = re.compile(r"[A-Za-zÀ-ÿ]+")
+
+
+@dataclass(slots=True)
+class ChunkQuality:
+    """Hasil penilaian satu chunk.
+
+    ``flag`` selalu ``CHUNK_FLAG_OK`` atau ``CHUNK_FLAG_LOW``; ``reasons``
+    kosong untuk chunk sehat dan berisi penanda sinyal untuk chunk low —
+    formatnya siap log, bukan siap tampil ke pengguna (pengguna melihat
+    frasa awam lewat prompt, bukan sinyal mentah ini).
+    """
+
+    flag: str
+    reasons: list[str] = field(default_factory=list)
+
+
+def assess_chunk_quality(
+    content: str, page_confidence: float | None = None
+) -> ChunkQuality:
+    """Nilai kualitas teks satu chunk; kembalikan flag, bukan keputusan buang.
+
+    Sinyal yang dipakai sengaja murah (regex dan statistik panjang, tanpa
+    model) karena dijalankan untuk ribuan chunk per dokumen. Confidence
+    halaman, kalau ada, dipakai sebagai sinyal independen: teks yang tampak
+    rapi tapi dibaca dengan keyakinan rendah tetap meragukan.
+    """
+    reasons: list[str] = []
+    text = content or ""
+    stripped = text.strip()
+
+    if len(stripped) < _CHUNK_MIN_CHARS:
+        reasons.append(f"chunk hanya {len(stripped)} karakter")
+
+    tokens = _CHUNK_TOKEN_RE.findall(text)
+    # Rasio karakter aneh dihitung selalu: chunk sampah justru sering TANPA
+    # satu kata pun huruf, dan justru kasus itulah yang paling penting
+    # ditandai. Sinyal statistik token (satu huruf, panjang rata-rata) baru
+    # bermakna pada sampel yang cukup besar.
+    garbage = _GARBAGE_CHAR_RE.findall(text)
+    garbage_ratio = sum(len(match) for match in garbage) / max(len(text), 1)
+    if garbage_ratio > 0.06:
+        reasons.append(f"rasio karakter aneh {garbage_ratio:.1%}")
+
+    if len(tokens) >= _CHUNK_MIN_TOKENS_FOR_STATS:
+        single = sum(1 for token in tokens if len(token) == 1)
+        single_ratio = single / len(tokens)
+        avg_len = sum(len(token) for token in tokens) / len(tokens)
+        if single_ratio > _CHUNK_SINGLE_CHAR_RATIO_MAX:
+            reasons.append(f"rasio token satu huruf {single_ratio:.1%}")
+        if avg_len < _CHUNK_AVG_TOKEN_LEN_MIN:
+            reasons.append(f"panjang kata rata-rata {avg_len:.1f}")
+
+    if (
+        page_confidence is not None
+        and page_confidence < _CHUNK_PAGE_CONFIDENCE_MIN
+    ):
+        reasons.append(f"confidence OCR halaman {page_confidence:.2f}")
+
+    if not tokens:
+        reasons.append("tidak ada kata sama sekali")
+
+    return ChunkQuality(
+        flag=CHUNK_FLAG_LOW if reasons else CHUNK_FLAG_OK,
+        reasons=reasons,
+    )

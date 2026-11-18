@@ -65,7 +65,10 @@ def init_services(app_settings: Settings | None = None) -> None:
         _settings.rerank_enabled, _settings.rerank_model, _settings.rerank_device
     )
     _retriever = HybridRetriever(
-        _store, reranker, rerank_candidates=_settings.rerank_candidates
+        _store,
+        reranker,
+        rerank_candidates=_settings.rerank_candidates,
+        fuzzy_enabled=_settings.bm25_fuzzy_enabled,
     )
     # Stemming BM25 harus disetel SEBELUM indeks dibangun: dokumen dan query
     # memakai pemroses yang sama, dan konfigurasinya dibaca sekali di sini.
@@ -150,6 +153,8 @@ def _index_entries(repository: MetadataRepository) -> list:
             content=chunk.content,
             chunk_index=chunk.chunk_index,
             page_number=chunk.page_number,
+            quality_flag=getattr(chunk, "quality_flag", None),
+            parent_text=getattr(chunk, "parent_text", None),
         )
         for chunk in repository.all_chunks()
     ]

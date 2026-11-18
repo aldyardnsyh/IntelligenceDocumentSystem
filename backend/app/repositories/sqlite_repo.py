@@ -132,7 +132,9 @@ CREATE TABLE IF NOT EXISTS chunks (
     token_count INTEGER,
     char_start INTEGER NOT NULL DEFAULT 0,
     char_end INTEGER NOT NULL DEFAULT 0,
-    section TEXT
+    section TEXT,
+    quality_flag TEXT,
+    parent_text TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_chunks_document ON chunks(document_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_index ON chunks(document_id, chunk_index);
@@ -215,6 +217,15 @@ class SqliteRepository:
             # Label struktur hukum ("Pasal 5") untuk badge UI. Nullable: chunk
             # lama dan chunking paragraf generik memang tidak punya label.
             connection.execute("ALTER TABLE chunks ADD COLUMN section TEXT")
+        if "quality_flag" not in chunk_columns:
+            # Penanda kualitas ekstraksi ("ok"/"low"). Nullable: chunk lama
+            # sebelum fitur ini tidak punya penilaian, dan itu sah — artinya
+            # "belum dinilai", bukan "buruk".
+            connection.execute("ALTER TABLE chunks ADD COLUMN quality_flag TEXT")
+        if "parent_text" not in chunk_columns:
+            # Badan Pasal utuh untuk pecahan Pasal panjang (small-to-big).
+            # Nullable: chunk mandiri tidak punya parent.
+            connection.execute("ALTER TABLE chunks ADD COLUMN parent_text TEXT")
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self._path, check_same_thread=False)
@@ -287,6 +298,8 @@ class SqliteRepository:
                 getattr(chunk, "char_start", 0),
                 getattr(chunk, "char_end", 0),
                 getattr(chunk, "section", None),
+                getattr(chunk, "quality_flag", None),
+                getattr(chunk, "parent_text", None),
             )
             for chunk in chunks
         ]
@@ -296,8 +309,8 @@ class SqliteRepository:
             connection.executemany(
                 "INSERT OR REPLACE INTO chunks "
                 "(id, document_id, chunk_index, content, page_number, "
-                "token_count, char_start, char_end, section) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "token_count, char_start, char_end, section, quality_flag, parent_text) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 rows,
             )
 
@@ -661,6 +674,10 @@ def _row_to_chunk(row: sqlite3.Row) -> object:
         # Kolom section ditambah belakangan; kalau ada database lama yang
         # lolos migrasi, baca dengan guard alih-alih KeyError.
         section=row["section"] if "section" in columns else None,
+        # Sama untuk quality_flag: NULL berarti "belum dinilai" (chunk lama),
+        # bukan kualitas buruk.
+        quality_flag=row["quality_flag"] if "quality_flag" in columns else None,
+        parent_text=row["parent_text"] if "parent_text" in columns else None,
         # LEFT JOIN bisa menghasilkan NULL kalau dokumen induknya sudah
         # dihapus. Nama cadangan dipakai supaya sitasi tetap punya sumber yang
         # bisa ditampilkan, meski label aslinya tidak ada lagi.

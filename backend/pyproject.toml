@@ -46,10 +46,18 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Mesin OCR lokal (PP-OCR via ONNX). Dipisah supaya instalasi dasar tetap
-# ringan dan test tidak memuat model; nyalakan dengan `pip install -e .[ocr]`.
-# Tanpa paket ini, halaman pindai langsung ditangani model vision.
+# Mesin OCR lokal (PP-OCR via ONNX Runtime). Dipisah supaya instalasi dasar
+# tetap ringan dan test tidak memuat model; nyalakan dengan
+# `pip install -e .[ocr]`. Tanpa paket ini, halaman pindai langsung ditangani
+# model vision.
+#
+# `rapidocr` (2.x+, default PP-OCRv6 small) diutamakan: pada Perpres 76/2013
+# terukur ~30% lebih cepat, cakupan teks referensi 99.4% (vs 93.9%), dan
+# evidence-hit evaluasi naik 8/24 menjadi 19/24 dibanding PP-OCRv4. Paket
+# lama `rapidocr-onnxruntime` (PP-OCRv4) tetap didukung sebagai fallback —
+# engine memilih yang tersedia, jadi keduanya dideklarasikan.
 ocr = [
+    "rapidocr>=2.0",
     "rapidocr-onnxruntime>=1.4",
 ]
 # Tracing dan evaluasi. Dipisah supaya instalasi dasar tetap ringan.

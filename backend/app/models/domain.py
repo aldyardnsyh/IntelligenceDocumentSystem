@@ -71,17 +71,27 @@ class Chunk:
     #: "Pasal 5"). None untuk chunking paragraf generik. UI menampilkannya
     #: sebagai badge di samping nomor halaman.
     section: str | None = None
+    #: Penanda kualitas ekstraksi dari ``assess_chunk_quality``: "ok" atau
+    #: "low" (teks meragukan — artefak OCR, kata terpecah, atau halaman yang
+    #: dibaca dengan keyakinan rendah). Chunk low TIDAK dibuang: tetap bisa
+    #: jadi sumber, tapi ditandai di prompt agar jawabannya mencantumkan
+    #: catatan berbahasa awam. None = penilaian belum dijalankan (chunk lama).
+    quality_flag: str | None = None
+    #: Badan Pasal utuh bila chunk ini pecahan Pasal panjang (small-to-big).
+    #: Dipakai sebagai konteks ekspansi di prompt menggantikan tetangga ±1:
+    #: pecahan menyebut "ayat (2)" yang rujukannya ada di pecahan lain.
+    parent_text: str | None = None
 
 
 @dataclass(slots=True)
 class RetrievedChunk:
     """Hasil retrieval, siap dikirim ke generator.
 
-    ``score`` adalah skor gabungan hybrid retrieval: RRF yang sudah dinormalisasi
-    ke rentang 0..1. **Bukan** cosine similarity, dan tidak bisa dibandingkan
-    dengan ``similarity_threshold``, ambang itu dinilai pada bukti mentah
-    (``vector_score`` dan ``keyword_score``), bukan pada skor RRF. Mencampur
-    keduanya adalah penyebab paling umum threshold terlihat rusak padahal tidak.
+    ``score`` adalah **bukti terkuat**: nilai terbaik antara cosine similarity
+    vektor dan skor BM25 yang sudah diskalakan ``s/(s+k)`` — keduanya rentang
+    0..1 dan bisa dibandingkan dengan ``similarity_threshold``. (Versi lama
+    memakai RRF ternormalisasi, di mana kandidat terbaik selalu tepat 1.0,
+    sehingga angka itu tidak bercerita seberapa mirip sumbernya.)
     """
 
     chunk: Chunk
@@ -95,10 +105,10 @@ class RetrievedChunk:
 class Citation:
     """Satu sumber yang bisa ditelusuri.
 
-    ``score`` di sini adalah skor gabungan hybrid retrieval (RRF yang sudah
-    dinormalisasi ke 0..1), **bukan** cosine similarity. Dua angka itu tidak
-    bisa dibandingkan: skor RRF selalu 1.0 untuk kandidat terbaik, sedangkan
-    cosine tidak pernah sampai 1.0 kecuali teksnya identik.
+    ``score`` sama dengan ``RetrievedChunk.score``: bukti terkuat antara
+    cosine similarity vektor dan skor BM25 terskalakan, rentang 0..1 — bukan
+    RRF ternormalisasi seperti versi lama, yang selalu 1.0 untuk kandidat
+    terbaik sehingga tidak bercerita tentang kemiripan sebenarnya.
     """
 
     document_id: str

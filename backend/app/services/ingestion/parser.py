@@ -59,6 +59,10 @@ class ParsedPage:
 
     text: str
     page_number: int
+    #: Rata-rata confidence OCR halaman ini (0..1), dari mesin lokal. None
+    #: untuk jalur text-layer (tanpa OCR) dan jalur vision murni (model
+    #: vision tidak mengeluarkan confidence terkalibrasi).
+    ocr_confidence: float | None = None
 
 
 @dataclass(slots=True)
@@ -82,6 +86,9 @@ class ParsedDocument:
     #: Laporan penilaian kualitas text-layer. None untuk dokumen non-PDF.
     #: Disimpan supaya keputusan bisa diaudit lewat log dan test.
     text_quality: TextQualityReport | None = None
+    #: Elemen visual hasil deteksi (lambang, tanda tangan, stempel, paraf).
+    #: Kosong untuk dokumen non-PDF atau bila OpenCV tidak tersedia.
+    visuals: list = field(default_factory=list)
 
     @property
     def full_text(self) -> str:
@@ -91,6 +98,15 @@ class ParsedDocument:
         dipulihkan saat chunking.
         """
         return "\f".join(page.text for page in self.pages)
+
+    @property
+    def page_confidences(self) -> dict[int, float]:
+        """Peta nomor halaman → confidence OCR-nya, hanya yang terukur."""
+        return {
+            page.page_number: page.ocr_confidence
+            for page in self.pages
+            if page.ocr_confidence is not None
+        }
 
     def looks_empty(self) -> bool:
         """True kalau dokumen tidak punya teks yang bisa dipakai.

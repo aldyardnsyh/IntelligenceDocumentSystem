@@ -229,6 +229,31 @@ class Settings(BaseSettings):
     varian pertama (early exit), jadi halaman bersih tidak membayar biaya
     varian ekstra."""
     ocr_variant_voting_enabled: bool = True
+    """Koreksi salah-OCR berbasis leksikon korpus (pass level dokumen).
+
+    Kata yang muncul >= 3 kali di dokumen yang sama dianggap dibaca benar;
+    token yang tidak ada di kamus tapi bentuk kanoniknya (c~e, l~i, rn~m,
+    cl~d — huruf yang lazim tertukar saat pemindaian cetak) bertabrakan
+    dengan kata kamus, dikoreksi. Ini satu-satunya koreksi typo di pipeline:
+    aman karena di-gate frekuensi dan hanya menyentuh token >= 4 huruf, dan
+    korpus legal memang repetitif sehingga kamusnya padat. Matikan bila
+    dokumen sangat pendek (kamusnya sempit, risiko salah koreksi naik)."""
+    ocr_typo_correction_enabled: bool = True
+    """Perbaikan penanda butir/ayat yang rusak (pass level dokumen, lintas
+    halaman): penanda butir dua huruf ("Cc." untuk "c.") dipulihkan dari
+    urutan abjad, nomor daftar definisi yang hilang dipulihkan dari pola
+    barisnya, dan tanda baca akhir butir/ayat dirapikan dari penanda
+    berikutnya. Tanpa ini, ayat/butir yang rusak penandanya bocor dari
+    chunking struktur dan sitasinya salah pasal."""
+    ocr_repair_markers_enabled: bool = True
+    """Chunk visual multimodal: lambang, tanda tangan, stempel, dan paraf
+    yang terdeteksi di halaman pindai dijadikan chunk terindeks dengan
+    caption template (jenis + posisi + teks terdekat). Butuh OpenCV (opsional
+    di instalasi); tanpa itu deteksi dilewati diam-diam. Caption VLM
+    (deskripsi semantik) belum dipasang — template sudah cukup menjawab
+    pertanyaan "lambang apa di kop" / "siapa yang bermaterai".
+    """
+    ocr_visual_chunks_enabled: bool = True
 
     # ------------------------------------------------------------- embedding
     """Model embedding lokal (nol biaya, data tidak keluar).
@@ -277,6 +302,31 @@ class Settings(BaseSettings):
     default_similarity_threshold: float = 0.78
     min_similarity_threshold: float = 0.70
     max_similarity_threshold: float = 0.92
+    """Bar bukti LEXIKAL MURNI untuk lolos tier jawaban kuat.
+
+    Sebuah chunk dianggap bukti kuat kalau skor vektornya mencapai
+    ``default_similarity_threshold`` ATAU skor BM25 ternormalisasi ``s/(s+k)``
+    mencapai bar ini. Dua bar yang berbeda karena keduanya mengukur hal yang
+    berbeda: kemiripan makna vs kecocokan kata. Versi lama memakai satu
+    ambang untuk keduanya (0.78 ≈ BM25 mentah 11.6), sehingga satu-dua kata
+    kunci yang cocok sudah cukup menjawab tanpa label — gejala "asal ada
+    kata kuncinya, langsung dijawab".
+
+    0.85 ≈ BM25 mentah 22.7 pada ``BM25_SATURATION=4.0``: kecocokan leksikal
+    yang benar-benar spesifik (nomor klausul, istilah unik dokumen). Kecocokan
+    di bawah bar ini tetap bisa dijawab — lewat tier bukti lemah
+    (``weak_evidence_floor``), berlabel jujur. Kalibrasi ulang hanya lewat
+    evaluasi (``/analytics/evaluate``), bukan tebakan.
+    """
+    keyword_strong_bar: float = 0.85
+    """Toleransi typo pada pencarian kata (BM25): token query ≥ 6 huruf yang
+    tidak ditemukan di indeks dicocokkan fuzzy ke kata indeks terdekat (edit
+    distance ≤ 1, maks 3 kandidat per token, bobot 0.8). Dokumen legal banyak
+    istilah teknisnya ("penelaahan", "pengklasifikasian") yang mudah salah tik
+    oleh pengguna; tanpa toleransi ini, satu huruf yang salah membuat jalur
+    kata kunci kosong. Vektor menangkap sebagian, tapi nomor klausul dan
+    istilah unik memang jalurnya leksikal."""
+    bm25_fuzzy_enabled: bool = True
     """Floor skor vektor untuk tier bukti lemah.
 
     Kalau gate ambang menolak semua kandidat tapi masih ada yang skornya di

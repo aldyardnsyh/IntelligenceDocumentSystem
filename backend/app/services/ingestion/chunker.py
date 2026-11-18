@@ -39,6 +39,10 @@ class TextSpan:
     #: "Pasal 5"). None untuk chunking paragraf generik. Dipakai UI untuk
     #: badge dan metadata vector store untuk penyaringan.
     section: str | None = None
+    #: Badan PASAL utuh bila span ini adalah pecahan Pasal panjang
+    #: (small-to-big): pecahan yang terindeks tetap ringkas, tapi konteks
+    #: ekspansi saat menjawab memakai pasal utuhnya, bukan tetangga chunk.
+    parent_text: str | None = None
 
     def token_estimate(self) -> int:
         """Perkiraan jumlah token.

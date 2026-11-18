@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import re
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -49,12 +50,30 @@ class OcrLine:
 
 
 def paddle_available() -> bool:
-    """True kalau mesin PP-OCR bisa dimuat di environment ini."""
-    try:
-        import rapidocr_onnxruntime  # noqa: F401, PLC0415
-    except ImportError:
-        return False
-    return True
+    """True kalau mesin PP-OCR bisa dimuat di environment ini.
+
+    Dua generasi paket didukung dan keduanya berbasis ONNX Runtime:
+    ``rapidocr`` 2.x+ (model PP-OCRv5/v6) dan ``rapidocr-onnxruntime`` 1.x
+    (model PP-OCRv4). Versi baru diutamakan.
+    """
+    for module in ("rapidocr", "rapidocr_onnxruntime"):
+        try:
+            __import__(module)  # noqa: F401, PLC0415
+        except ImportError:
+            continue
+        return True
+    return False
+
+
+def _as_list(value) -> list:  # noqa: ANN001
+    """Jadikan list tanpa menyentuh truth value.
+
+    Nilai bisa array NumPy yang melempar ValueError bila diuji kebenarannya
+    langsung.
+    """
+    if value is None:
+        return []
+    return list(value)
 
 
 class PaddleOcrEngine:
@@ -64,6 +83,18 @@ class PaddleOcrEngine:
     belasan MB), bukan per halaman. Thread-safety: RapidOCR tidak dijamin
     thread-safe, dan ingestion berjalan di thread pekerja — kunci memastikan
     dua halaman tidak menembak model yang sama bersamaan.
+
+    Dua generasi paket, dengan keluaran yang bentuknya berbeda:
+
+    - ``rapidocr`` >= 2 (PP-OCRv5/v6, default): ``engine(img)`` mengembalikan
+      objek beratribut ``txts``/``scores``/``boxes``. Diukur pada Perpres
+      76/2013: ~30% lebih cepat, confidence ~0.99, kata tidak menempel, dan
+      baris yang terlewat oleh v4 terbaca.
+    - ``rapidocr-onnxruntime`` 1.x (PP-OCRv4, fallback): mengembalikan tuple
+      ``(list[box,text,score], elapsed)``.
+
+    Model v6 yang dipakai adalah varian *small* — tetap ONNX Runtime murni,
+    ~29 MB di disk, RAM sekelas v4 mobile, aman untuk VPS 2 GB.
     """
 
     name = "paddle"
@@ -71,15 +102,29 @@ class PaddleOcrEngine:
     def __init__(self) -> None:
         self._engine = None
         self._lock = threading.Lock()
+        #: "rapidocr3" (PP-OCRv5/v6) atau "rapidocr1" (PP-OCRv4); ditentukan
+        #: sekali saat engine dimuat.
+        self._api = "rapidocr3"
 
     def _get_engine(self):  # noqa: ANN202
         if self._engine is None:
             with self._lock:
                 if self._engine is None:
-                    from rapidocr_onnxruntime import RapidOCR  # noqa: PLC0415
+                    try:
+                        from rapidocr import RapidOCR  # noqa: PLC0415
 
-                    self._engine = RapidOCR()
-                    logger.info("Mesin PP-OCR (RapidOCR) siap.")
+                        self._engine = RapidOCR()
+                        self._api = "rapidocr3"
+                        logger.info("Mesin PP-OCR (rapidocr 3.x, PP-OCRv6 small) siap.")
+                    except ImportError:
+                        from rapidocr_onnxruntime import RapidOCR  # noqa: PLC0415
+
+                        self._engine = RapidOCR()
+                        self._api = "rapidocr1"
+                        logger.info(
+                            "Mesin PP-OCR (rapidocr-onnxruntime 1.x, PP-OCRv4) siap. "
+                            "Pasang paket `rapidocr` untuk model PP-OCRv6 yang lebih akurat."
+                        )
         return self._engine
 
     def recognize_page_voted(
@@ -179,18 +224,36 @@ class PaddleOcrEngine:
             image = image.convert("RGB")
 
         try:
-            raw_result, _elapsed = engine(image)
+            result = engine(image)
         except Exception as exc:  # noqa: BLE001
             raise RuntimeError(f"PP-OCR gagal mengenali halaman: {exc}") from exc
 
+        # rapidocr 3.x: objek dengan atribut txts/scores/boxes; 1.x: tuple
+        # (list[box, text, score], elapsed). Keduanya diratakan jadi OcrLine.
+        # Atribut bisa array NumPy, jadi TIDAK boleh lewat `or []` — truth
+        # value array multi-elemen melempar ValueError.
+        if self._api == "rapidocr3":
+            texts = _as_list(getattr(result, "txts", None))
+            scores = _as_list(getattr(result, "scores", None))
+            boxes = _as_list(getattr(result, "boxes", None))
+        else:
+            raw_result = result[0] if isinstance(result, tuple) else result
+            texts = [str(text) for _box, text, _score in (raw_result or [])]
+            scores = [float(score) for _box, _text, score in (raw_result or [])]
+            boxes = [box for box, _text, _score in (raw_result or [])]
+
         lines: list[OcrLine] = []
-        if not raw_result:
-            return lines
-        for box, text, confidence in raw_result:
-            if not isinstance(box, (list, tuple)) or len(box) < 4:
+        for box, text, confidence in zip(boxes, texts, scores, strict=False):
+            if not text:
                 continue
-            xs = [float(point[0]) for point in box[:4]]
-            ys = [float(point[1]) for point in box[:4]]
+            try:
+                # Kotak di rapidocr 3.x bisa array NumPy, bukan list/tuple.
+                if box is None or len(box) < 4:
+                    continue
+                xs = [float(point[0]) for point in list(box)[:4]]
+                ys = [float(point[1]) for point in list(box)[:4]]
+            except (TypeError, ValueError, IndexError):
+                continue
             lines.append(
                 OcrLine(
                     text=str(text).strip(),
@@ -662,6 +725,50 @@ def find_gap_bands(
 
     bands.sort(key=lambda band: band[3] - band[1], reverse=True)
     return bands
+
+
+#: Baris penanda struktur tidak boleh dibuang apa pun posisinya: heading
+#: pendek di dasar halaman masih isi, bukan catchword.
+_CATCHWORD_HEADING_RE = re.compile(r"^(Pasal\s*\d+|BAB\s*[IVXLC]+|Bagian\s+[A-Z])")
+
+
+def strip_catchwords(lines: list[OcrLine]) -> list[OcrLine]:
+    """Buang penanda lanjutan ("catchword") rata-kanan di dasar halaman.
+
+    Lembaran Negara mencetak potongan kata pertama halaman BERIKUTNYA di
+    sudut kanan-bawah halaman ini ("(2) Penyediaan..."). Tanpa strip
+    berbasis posisi, artefak itu lolos dari pembersih berbasis pola teks
+    (bentuknya seperti isi biasa) dan terindeks sebagai kalimat mandiri
+    yang terpotong. Ciri posisinya khas: mulai jauh di kanan, menempel ke
+    tepi kanan margin, di zona dasar halaman, dan pendek. Ukuran halaman
+    tidak tersedia di sini, jadi pembandingnya adalah ekstrem baris
+    halaman itu sendiri — catchword nyata adalah baris paling kanan.
+
+    Heading struktur dikecualikan: judul pendek di dasar halaman tetap isi.
+    """
+    if len(lines) < 2:
+        return lines
+    max_bottom = max(line.bottom for line in lines)
+    max_right = max(line.right for line in lines)
+    if max_bottom <= 0 or max_right <= 0:
+        return lines
+    kept: list[OcrLine] = []
+    for line in lines:
+        in_bottom_zone = line.bottom >= 0.85 * max_bottom
+        starts_far_right = line.x >= 0.60 * max_right
+        touches_right_margin = line.right >= 0.97 * max_right
+        short = len(line.text.split()) <= 4
+        if (
+            in_bottom_zone
+            and starts_far_right
+            and touches_right_margin
+            and short
+            and not _CATCHWORD_HEADING_RE.match(line.text.strip())
+        ):
+            logger.info("Catchword dibuang: %r", line.text.strip())
+            continue
+        kept.append(line)
+    return kept
 
 
 def lines_to_page_text(lines: list[OcrLine]) -> str:
