@@ -12,18 +12,8 @@ import type { NextConfig } from "next";
  * sehingga login mengembalikan HTML alih-alih JSON.
  *
  * Karena itu nilai defaultnya `http://api:8000` (nama service di compose).
- * Mode fixture di-browser dikendalikan `NEXT_PUBLIC_USE_BACKEND`, bukan
- * lewat nilai kosong di sini.
  */
 const BACKEND_ORIGIN = process.env.BACKEND_ORIGIN ?? "http://api:8000";
-
-/**
- * Sakelar profil, dibaca dengan aturan yang sama seperti `readFlag` di
- * `src/lib/api/config.ts` supaya rewrite dan UI tidak pernah berbeda pendapat.
- */
-const useBackend = /^(1|true|yes|on)$/i.test(
-  process.env.NEXT_PUBLIC_USE_BACKEND?.trim() ?? "",
-);
 
 const nextConfig: NextConfig = {
   /**
@@ -58,15 +48,10 @@ const nextConfig: NextConfig = {
    * build-argumen kalau nanti berubah. Compose sudah mengaturnya.
    */
   async rewrites() {
-    // Profil demo (`NEXT_PUBLIC_USE_BACKEND` kosong): tidak ada backend yang
-    // bisa dituju. Tanpa cabang ini, `/api/v1/*` di Vercel tetap diproxy ke
-    // `http://api:8000` dan gagal, padahal harusnya jatuh ke fixture browser.
-    if (!useBackend) return [];
-
-    // Saat backend aktif, rewrite selalu menyala. Cabang "mati" di sini
-    // sengaja tidak membaca nilai `BACKEND_ORIGIN` kosong; itulah penyebab
-    // request `/api/v1/*` sampai ke halaman Next alih-alih backend. Sakelar
-    // profil dibaca terpisah di atas.
+    // Selalu aktif: frontend tanpa backend sudah tidak ada (mode demo
+    // dihapus). Tanpa backend yang benar, /api/v1/* jatuh ke halaman Next —
+    // itu gejalanya, dan perbaikannya env BACKEND_ORIGIN, bukan mematikan
+    // rewrite.
     return [
       {
         source: "/api/v1/:path*",
