@@ -386,6 +386,24 @@ Tunggu sampai selesai, lalu periksa ulang dengan Langkah 5.
 Konfigurasi Anda di `backend/.env` **tidak tersentuh** oleh pembaruan, karena
 berkas itu tidak ada di repositori.
 
+### Catatan pembaruan: mesin OCR naik ke PP-OCRv6 (wajib dibaca sekali)
+
+Versi terbaru mengganti mesin OCR halaman pindai ke **PP-OCRv6 small** via
+paket `rapidocr` 3.x — tetap ONNX Runtime murni, tanpa dependensi sistem
+baru, modelnya hanya ~29 MB. Pada Perpres 76/2013 terukur: cakupan teks
+referensi per Pasal 93,9% menjadi 99,4%, evidence-hit evaluasi 8/24 menjadi
+20/24, dan waktu per halaman turun ~30%. Yang perlu dilakukan sekali:
+
+1. `git pull` seperti di atas (`docker compose up -d --build` menginstal
+   dependensi baru secara otomatis).
+2. **Hapus dan unggah ulang dokumen yang lama** supaya di-OCR ulang dengan
+   mesin baru — dokumen lama memakai hasil OCR lama sampai diunggah ulang.
+3. RAM tidak bertambah: model v6 sekelas v4 yang lama, dan hanya aktif saat
+   ingestion (bukan saat menjawab pertanyaan).
+
+Bila versi baru gagal terpasang di VPS, aplikasi otomatis jatuh ke mesin
+lama (PP-OCRv4) tanpa perubahan kode.
+
 ---
 
 ## Masalah yang sering terjadi

@@ -1,0 +1,8 @@
+pymupdf
+opencv-python-headless
+numpy
+pytesseract
+rapidfuzz
+jiwer
+rank_bm25
+# opsional (VLM caption/transkripsi): anthropic

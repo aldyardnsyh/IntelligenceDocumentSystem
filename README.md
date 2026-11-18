@@ -1,4 +1,4 @@
-﻿# Intelligent Document Assistant
+# Intelligent Document Assistant
 
 <!-- Stack teknologi. Versinya disamakan dengan pyproject.toml dan
      package.json, jadi badge ini ikut berubah saat dependency diperbarui. -->
@@ -51,31 +51,41 @@ Unggah -> parse -> [PDF scan? -> render halaman -> OCR: PP-OCR lokal, halaman
 Dua jalur ingestion yang menentukan mutu retrieval, khususnya untuk dokumen
 legal hasil pindai (misal Lembaran Negara dari peraturan.bpk.go.id):
 
-1. **OCR hybrid PP-OCR + vision.** Text-layer PDF dinilai dulu (mode
-   `auto`). PDF pindai yang text-layer-nya kosong â€” atau rusak seperti PDF
+1. **OCR hybrid PP-OCRv6 + vision.** Text-layer PDF dinilai dulu (mode
+   `auto`). PDF pindai yang text-layer-nya kosong — atau rusak seperti PDF
    BPK yang urutan bacanya kacau dan kata-katanya terpecah (`Undang-Undan g`)
-   â€” dirender per halaman menjadi gambar dan diekstraksi **PP-OCR lokal**
-   (model PP-OCR via RapidOCR/ONNX, tanpa biaya). Urutan baca dua kolom
-   dipulihkan dari bounding box, dan hanya halaman dengan confidence rendah
-   yang dieskalasi ke model vision Groq. Sinyal deteksi kerusakan text-layer
-   diukur, bukan ditebak (rasio token satu huruf, halaman kosong, baris
-   noise). Lihat `backend/app/services/ingestion/text_quality.py`,
-   `ocr_engine.py`, dan `ocr.py`.
+   — dirender per halaman menjadi gambar dan diekstraksi **PP-OCR lokal**
+   (PP-OCRv6 small via RapidOCR/ONNX Runtime, tanpa biaya dan tanpa
+   dependensi sistem; PP-OCRv4 tetap didukung sebagai fallback). Urutan baca
+   dua kolom dipulihkan dari bounding box, penanda lanjutan halaman
+   ("catchword") dibuang berbasis posisi, dan hanya halaman dengan
+   confidence rendah yang dieskalasi ke model vision Groq. Pass level
+   dokumen menyempurnakan hasilnya: koreksi salah-OCR leksikon korpus
+   (huruf yang lazim tertukar c~e, l~i, rn~m) dan pemulihan penanda
+   butir/ayat yang rusak. Sinyal deteksi kerusakan text-layer diukur, bukan
+   ditebak. Elemen visual halaman (lambang, tanda tangan, stempel, paraf)
+   ikut terdeteksi dan menjadi chunk terindeks. Lihat
+   `backend/app/services/ingestion/text_quality.py`, `ocr_engine.py`,
+   `ocr.py`, dan `visuals.py`.
 2. **Chunking struktur hukum.** Dokumen yang terdeteksi sebagai peraturan
    (heading BAB/Bagian/Pasal) dipecah **per Pasal**, bukan per paragraf.
    Baris pertama setiap chunk memuat konteksnya:
-   `BAB II â€“ PENGELOLAAN PENGADUAN Â· Bagian Kedua â€“ Sarana Pengaduan Â· Pasal 5`
-   â€” retrieval jadi tahu Pasal mana yang sedang dicari, dan halaman detail
+   `BAB II – PENGELOLAAN PENGADUAN · Bagian Kedua – Sarana Pengaduan · Pasal 5`
+   — retrieval jadi tahu Pasal mana yang sedang dicari, dan halaman detail
    menampilkan badge "Pasal N" di tiap chunk. Dokumen non-legal tetap memakai
    chunking paragraf generik. Lihat `backend/app/services/ingestion/legal.py`.
 
 3. **Retrieval berlapis.** BM25 dengan stemmer Sastrawi (`pengaduan`,
    `mengadu`, `diadukan` bertemu di bentuk dasar yang sama), embedding
    `multilingual-e5-base`, dan reranker cross-encoder multilingual
-   (`bge-reranker-v2-m3`) yang menilai ulang kandidat. Jawaban tidak lagi
-   ditolak keras di batas ambang: kalau bukti lemah tapi ada, jawaban tetap
-   diberikan dengan label "bukti terbatas"; kalau benar-benar kosong,
-   penolakan disertai saran kata kunci.
+   (`bge-reranker-v2-m3`) yang menilai ulang seluruh kandidat yang lolos
+   gate. Gate buktinya dua bar: jawaban kuat butuh kemiripan semantik
+   (vektor >= ambang) ATAU kecocokan kata kunci yang benar-benar spesifik
+   (`keyword_strong_bar`); kecocokan kata kunci biasa jatuh ke jawaban
+   berlabel "bukti terbatas", bukan dijawab tanpa label. Pasal panjang
+   dipecah per ayat, dan tiap pecahan membawa badan Pasal utuhnya sebagai
+   konteks ekspansi saat menjawab. Kalau benar-benar kosong, penolakan
+   disertai saran kata kunci.
 
 Tiga aturan yang menjaga sistem ini bisa dipercaya:
 
@@ -341,15 +351,17 @@ Folder `backend/samples/` berisi tiga berkas dengan format berbeda:
 2. Jawaban muncul mengalir, diikuti kartu sitasi.
 3. Klik salah satu kartu untuk membuka dokumen sumbernya di chunk yang tepat.
 
-### Mengatur seberapa ketat pencarian
+### Membaca alur sistem di `/settings`
 
-Buka `/settings`:
-
-- **Top K**: berapa banyak potongan dokumen yang diambil. Semakin besar,
-  semakin banyak konteks, tapi jawaban bisa kurang fokus.
-- **Ambang kemiripan**: batas minimal skor agar sebuah potongan dipakai.
-  Rentang 0,70 sampai 0,92 diukur untuk model embedding yang dipakai. Nilai
-  lebih tinggi membuat sistem lebih sering menjawab "tidak ditemukan".
+Halaman Pengaturan tidak lagi menawarkan slider top-k dan ambang kemiripan:
+nilai itu dikalibrasi lewat evaluasi dan dikunci di konfigurasi backend
+(`app/core/config.py`), karena menggesernya dari antarmuka tanpa
+pengukuran hanya menambah satu tempat untuk salah. Sebagai gantinya,
+halaman itu memperlihatkan alur lengkap sistem per tahap — dari dokumen
+diunggah, OCR, chunking, basis pengetahuan, retrieval dan model bahasa,
+sampai jawaban — lengkap dengan angka terkini (jumlah dokumen, halaman,
+chunk) dan status komponen. Zona berbahaya (reset semua sesi) tetap di
+sana.
 
 ### Percakapan privat per dokumen
 
@@ -412,11 +424,29 @@ cd backend
 python -m scripts.eval_perpres --pdf "dokumen-anda.pdf" --json-out hasil-eval.json
 ```
 
+Untuk evaluasi kualitas ekstraksi terhadap **data gold** (teks referensi
+manusia + pertanyaan ber-evidence verbatim + pertanyaan yang harus ditolak),
+jalankan:
+
+```powershell
+python -m scripts.eval_gold --pdf "Perpres 76 2013.pdf"          # kondisi produksi (rerank aktif)
+python -m scripts.eval_gold --pdf ... --tanpa-perbaikan          # pembanding A/B
+```
+
+Skrip ini mengekstraksi PDF dengan PP-OCR lokal ke penyimpanan sementara
+(tidak menyentuh data aplikasi), lalu melaporkan: cakupan dan kemiripan teks
+per Pasal terhadap `evaluation/gold-perpres-76-2013.json`, berapa banyak
+evidence verbatim dari `evaluation/gold-qa.json` yang muncul di top-5, dan
+berapa pertanyaan tanpa jawaban yang benar ditolak. Aset gold datanya ada di
+`backend/evaluation/`. Perpaduan terukur di Perpres 76/2013: cakupan per
+Pasal 99,4% dan evidence-hit 20/24 dengan PP-OCRv6 + reranker (dari 8/24
+sebelum upgrade).
+
 `--pdf` wajib dan harus menunjuk berkas Anda sendiri; tidak ada path lokal yang
 di-hardcode di repo, sehingga clone baru bisa langsung dipakai untuk dokumen
 apa pun. Dataset bawaan `evaluation/dataset-perpres.json` hanyalah **contoh**
-22 soal untuk Perpres 76 Tahun 2013 â€” 18 soal yang harus dijawab, 3 yang harus
-ditolak, dan 1 sapaan yang harus dijawab sebagai smalltalk â€” bukan keterikatan
+22 soal untuk Perpres 76 Tahun 2013 — 18 soal yang harus dijawab, 3 yang harus
+ditolak, dan 1 sapaan yang harus dijawab sebagai smalltalk — bukan keterikatan
 sistem pada korpus tersebut. Sistem berlaku untuk dokumen apa pun; buat dataset
 sendiri berisi pertanyaan dan `ground_truth` untuk dokumen Anda, lalu jalankan
 perintah yang sama.

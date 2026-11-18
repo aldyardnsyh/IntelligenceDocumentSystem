@@ -1,0 +1,40 @@
+{
+  "doc": "Perpres 76/2013",
+  "keterangan": "evidence = frasa verbatim dari data valid (gold_perpres_76_2013.json). expected = lokasi jawaban.",
+  "answerable": [
+    {"id": "q01", "question": "Paling lambat berapa hari sejak menerima layanan pengadu dapat menyampaikan pengaduan?", "evidence": "paling lambat 30 (tiga puluh) hari sejak pengadu menerima layanan", "expected_pasal": 12, "expected_ayat": 2, "answer": "30 hari sejak pengadu menerima layanan"},
+    {"id": "q02", "question": "Berapa hari penyelenggara wajib menyelesaikan pengaduan sejak berkas dinyatakan lengkap?", "evidence": "paling lambat 60 (enam puluh) hari sejak berkas pengaduan dinyatakan lengkap", "expected_pasal": 12, "expected_ayat": 3, "answer": "Paling lambat 60 hari"},
+    {"id": "q03", "question": "Apa yang dimaksud dengan pengadu?", "evidence": "Pengadu adalah seluruh pihak baik warga negara maupun penduduk", "expected_pasal": 1, "expected_butir": "7", "answer": "Seluruh pihak (WNI/penduduk, perseorangan, kelompok, badan hukum) yang menyampaikan pengaduan"},
+    {"id": "q04", "question": "Siapa yang disebut pengelola pengaduan pelayanan publik?", "evidence": "pejabat, pegawai, atau orang yang ditugaskan oleh penyelenggara untuk mengelola pengaduan masyarakat", "expected_pasal": 1, "expected_butir": "6", "answer": "Pejabat, pegawai, atau orang yang ditugaskan penyelenggara untuk mengelola pengaduan"},
+    {"id": "q05", "question": "Apa saja isi minimal formulir pengaduan?", "evidence": "identitas pengadu yang terdiri atas nama dan alamat lengkap", "expected_pasal": 5, "expected_ayat": 1, "answer": "Identitas pengadu, uraian keluhan, tempat-waktu-tanda tangan"},
+    {"id": "q06", "question": "Media elektronik apa yang dapat disediakan untuk menyampaikan pengaduan?", "evidence": "surat elektronik, pesan layanan singkat, dan telepon", "expected_pasal": 5, "expected_ayat": 4, "answer": "Surat elektronik, pesan layanan singkat, telepon"},
+    {"id": "q07", "question": "Bolehkah pengelola menerima imbalan terkait pengelolaan pengaduan?", "evidence": "menerima imbalan dalam bentuk apapun untuk kegiatan yang berkaitan dengan pengelolaan pengaduan", "expected_pasal": 14, "answer": "Tidak, dilarang (Pasal 14 huruf b)"},
+    {"id": "q08", "question": "Apa yang harus dilakukan pengelola jika pengadu tidak mampu menulis atau membaca?", "evidence": "pengelola wajib membantu mengisi formulir", "expected_pasal": 6, "expected_ayat": 2, "answer": "Pengelola wajib membantu mengisi formulir"},
+    {"id": "q09", "question": "Apa saja tahapan mekanisme dan tata cara pengelolaan pengaduan?", "evidence": "penelaahan dan pengklasifikasian, terdiri dari identifikasi masalah", "expected_pasal": 8, "expected_ayat": 2, "answer": "Penerimaan, penelaahan dan pengklasifikasian, penyaluran, penyelesaian"},
+    {"id": "q10", "question": "Siapa yang melakukan koordinasi pengelolaan pengaduan secara nasional?", "evidence": "Menteri melakukan koordinasi pengelolaan pengaduan secara nasional", "expected_pasal": 18, "expected_ayat": 1, "answer": "Menteri (yang bertanggung jawab di bidang pendayagunaan aparatur negara dan reformasi birokrasi)"},
+    {"id": "q11", "question": "Bagaimana pihak yang diadukan harus diperlakukan sebelum pembuktian selesai?", "evidence": "memperlakukan pihak yang diadukan sebagai pihak yang tidak bersalah sampai proses pembuktian selesai", "expected_pasal": 16, "answer": "Sebagai pihak yang tidak bersalah"},
+    {"id": "q12", "question": "Bentuk perlindungan apa yang dapat diberikan kepada pengadu?", "evidence": "jaminan kerahasiaan identitas pengadu", "expected_pasal": 15, "expected_ayat": 2, "answer": "Jaminan kerahasiaan identitas pengadu"},
+    {"id": "q13", "question": "Dalam jangka waktu berapa lama penyelenggara wajib menyediakan sarana pengaduan sejak peraturan ini berlaku?", "evidence": "dalam jangka waktu paling lama 1 (satu) tahun", "expected_pasal": 20, "answer": "Paling lama 1 tahun"},
+    {"id": "q14", "question": "Kapan Peraturan Presiden ini mulai berlaku?", "evidence": "mulai berlaku pada tanggal diundangkan", "expected_pasal": 21, "answer": "Pada tanggal diundangkan (6 Desember 2013)"},
+    {"id": "q15", "question": "Siapa yang dapat mewakili orang yang dirugikan untuk menyampaikan pengaduan?", "evidence": "pihak lain yang menerima kuasa untuk mewakilinya", "expected_pasal": 12, "expected_ayat": 1, "answer": "Pihak lain yang menerima kuasa"},
+    {"id": "q16", "question": "Apa saja kewajiban penyelenggara dalam pengelolaan pengaduan?", "evidence": "mengumumkan nama dan alamat kantor penanggung jawab pengelola pengaduan", "expected_pasal": 2, "expected_ayat": 2, "answer": "Pasal 2 ayat (2) huruf a-f"},
+    {"id": "q17", "question": "Apa saja yang dimuat dalam laporan pengelolaan pengaduan?", "evidence": "materi dan kategori pengaduan, waktu penerimaan, status penyelesaian, hasil penanganan, serta tanggapan pengadu", "expected_pasal": 9, "expected_ayat": 2, "answer": "Materi dan kategori, waktu penerimaan, status penyelesaian, hasil penanganan, tanggapan pengadu"},
+    {"id": "q18", "question": "Siapa yang menandatangani dan menetapkan Peraturan Presiden ini?", "evidence": "SUSILO BAMBANG YUDHOYONO", "expected_pasal": "penutup", "answer": "Susilo Bambang Yudhoyono (Presiden RI)"},
+    {"id": "q19", "question": "Pada tanggal berapa Peraturan Presiden ini ditetapkan?", "evidence": "6 Desember 2013", "expected_pasal": "penutup", "answer": "6 Desember 2013"},
+    {"id": "q20", "question": "Informasi apa yang harus tersedia pada setiap sarana pengaduan?", "evidence": "informasi tentang mekanisme atau tata cara pengaduan secara langsung, tidak langsung, dan/atau elektronik", "expected_pasal": 4, "answer": "Informasi mekanisme/tata cara pengaduan langsung, tidak langsung, elektronik"},
+    {"id": "q21", "question": "Bagaimana sikap pengelola dalam memberikan pelayanan kepada pengadu?", "evidence": "empati, hormat dan santun, tanpa pamrih, dan tanpa unsur pemaksaan", "expected_pasal": 13, "answer": "Pasal 13 huruf a-f"},
+    {"id": "q22", "question": "Apa yang dimaksud dengan standar pelayanan?", "evidence": "tolok ukur yang dipergunakan sebagai pedoman penyelenggaraan pelayanan", "expected_pasal": 1, "expected_butir": "9", "answer": "Tolok ukur pedoman penyelenggaraan dan acuan penilaian kualitas pelayanan"},
+    {"id": "q23", "question": "Berapa nomor Lembaran Negara untuk Peraturan Presiden ini?", "evidence": "TAHUN 2013 NOMOR 191", "expected_pasal": "penutup", "answer": "Lembaran Negara RI Tahun 2013 Nomor 191"},
+    {"id": "q24", "question": "Apa yang wajib dilakukan terhadap hasil pemantauan dan evaluasi pengelolaan pengaduan?", "evidence": "wajib ditindaklanjuti oleh penyelenggara untuk peningkatan penyelenggaraan pelayanan publik", "expected_pasal": 10, "expected_ayat": 2, "answer": "Wajib ditindaklanjuti untuk peningkatan penyelenggaraan pelayanan publik"}
+  ],
+  "visual": [
+    {"id": "v01", "question": "Lambang apa yang tampak pada kop setiap halaman peraturan ini?", "expected_visual_kind": "lambang", "answer": "Lambang negara (Garuda) di atas tulisan PRESIDEN REPUBLIK INDONESIA"},
+    {"id": "v02", "question": "Apakah ada tanda tangan atau stempel pengesahan salinan pada halaman terakhir?", "expected_visual_kind": "tanda_tangan_atau_stempel", "expected_page": 14, "answer": "Ya, pengesahan 'Salinan sesuai dengan aslinya' oleh Sekretariat Kabinet RI disertai tanda tangan"}
+  ],
+  "unanswerable": [
+    {"id": "u01", "question": "Berapa denda administratif bagi pengelola yang menerima imbalan?", "answer": "Tidak ada dalam dokumen; sistem harus menolak menjawab"},
+    {"id": "u02", "question": "Siapa nama Menteri PANRB yang menjabat saat ini?", "answer": "Tidak ada dalam dokumen; sistem harus menolak menjawab"},
+    {"id": "u03", "question": "Apa sanksi pidana bagi penyelenggara yang tidak menyediakan sarana pengaduan?", "answer": "Tidak diatur dalam dokumen; sistem harus menolak menjawab"},
+    {"id": "u04", "question": "Apakah Peraturan Presiden ini sudah dicabut atau diubah?", "answer": "Dokumen tidak memuat informasi tersebut; sistem harus menolak atau menyatakan tidak tahu"}
+  ]
+}

@@ -1,0 +1,94 @@
+{
+  "A_kualitas_teks": {
+    "1_lapisan_teks_bawaan_PDF (ingest lama)": {
+      "CER_%": 42.4,
+      "WER_%": 59.5
+    },
+    "2_OCR_Tesseract_mentah": {
+      "CER_%": 5.9,
+      "WER_%": 6.0
+    },
+    "3_pipeline_baru (bersih)": {
+      "CER_%": 0.9,
+      "WER_%": 1.1
+    }
+  },
+  "B_struktur_pipeline_baru": {
+    "pasal_ditemukan": "21/21",
+    "ayat_terdeteksi": "41/41",
+    "kemiripan_teks_per_pasal_%": {
+      "rata2": 100.0,
+      "min": 99.6,
+      "pasal_<97%": []
+    }
+  },
+  "C_retrieval": {
+    "baseline_chunk_500_karakter_pada_teks_bawaan": {
+      "hit@1_%": 62.5,
+      "hit@3_%": 75.0,
+      "hit@5_%": 83.3,
+      "peringkat_pertama": {
+        "q01": 1,
+        "q02": 1,
+        "q03": null,
+        "q04": 1,
+        "q05": 2,
+        "q06": 2,
+        "q07": 1,
+        "q08": 1,
+        "q09": null,
+        "q10": 1,
+        "q11": 1,
+        "q12": 1,
+        "q13": 1,
+        "q14": null,
+        "q15": 1,
+        "q16": 5,
+        "q17": 1,
+        "q18": null,
+        "q19": 1,
+        "q20": 1,
+        "q21": 1,
+        "q22": 1,
+        "q23": 5,
+        "q24": 2
+      }
+    },
+    "pipeline_baru_chunk_per_pasal_ayat (BM25 saja)": {
+      "hit@1_%": 75.0,
+      "hit@3_%": 87.5,
+      "hit@5_%": 91.7,
+      "peringkat_pertama": {
+        "q01": 1,
+        "q02": 1,
+        "q03": null,
+        "q04": 1,
+        "q05": 2,
+        "q06": 1,
+        "q07": 1,
+        "q08": 1,
+        "q09": null,
+        "q10": 1,
+        "q11": 1,
+        "q12": 1,
+        "q13": 1,
+        "q14": 1,
+        "q15": 1,
+        "q16": 1,
+        "q17": 1,
+        "q18": 5,
+        "q19": 1,
+        "q20": 1,
+        "q21": 1,
+        "q22": 2,
+        "q23": 2,
+        "q24": 1
+      }
+    }
+  },
+  "D_visual": {
+    "chunk_visual": 3,
+    "pertanyaan_visual_punya_chunk_jawaban (cek keberadaan, bukan retrieval)": "2/2",
+    "baseline": "0/2 (tidak ada chunk visual)"
+  }
+}
