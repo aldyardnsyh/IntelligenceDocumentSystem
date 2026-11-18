@@ -386,7 +386,8 @@ function extractiveAnswer(
   const lines: string[] = [];
 
   lines.push(
-    `Informasi yang paling mendekati pertanyaan Anda ditemukan di ${top.length} chunk berikut.`,
+    `Mode demo aktif (tanpa model bahasa). Berikut cuplikan paling relevan `
+      + `dari ${top.length} chunk berikut:`,
   );
   lines.push("");
   lines.push(`Chunk #${lead.citation.chunk_index + 1} dari ${lead.citation.document_name}`);
@@ -406,8 +407,8 @@ function extractiveAnswer(
 
   lines.push("");
   lines.push(
-    "Jawaban ini disusun langsung dari kutipan chunk di atas. Backend FastAPI akan "
-    + "mengganti langkah ini dengan sintesis LLM yang tetap terikat pada kutipan yang sama.",
+    "Ini ringkasan ekstraktif langsung dari dokumen (tanpa sintesis model). "
+      + "Jalankan mode backend agar mendapat jawaban alami.",
   );
 
   return lines.join("\n");
