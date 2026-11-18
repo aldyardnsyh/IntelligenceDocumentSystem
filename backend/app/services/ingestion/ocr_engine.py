@@ -1,4 +1,4 @@
-"""Mesin OCR lokal: PP-OCR via RapidOCR (ONNX) + rekonstruksi urutan baca.
+"""Mesin OCR lokal: PP-OCR via ONNX Runtime + rekonstruksi urutan baca.
 
 Text-layer rusak pada Lembaran Negara memangkas urutan baca karena layout
 dokumen aslinya dua kolom. Mesin PP-OCR mengembalikan **bounding box** untuk
@@ -15,8 +15,10 @@ instalasinya sama di Windows developer maupun container Linux.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -79,6 +81,80 @@ class PaddleOcrEngine:
                     self._engine = RapidOCR()
                     logger.info("Mesin PP-OCR (RapidOCR) siap.")
         return self._engine
+
+    def recognize_page_voted(
+        self,
+        image_bytes: bytes,
+        *,
+        variants: tuple[str, ...] = ("as_is", "clahe_sharpen", "adaptive_threshold"),
+        early_exit_confidence: float = 0.75,
+        min_chars: int = 40,
+        on_variant: Callable[[str, int, float], None] | None = None,
+    ) -> tuple[list[OcrLine], dict[str, float]]:
+        """Kenali satu halaman lewat beberapa varian citra, lalu vote hasilnya.
+
+        Varian praproses membaca halaman yang sama dari sudut yang berbeda:
+        halaman yang tinta capnya menutup baris biasanya bersih pada binarisasi
+        adaptif, halaman kontras rendah biasanya bersih pada CLAHE. Satu varian
+        yang salah huruf jarang salah di tempat yang sama dengan varian lain —
+        kesepakatan mayoritas merekam teks yang benar-benar ada.
+
+        Argumen ini bukan selalu lebih mahal. Halaman yang as-is sudah dibaca
+        dengan confidence tinggi dan cukup panjang teksnya berhenti setelah
+        varian pertama, jadi halaman bersih tidak membayar biaya varian tambahan.
+        Halaman buruk (confidence rendah) membayar hingga len(variants) tahap.
+
+        Args:
+            image_bytes: Gambar halaman PNG.
+            variants: Nama varian yang dicoba berurutan; ``as_is`` selalu
+                di depan supaya early-exit bermakna.
+            early_exit_confidence: Ambang confidence halaman as-is untuk berhenti
+                membaca varian lebih.
+            min_chars: Jumlah karakter minimum halaman as-is supaya early exit
+                mengizinkan berhenti; halaman hampir kosong tetap dibaca varian
+                lain dan kalau tetap kosong, eskalasi vision yang mengambil.
+            on_variant: Callback opsional ``(nama, jumlah baris, confidence)``
+                untuk diagnostik.
+
+        Returns:
+            Pasangan ``(baris terurut hasil vote, confidence per varian)``.
+            Kosong pada map confidence berarti as-is dilepas tanpa vote.
+
+        Raises:
+            RuntimeError: Halaman tak bisa dibaca sama sekali.
+        """
+        if list(variants)[0] != "as_is":
+            variants = ("as_is", *variants)
+
+        try:
+            prepared = make_preprocess_variants(image_bytes, variants)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Varian praproses gagal dibuat (%s); pakai as-is.", exc)
+            lines = self.recognize_page(image_bytes)
+            return reconstruct_reading_order(lines), {"as_is": page_confidence(lines)}
+        if not prepared:  # pragma: no cover - fallback defensif
+            lines = self.recognize_page(image_bytes)
+            return reconstruct_reading_order(lines), {"as_is": page_confidence(lines)}
+
+        readings: list[list[OcrLine]] = []
+        confidences: dict[str, float] = {}
+        for name, payload in prepared:
+            lines = self.recognize_page(payload)
+            conf = page_confidence(lines)
+            confidences[name] = conf
+            readings.append(lines)
+            if on_variant is not None:
+                with contextlib.suppress(Exception):
+                    on_variant(name, len(lines), conf)
+            chars = sum(len(line.text) for line in lines)
+            if name == "as_is" and conf >= early_exit_confidence and chars >= min_chars:
+                break
+
+        if len(readings) <= 1:
+            return reconstruct_reading_order(readings[0]), confidences
+
+        voted = vote_lines(readings)
+        return voted, confidences
 
     def recognize_page(self, image_bytes: bytes) -> list[OcrLine]:
         """Kenali satu halaman, kembalikan baris dengan kotak dan confidence.
@@ -188,6 +264,171 @@ class PaddleOcrEngine:
             if not overlap and line.text:
                 kept.append(line)
         return _merge_line_fragments(kept)
+
+
+def make_preprocess_variants(
+    image_bytes: bytes,
+    variants: tuple[str, ...] = ("as_is", "clahe_sharpen", "adaptive_threshold"),
+    *,
+    max_side: int = 2600,
+) -> list[tuple[str, bytes]]:
+    """Hasilkan varian citra halaman untuk dibaca lewat tahap pengenalan.
+
+    Pindai Lembaran Negara punya tiga tantangan sekaligus: tinta cap, muka
+    berbayang, dan kontras rendah pada cetakan yang pudar. Satu citra tunggal
+    tak bisa menang semua, jadi tiap varian diarahkan ke tantangan berbeda dan
+    hasilnya divoting di ``vote_lines``. Varian dipilih karena saling melengkapi,
+    bukan karena mirip:
+
+    - ``as_is``: citra mentah. PP-OCR dirancang untuk citra asli; baseline.
+    - ``clahe_sharpen``: equalisasi histogram adaptif + penajaman — memperlihatkan
+      teks yang pudar.
+    - ``adaptive_threshold``: binarisasi lokal — mengubah tulisan buram di bawah
+      cap menjadi hitam-putih yang jelas.
+    - ``shadow_normalised``: penormalan latar via median blur — meratakan bayang.
+
+    Args:
+        image_bytes: Gambar halaman PNG yang akan diolah jadi beberapa varian.
+        variants: Nama varian yang diminta; ``as_is`` selalu diperhitungkan.
+        max_side: Panjang sisi terbesar yang diterima pemuatan model; citra lebih
+            besar akan didownscale agar tidak menambah biaya tanpa manfaat.
+    """
+    import io  # noqa: PLC0415
+
+    import cv2
+    import numpy
+
+    requested = ("as_is", *tuple(v for v in variants if v != "as_is"))
+    available = {"as_is", "clahe_sharpen", "adaptive_threshold", "shadow_normalised"}
+    requested = tuple(v for v in requested if v in available)
+    if not requested:
+        requested = ("as_is",)
+
+    decoded = cv2.imdecode(
+        numpy.frombuffer(image_bytes, dtype=numpy.uint8), cv2.IMREAD_COLOR
+    )
+    if decoded is None:  # pragma: no cover - decode gagal pada input rusak
+        return [("as_is", image_bytes)]
+
+    big = max(decoded.shape[0], decoded.shape[1])
+    scale = 1.0 if big <= max_side else max_side / float(big)
+    base = (
+        cv2.resize(decoded, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+        if scale < 1.0
+        else decoded
+    )
+
+    def encode(image: cv2.Mat) -> bytes:
+        buffer = io.BytesIO()
+        ok, encoded = cv2.imencode(
+            ".png", image, [int(cv2.IMWRITE_PNG_COMPRESSION), 1]
+        )
+        if not ok:  # pragma: no cover - cv2 gagal mengode
+            raise RuntimeError("gagal mengode varian citra")
+        buffer.write(encoded.tobytes())
+        return buffer.getvalue()
+
+    output: list[tuple[str, bytes]] = []
+    for name in requested:
+        if name == "as_is":
+            output.append((name, encode(base)))
+        elif name == "clahe_sharpen":
+            import numpy  # noqa: PLC0415
+
+            grey = cv2.cvtColor(base, cv2.COLOR_BGR2GRAY)
+            clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
+            kernel = numpy.array(
+                [[0.0, -1.0, 0.0], [-1.0, 5.0, -1.0], [0.0, -1.0, 0.0]],
+                dtype=numpy.float32,
+            )
+            sharpened = cv2.filter2D(clahe.apply(grey), -1, kernel)
+            output.append((name, encode(sharpened)))
+        elif name == "adaptive_threshold":
+            grey = cv2.cvtColor(base, cv2.COLOR_BGR2GRAY)
+            blurred = cv2.medianBlur(grey, 3)
+            binary = cv2.adaptiveThreshold(
+                blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 21, 8
+            )
+            output.append((name, encode(binary)))
+        elif name == "shadow_normalised":
+            grey = cv2.cvtColor(base, cv2.COLOR_BGR2GRAY)
+            background = cv2.medianBlur(grey, 15)
+            output.append((name, encode(cv2.divide(grey, background, scale=255))))
+    return output
+
+
+def vote_lines(variants: list[list[OcrLine]], *, agree_ratio: float = 0.6) -> list[OcrLine]:
+    """Gabung baris lintas varian dengan voting geometris.
+
+    Baris dari setiap varian terdekat secara geometris dikelompokkan (pusat-y
+    dan rentang-x berdekatan), lalu teksnya divoting. Mayoritas teks yang sama
+    menang — dan hanya varian yang berjuang dengan keras untuk memulihkan kata
+    yang pudar akan berbeda. Teks yang kalah vote dibuang; itu lebih aman
+    daripada membiarkan salah satu varian menang hanya karena confidence-nya
+    sedikit lebih tinggi.
+
+    Baris yang hanya dipilih satu varian dan berjarak dari grup lain tetap
+    dipertahankan — pemilihan varian berbeda bisa membawa baris yang hilang
+    pada varian lain (kata yang tertutup cap) dan membuangnya merusak isi.
+
+    Args:
+        variants: Baris OCR dari masing-masing varian (maks. 4).
+        agree_ratio: Porsi varian yang harus sepakat agar teks dianggap
+            disepakati penuh. Di bawah 1.0 supaya varian minoritas yang salah
+            baca satu halaman tak bisa memaksakan keputusan.
+    """
+    if not variants:
+        return []
+    if len(variants) == 1:
+        return reconstruct_reading_order(variants[0])
+
+    ordered = reconstruct_reading_order([line for var in variants for line in var])
+    minimum_agree = max(2, int(len(variants) * agree_ratio))
+
+    groups: list[list[OcrLine]] = []
+    for line in ordered:
+        center = line.y + line.height / 2.0
+        tolerance = max(6.0, 0.7 * line.height)
+        if groups:
+            last = groups[-1][-1]
+            last_center = last.y + last.height / 2.0
+            near = abs(center - last_center) <= tolerance
+            horizontal = not (line.right < last.x or line.x > last.right)
+            if near and horizontal:
+                groups[-1].append(line)
+                continue
+        groups.append([line])
+
+    voted: list[OcrLine] = []
+    for group in groups:
+        # Kelompokkan berdasar teks yang identik di dalam grup geometris; teks
+        # yang paling banyak barisnya menang, ties dipecahkan lewat confidence
+        # rata-rata.
+        counter: dict[str, list[OcrLine]] = {}
+        for line in group:
+            counter.setdefault(line.text, []).append(line)
+        best_text, winner_lines = max(
+            counter.items(),
+            key=lambda item: (len(item[1]), sum(ln.confidence for ln in item[1]) / len(item[1])),
+        )
+        # Satu varian yang membaca baris yang tak terbaca varian lain tetap
+        # "disepakati" karena tak ada lawan — baris tunggal dianggap bersih.
+        agree = len(group) < 2 or len(winner_lines) >= minimum_agree
+        best = max(winner_lines, key=lambda line: line.confidence)
+        voted.append(
+            OcrLine(
+                text=best.text,
+                # Teks yang ditentangkan dan tidak mencapai kohesi penuh
+                # ditandai lebih rendah supaya eskalasi ke vision bisa
+                # mempertimbangkan sinyal itu.
+                confidence=best.confidence if agree else best.confidence * 0.85,
+                x=best.x,
+                y=best.y,
+                width=best.width,
+                height=best.height,
+            )
+        )
+    return voted
 
 
 def _merge_line_fragments(lines: list[OcrLine]) -> list[OcrLine]:

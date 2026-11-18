@@ -20,8 +20,10 @@ from app.services.ingestion.ocr_engine import (
     PaddleOcrEngine,
     find_gap_bands,
     lines_to_page_text,
+    make_preprocess_variants,
     page_confidence,
     reconstruct_reading_order,
+    vote_lines,
 )
 
 
@@ -270,3 +272,189 @@ class TestRecoverMissingLines:
         engine = _StubCropEngine(fragments)
         recovered = engine.recover_missing_lines(_page_png(), list(self._detected))
         assert [line.text for line in recovered] == ["atas", "bawah"]
+
+
+class TestVoteLines:
+    """Voting lintas varian: teks yang dibaca mayoritas menang."""
+
+    def test_teks_disepakati_mayoritas_menang(self) -> None:
+        # Tiga varian membaca baris yang sama, tapi salah satu salah baca.
+        variants = [
+            [_line("penerimaan", 10, 0)],
+            [_line("penerimaan", 10, 0)],
+            [_line("pcnerimaan", 10, 0)],
+        ]
+        result = vote_lines(variants)
+        assert len(result) == 1
+        assert result[0].text == "penerimaan"
+
+    def test_varian_tunggal_dilepas_tanpa_voting(self) -> None:
+        lines = [_line("satu", 10, 0), _line("dua", 10, 24)]
+        result = vote_lines([lines])
+        assert [line.text for line in result] == ["satu", "dua"]
+
+    def test_kosong_aman(self) -> None:
+        assert vote_lines([]) == []
+        assert vote_lines([[], []]) == []
+
+    def test_baris_hanya_di_satu_varian_tetap_dipertahankan(self) -> None:
+        # Varian kedua membaca baris tambahan (tinta cap menutup varian lain).
+        variants = [
+            [_line("utama", 10, 0)],
+            [_line("utama", 10, 0), _line("dari-cap", 10, 200)],
+        ]
+        result = vote_lines(variants)
+        texts = [line.text for line in result]
+        assert "utama" in texts
+        assert "dari-cap" in texts
+
+    def test_salah_baca_tunggal_lebih_rendah_confidence(self) -> None:
+        # Dua tandingan tanpa kohesi penuh: confidence varian minoritas
+        # ditekan supaya eskalasi vision tetap bisa melihat sinyal itu.
+        variants = [
+            [_line("rnasalah", 10, 0, conf=0.6)],
+            [_line("masalah", 10, 0, conf=0.6)],
+        ]
+        result = vote_lines(variants)
+        assert result[0].confidence < 0.6
+
+
+class _StubVariantEngine(PaddleOcrEngine):
+    """Mesin lokal palsu yang membaca tiap varian dengan hasil berbeda.
+
+    Simulasi pindai Lembaran Negara: varian as-is salah huruf satu-dua di
+    baris tengah, varian CLAHE / adaptive threshold membacanya benar. Voting
+    diharapkan mengembalikan baris bersih.
+    """
+
+    def __init__(
+        self,
+        readings_by_variant: dict[str, list[OcrLine]],
+        *,
+        low_conf_as_is: bool = False,
+    ) -> None:
+        super().__init__()
+        self._readings = readings_by_variant
+        self._low_conf_as_is = low_conf_as_is
+        self.variants_seen: list[str] = []
+
+    def recognize_page(self, image_bytes: bytes) -> list[OcrLine]:
+        # Ketika jalur satu tahap dipakai (flag mati), mesin membaca halaman
+        # as-is. Bacaan stubnya diambil dari varian "as_is".
+        return list(self._readings.get("as_is", []))
+
+    def recognize_page_voted(
+        self,
+        image_bytes: bytes,
+        *,
+        variants: tuple[str, ...] = ("as_is", "clahe_sharpen", "adaptive_threshold"),
+        early_exit_confidence: float = 0.75,
+        min_chars: int = 40,
+        on_variant=None,
+    ) -> tuple[list[OcrLine], dict[str, float]]:
+        confidences: dict[str, float] = {}
+        readings: list[list[OcrLine]] = []
+        for name in variants:
+            self.variants_seen.append(name)
+            lines = list(self._readings.get(name, []))
+            conf = 0.5 if (name == "as_is" and self._low_conf_as_is) else 0.95
+            confidences[name] = conf
+            readings.append(lines)
+            if on_variant is not None:
+                on_variant(name, len(lines), conf)
+        voted = vote_lines(readings)
+        return voted, confidences
+
+
+class TestVariantVotingIntegration:
+    """Jalur hybrid: pembacaan voted dipilih saat flag aktif."""
+
+    def test_flag_aktif_memakai_baris_hasil_vote(self) -> None:
+        base = [_line("Pasal", 10, 0), _line("penerimaan yang benar", 10, 24)]
+        salah = [_line("Pasal", 10, 0), _line("pcnerimaan yang benar", 10, 24)]
+        engine = _StubVariantEngine(
+            {"as_is": salah, "clahe_sharpen": base, "adaptive_threshold": base}
+        )
+        settings = Settings(
+            ocr_engine="paddle",
+            ocr_variant_voting_enabled=True,
+            ocr_gap_rescan_enabled=False,
+        )
+        service = HybridOcrService.__new__(HybridOcrService)
+        service._settings = settings  # noqa: SLF001
+        service._paddle = engine  # noqa: SLF001
+        service._vision = None  # type: ignore[assignment]  # noqa: SLF001
+        service._rescue_enabled = False  # noqa: SLF001
+
+        pages = asyncio.run(service.ocr_pages([(1, b"halaman")]))
+        assert "penerimaan yang benar" in pages[0].text
+        assert service._paddle.variants_seen == [  # noqa: SLF001
+            "as_is",
+            "clahe_sharpen",
+            "adaptive_threshold",
+        ]
+
+    def test_flag_mati_memakai_satu_tahap(self) -> None:
+        base = [_line("pasal biasa", 10, 0)]
+        engine = _StubVariantEngine({"as_is": base})
+        settings = Settings(
+            ocr_engine="paddle",
+            ocr_variant_voting_enabled=False,
+            ocr_gap_rescan_enabled=False,
+        )
+        service = HybridOcrService.__new__(HybridOcrService)
+        service._settings = settings  # noqa: SLF001
+        service._paddle = engine  # noqa: SLF001
+        service._vision = None  # type: ignore[assignment]  # noqa: SLF001
+        service._rescue_enabled = False  # noqa: SLF001
+
+        pages = asyncio.run(service.ocr_pages([(1, b"halaman")]))
+        assert "pasal biasa" in pages[0].text
+        # Flag mati: jalur satu tahap; tanpa recognize_page_voted dipanggil.
+        assert engine.variants_seen == []
+
+
+class TestMakePreprocessVariants:
+    """Pembuatan varian citra: cv2 tersedia, hasilnya cukup untuk divoting."""
+
+    def test_varian_asli_dan_derivatif_diemiten(self) -> None:
+        import io
+
+        from PIL import Image
+
+        # Halaman krem polos dengan garis hitam: cukup membedakan CLAHE dari
+        # binarisasi adaptif.
+        image = Image.new("RGB", (120, 90), (245, 240, 230))
+        for y in range(20, 70, 8):
+            for x in range(10, 110):
+                image.putpixel((x, y), (10, 10, 10))
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+
+        prepared = make_preprocess_variants(
+            buffer.getvalue(),
+            ("as_is", "clahe_sharpen", "adaptive_threshold", "shadow_normalised"),
+        )
+        names = [name for name, _payload in prepared]
+        assert names == [
+            "as_is",
+            "clahe_sharpen",
+            "adaptive_threshold",
+            "shadow_normalised",
+        ]
+        # Tiap varian menghasilkan gambar PNG yang berbeda bytes; voting tetap
+        # bisa membandingkan baris yang dibaca dari masing-masing.
+        payloads = {payload for _name, payload in prepared}
+        assert len(payloads) == 4
+
+    def test_varian_tidak_dikenal_dibuang(self) -> None:
+        import io
+
+        from PIL import Image
+
+        buffer = io.BytesIO()
+        Image.new("RGB", (60, 40), "white").save(buffer, format="PNG")
+        prepared = make_preprocess_variants(
+            buffer.getvalue(), ("as_is", "tidak_ada")
+        )
+        assert [name for name, _payload in prepared] == ["as_is"]

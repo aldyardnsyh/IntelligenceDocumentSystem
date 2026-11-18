@@ -219,6 +219,16 @@ class Settings(BaseSettings):
     kecil (maksimal 4 band per halaman); tanpa ini angka penting dalam satu
     baris hilang diam-diam dari korpus."""
     ocr_gap_rescan_enabled: bool = True
+    """Voting lintas varian praproses untuk mesin lokal.
+
+    Setiap halaman dibaca lewat beberapa varian citra (as-is, CLAHE, adaptive
+    threshold), teks tiap varian di-vote berdasarkan kecocokan. Satu tahap
+    tunggal sering salah satu-dua huruf pada pindai buruk dan tetap percaya
+    diri; varian berbeda jarang salah di tempat yang sama, jadi mayoritas
+    mengembalikan kata yang benar. Halaman yang as-is sudah baik berhenti setelah
+    varian pertama (early exit), jadi halaman bersih tidak membayar biaya
+    varian ekstra."""
+    ocr_variant_voting_enabled: bool = True
 
     # ------------------------------------------------------------- embedding
     """Model embedding lokal (nol biaya, data tidak keluar).

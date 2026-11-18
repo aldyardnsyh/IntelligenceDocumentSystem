@@ -251,8 +251,22 @@ class HybridOcrService:
             )
             return text, "vision"
 
-        lines = await asyncio.to_thread(self._paddle.recognize_page, image)
-        if self._settings.ocr_gap_rescan_enabled:
+        if self._settings.ocr_variant_voting_enabled and hasattr(
+            self._paddle, "recognize_page_voted"
+        ):
+            # Baca halaman lewat beberapa varian praproses lalu vote. Satu tahap
+            # tunggal sering salah satu-dua huruf pada pindai buruk ("penerimaan"
+            # → "pcnerimaan") dan tetap percaya diri; varian yang salah buta
+            # hampir tak pernah salah di tempat yang sama, jadi mayoritas teks
+            # mengembalikan kata yang benar. Halaman bersih berhenti di tahap
+            # pertama (early exit), jadi biayanya hanya dirasakan halaman sulit.
+            lines, _per_variant = await asyncio.to_thread(
+                self._paddle.recognize_page_voted,
+                image,
+            )
+        else:
+            lines = await asyncio.to_thread(self._paddle.recognize_page, image)
+        if self._settings.ocr_gap_rescan_enabled and lines:
             # Pass kedua: baris yang tertutup cap tinta sering lolos dari
             # detektor; celah antar baris di-crop dan dibaca ulang dengan zoom.
             extra = await asyncio.to_thread(
