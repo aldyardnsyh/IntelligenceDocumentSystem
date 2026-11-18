@@ -231,3 +231,371 @@
     opacity: 0.7;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Scene pipeline (/settings): enam ilustrasi kecil yang menceritakan proses
+   RAG — unggah, OCR, chunking, indeks, retrieval, jawaban. Semua geometri
+   murni (garis, kotak, titik), bukan gambar; bahasanya konsisten: abu-abu
+   muda = konten yang belum diproses, navy = konten yang sudah, biru brand =
+   elemen yang sedang bekerja.
+
+   Aturan state dasar: TANPA animasi (reduce motion, JS gagal) setiap scene
+   harus sudah terbaca utuh. Jadi keyframes selalu mulai dari keadaan
+   tersembunyi/awal lalu berakhir di keadaan dasar yang terlihat — siklusnya
+   yang "mengulang proses", bukan DOM-nya yang menyembunyikan konten.
+--------------------------------------------------------------------------- */
+.pl-scene {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* transform-box penting supaya scale/pulse SVG memusat di bentuknya sendiri,
+   bukan di titik nol viewBox. */
+.pl-scene [class^="pl-"] {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.pl-ghost {
+  fill: var(--input);
+}
+.pl-ghost-stroke {
+  fill: none;
+  stroke: var(--input);
+}
+.pl-navy {
+  fill: var(--primary);
+}
+.pl-navy-stroke {
+  fill: none;
+  stroke: var(--primary);
+}
+.pl-brand {
+  fill: var(--brand);
+}
+.pl-brand-stroke {
+  fill: none;
+  stroke: var(--brand);
+}
+.pl-card {
+  fill: var(--card);
+}
+.pl-wash {
+  fill: var(--brand-wash);
+}
+
+/* Loop dipause saat scene di luar viewport atau tab tersembunyi; hook di
+   pipeline-scenes.tsx yang menyetel data-paused. */
+.pl-scene[data-paused] * {
+  animation-play-state: paused !important;
+}
+
+/* Elemen efek murni (sapuan, titik yang terbang, denyut) tidak punya arti
+   dalam keadaan diam, jadi keadaan dasarnya tersembunyi. Elemen konten
+   (teks, kotak chunk, sitasi) keadaan dasarnya terlihat utuh. */
+.pl-scan,
+.pl-fly,
+.pl-pulse-y,
+.pl-arrive {
+  opacity: 0;
+}
+.pl-seam {
+  opacity: 0.35;
+}
+
+/* Tahap 1 — berkas turun ke tumpukan. */
+@keyframes pl-drop {
+  0% {
+    opacity: 0;
+    transform: translateY(-46px);
+  }
+  12% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  88% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(0);
+  }
+}
+.pl-drop {
+  animation: pl-drop 3.6s cubic-bezier(0.3, 0.6, 0.3, 1) infinite;
+}
+
+/* Titik sukses berkedip tepat setelah berkas mendarat (~50% siklus). */
+@keyframes pl-arrive {
+  0%,
+  48% {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  56% {
+    opacity: 1;
+    transform: scale(1.25);
+  }
+  62% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  88% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+}
+.pl-arrive {
+  animation: pl-arrive 3.6s ease-out infinite;
+}
+
+/* Tahap 2 — garis sapuan OCR turun memindai halaman. */
+@keyframes pl-scan {
+  0% {
+    opacity: 0;
+    transform: translateY(0);
+  }
+  6% {
+    opacity: 1;
+  }
+  58% {
+    opacity: 1;
+    transform: translateY(120px);
+  }
+  64% {
+    opacity: 0;
+    transform: translateY(120px);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(0);
+  }
+}
+.pl-scan {
+  animation: pl-scan 3.6s cubic-bezier(0.4, 0.2, 0.4, 1) infinite;
+}
+
+/* Teks di atas garis sapuan berubah dari ghost ke navy (clip naik). */
+@keyframes pl-reveal {
+  0% {
+    clip-path: inset(0 0 100% 0);
+  }
+  58%,
+  100% {
+    clip-path: inset(0 0 0 0);
+  }
+}
+.pl-reveal {
+  clip-path: inset(0 0 0 0);
+  animation: pl-reveal 3.6s cubic-bezier(0.4, 0.2, 0.4, 1) infinite;
+}
+
+/* Tahap 3 — kotak chunk muncul berurutan dari satu halaman. */
+@keyframes pl-chunk-in {
+  0%,
+  var(--pl-at, 20%) {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  calc(var(--pl-at, 20%) + 12%) {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+.pl-chunk-in {
+  animation: pl-chunk-in 3.6s ease-out infinite;
+}
+
+/* Pemisah struktur (BAB/Pasal) berkedip saat batasnya terbentuk. */
+@keyframes pl-seam {
+  0%,
+  var(--pl-at, 20%) {
+    opacity: 0;
+  }
+  calc(var(--pl-at, 20%) + 10%) {
+    opacity: 1;
+  }
+  calc(var(--pl-at, 20%) + 26%) {
+    opacity: 0.35;
+  }
+  100% {
+    opacity: 0.35;
+  }
+}
+.pl-seam {
+  animation: pl-seam 3.6s ease-out infinite;
+}
+
+/* Tahap 4 — titik chunk terbang ke ruang vektor. */
+@keyframes pl-fly {
+  0%,
+  var(--pl-at, 10%) {
+    opacity: 0;
+    transform: translate(0, 0);
+  }
+  calc(var(--pl-at, 10%) + 6%) {
+    opacity: 1;
+  }
+  calc(var(--pl-at, 10%) + 34%) {
+    opacity: 1;
+    transform: translate(var(--pl-to-x, 56px), var(--pl-to-y, 0px));
+  }
+  calc(var(--pl-at, 10%) + 42%) {
+    opacity: 0;
+    transform: translate(var(--pl-to-x, 56px), var(--pl-to-y, 0px));
+  }
+  100% {
+    opacity: 0;
+    transform: translate(0, 0);
+  }
+}
+.pl-fly {
+  animation: pl-fly 3.6s ease-in-out infinite;
+}
+
+/* Titik di grid memantul saat vektor tiba. */
+@keyframes pl-ping {
+  0%,
+  var(--pl-at, 44%) {
+    opacity: 0.25;
+    transform: scale(1);
+  }
+  calc(var(--pl-at, 44%) + 7%) {
+    opacity: 1;
+    transform: scale(1.9);
+  }
+  calc(var(--pl-at, 44%) + 16%) {
+    opacity: 0.9;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0.9;
+    transform: scale(1);
+  }
+}
+.pl-ping {
+  animation: pl-ping 3.6s ease-out infinite;
+}
+
+/* Tahap 5 — denyut pertanyaan turun ke kandidat, lalu ke model. */
+@keyframes pl-pulse-y {
+  0%,
+  var(--pl-at, 4%) {
+    opacity: 0;
+    transform: translateY(0);
+  }
+  calc(var(--pl-at, 4%) + 4%) {
+    opacity: 1;
+  }
+  calc(var(--pl-at, 4%) + 26%) {
+    opacity: 1;
+    transform: translateY(var(--pl-to-y, 46px));
+  }
+  calc(var(--pl-at, 4%) + 32%) {
+    opacity: 0;
+    transform: translateY(var(--pl-to-y, 46px));
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(0);
+  }
+}
+.pl-pulse-y {
+  animation: pl-pulse-y 3.6s ease-in-out infinite;
+}
+
+/* Kandidat menyala saat dilalui denyut, lalu meredup kembali. */
+@keyframes pl-hit {
+  0%,
+  var(--pl-at, 30%) {
+    fill: var(--input);
+  }
+  calc(var(--pl-at, 30%) + 6%) {
+    fill: var(--brand);
+  }
+  calc(var(--pl-at, 30%) + 40%) {
+    fill: var(--brand);
+  }
+  calc(var(--pl-at, 30%) + 50%),
+  100% {
+    fill: var(--input);
+  }
+}
+.pl-hit {
+  animation: pl-hit 3.6s ease-out infinite;
+}
+
+/* Tahap 6 — baris jawaban tumbuh, sitasi muncul. */
+@keyframes pl-grow {
+  0%,
+  var(--pl-at, 8%) {
+    opacity: 0;
+    transform: scaleX(0);
+    transform-origin: left center;
+  }
+  calc(var(--pl-at, 8%) + 10%) {
+    opacity: 1;
+    transform: scaleX(1);
+    transform-origin: left center;
+  }
+  100% {
+    opacity: 1;
+    transform: scaleX(1);
+    transform-origin: left center;
+  }
+}
+.pl-grow {
+  animation: pl-grow 3.6s ease-out infinite;
+}
+
+@keyframes pl-pop {
+  0%,
+  var(--pl-at, 46%) {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  calc(var(--pl-at, 46%) + 8%) {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.pl-pop {
+  animation: pl-pop 3.6s ease-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Keadaan dasar tiap elemen sudah = akhir proses yang terlihat, jadi cukup
+     matikan animasinya. Elemen efek murni (sapuan, denyut) dibiarkan tak
+     terlihat lewat keadaan dasarnya masing-masing. */
+  .pl-scene .pl-drop,
+  .pl-scene .pl-arrive,
+  .pl-scene .pl-scan,
+  .pl-scene .pl-reveal,
+  .pl-scene .pl-chunk-in,
+  .pl-scene .pl-seam,
+  .pl-scene .pl-fly,
+  .pl-scene .pl-ping,
+  .pl-scene .pl-pulse-y,
+  .pl-scene .pl-hit,
+  .pl-scene .pl-grow,
+  .pl-scene .pl-pop {
+    animation: none;
+  }
+}

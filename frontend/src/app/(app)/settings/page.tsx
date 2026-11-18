@@ -3,7 +3,7 @@ import { SettingsView } from "@/components/settings/settings-view";
 
 export const metadata: Metadata = {
   title: "Pengaturan",
-  description: "Parameter retrieval, tampilan, dan reset sesi.",
+  description: "Alur pipeline dari dokumen menjadi jawaban, dan reset sesi.",
 };
 
 export default function SettingsPage() {
