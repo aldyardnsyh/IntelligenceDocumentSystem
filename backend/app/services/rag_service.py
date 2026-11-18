@@ -43,6 +43,7 @@ from app.providers.embedding import EmbeddingProvider
 from app.repositories.sqlite_repo import MetadataRepository, new_id, utc_now
 from app.services.collection_query import (
     is_collection_question,
+    is_meta_question,
     is_smalltalk,
     matches_topic,
     topic_terms,
@@ -50,12 +51,14 @@ from app.services.collection_query import (
 from app.services.generation.generator import LLMChain
 from app.services.generation.injection_guard import InjectionGuard
 from app.services.generation.prompts import (
+    DOCUMENT_OVERVIEW_SYSTEM_PROMPT,
     NOT_FOUND_RESPONSE,
     SMALLTALK_SYSTEM_PROMPT,
     UNGROUNDED_SYSTEM_PROMPT,
     WEAK_EVIDENCE_SYSTEM_PROMPT,
     build_citations,
     build_context_prompt,
+    build_overview_prompt,
     build_smalltalk_prompt,
     build_ungrounded_prompt,
 )
@@ -392,6 +395,37 @@ class RagService:
         effective_document_ids: list[str] | None = document_ids
         if document_id:
             effective_document_ids = [document_id]
+
+        # 2a. Pertanyaan meta tentang dokumennya sendiri (gambaran umum).
+        #
+        # "Ini dokumen terkait dengan apa?" bukan pertanyaan retrieval: tidak
+        # ada pasal/istilah spesifik yang jadi target, jadi skor kemiripannya
+        # rendah dan biasanya jatuh ke "tidak ditemukan". Padahal dokumennya ada
+        # dan pengguna hanya butuh gambaran. Jalur ini dirangkum dari chunk
+        # dokumen aktif + sitasi, dengan prompt khusus, TETAP bersumber dokumen.
+        #
+        # Sengaja sebelum perhitungan vektor: pertanyaan meta tidak butuh
+        # retrieval berbasis ambang, jadi memanggil embedding di sini hanya
+        # membuang latensi. Juga sebelum is_collection_question: "dokumen
+        # terkait dengan X" bisa sekilas cocok dengan pola koleksi, tapi
+        # maksudnya meta (tentang satu dokumen), bukan daftar.
+        if is_meta_question(question):
+            if session_id is None:
+                session_id = new_id("ses")
+                yield StreamEvent(type="session", session_id=session_id)
+            async for event in self._answer_overview_question(
+                question=question,
+                session_id=session_id,
+                document_id=document_id,
+                document_ids=effective_document_ids,
+                started=started,
+                trace=trace,
+                history=await self._load_history(session_id),
+                cache_id=cache_id,
+            ):
+                yield event
+            return
+
         query_embedding = await asyncio.to_thread(self._embedding.embed_query, question)
         retrieved = await self.retrieve(
             question,
@@ -904,6 +938,159 @@ class RagService:
             question=question,
             answer=answer,
             citations=[],
+            not_found=False,
+            elapsed=elapsed,
+            from_cache=False,
+            trace_id=trace.trace_id,
+            document_id=document_id,
+            document_ids=document_ids,
+        )
+        yield StreamEvent(type="done", response_time_ms=elapsed)
+
+    async def _answer_overview_question(
+        self,
+        *,
+        question: str,
+        session_id: str,
+        document_id: str | None,
+        document_ids: list[str] | None,
+        started: float,
+        trace: TraceContext,
+        history: list[tuple[str, str]],
+        cache_id: str,
+    ) -> AsyncIterator[StreamEvent]:
+        """Jawab pertanyaan meta/gambaran umum: "ini dokumen terkait dengan apa?".
+
+        Jalur ini ada karena pertanyaan meta tidak menunjuk pasal/istilah
+        spesifik, jadi retrieval normal memberi skor rendah dan akan jebol ke
+        "tidak ditemukan". Padahal dokumennya ada dan pengguna hanya butuh
+        gambaran. Jawaban tetap bersumber dokumen + disitasi ke chunk sumber,
+        konsisten dengan prinsip anti-halusinasi.
+
+        Tiga kasus:
+        1. Tidak ada dokumen aktif -> minta unggah dulu.
+        2. Dokumen ada -> ambil chunk awal tiap dokumen aktif + ringkas dengan LLM.
+        3. LLM gagal -> jalur error biasa (ProviderError ditangani di atas).
+        """
+        documents = await asyncio.to_thread(self._repository.list_documents)
+
+        # Scope sama seperti is_collection_question: hormati scope sesi.
+        if document_id:
+            documents = [item for item in documents if item.id == document_id]
+        elif document_ids:
+            diizinkan = set(document_ids)
+            documents = [item for item in documents if item.id in diizinkan]
+
+        # Filter dokumen yang benar-benar siap.
+        ready = [item for item in documents if item.status is DocumentStatus.READY]
+
+        if not ready:
+            elapsed = int((time.perf_counter() - started) * 1000)
+            answer = (
+                "Belum ada dokumen yang tersimpan. Unggah dokumen terlebih dahulu "
+                "di halaman Dokumen, lalu saya bisa jelaskan gambaran umumnya."
+            )
+            for token in _slice(answer):
+                yield StreamEvent(type="token", value=token)
+            await self._persist(
+                session_id=session_id,
+                question=question,
+                answer=answer,
+                citations=[],
+                not_found=False,
+                elapsed=elapsed,
+                from_cache=False,
+                trace_id=trace.trace_id,
+                document_id=document_id,
+                document_ids=document_ids,
+            )
+            yield StreamEvent(type="done", response_time_ms=elapsed)
+            return
+
+        # Jalur meta memang sengaja tidak memanggil embedding: pertanyaan meta
+        # tidak punya target semantik yang bisa dicocokkan, jadi skor retrieval
+        # normal hampir pasti rendah. Kita ambil sejumlah chunk awal dokumen
+        # sebagai "sampel isi" untuk dirangkum. Chunk awal dipilih karena
+        # dokumen legal/prosedural biasanya membuka dengan judul, tujuan, dan
+        # ruang lingkup -- persis yang dibutuhkan untuk gambaran umum.
+        sampel_per_doc = 6
+        potongan = list(ready)[:3]
+        best: list[RetrievedChunk] = []
+        for dok in potongan:
+            raw, _total = await asyncio.to_thread(
+                self._repository.get_chunks, dok.id, 1, sampel_per_doc, None
+            )
+            for chunk in raw:
+                best.append(
+                    RetrievedChunk(
+                        chunk=chunk,  # type: ignore[arg-type]
+                        document_name=dok.filename,
+                        # Skor diberi urutan dokumen dan chunk supaya penanda
+                        # [SUMBER n] stabil dan pengguna bisa telusuri. Ini bukan
+                        # skor kemiripan: pertanyaan meta tidak memilih berdasar
+                        # skor, ia meminta gambaran.
+                        score=0.0,
+                        vector_score=0.0,
+                        keyword_score=0.0,
+                    )
+                )
+
+        prompt = build_overview_prompt(
+            question=question,
+            documents=ready,
+            retrieved=best,
+            history=history,
+            max_history=self._settings.history_message_count,
+        )
+
+        parts: list[str] = []
+        degraded = False
+        try:
+            async for chunk in self._chain.stream(
+                prompt, system=DOCUMENT_OVERVIEW_SYSTEM_PROMPT
+            ):
+                if chunk.degraded:
+                    degraded = True
+                    continue
+                parts.append(chunk.token)
+                yield StreamEvent(type="token", value=chunk.token)
+        except ProviderError as exc:
+            elapsed = int((time.perf_counter() - started) * 1000)
+            logger.warning("Generasi overview gagal: %s", exc)
+            yield StreamEvent(
+                type="error",
+                value="Layanan bahasa sedang tidak tersedia. Coba lagi sebentar lagi.",
+                retry_after_seconds=30,
+            )
+            yield StreamEvent(type="done", response_time_ms=elapsed)
+            return
+
+        answer_text = _clean_answer("".join(parts).strip())
+        elapsed = int((time.perf_counter() - started) * 1000)
+
+        # Sitasi dikirim dari chunk sumber overview.
+        citations = build_citations(best) if best else []
+
+        if citations:
+            yield StreamEvent(type="citations", value=citations)
+
+        if answer_text and not degraded:
+            await self._memory.set_cached(
+                cache_id,
+                {
+                    "answer": answer_text,
+                    "citations": [asdict(c) for c in citations],
+                    "not_found": False,
+                    "weak_evidence": False,
+                },
+                self._settings.cache_ttl_seconds,
+            )
+
+        await self._persist(
+            session_id=session_id,
+            question=question,
+            answer=answer_text,
+            citations=citations,
             not_found=False,
             elapsed=elapsed,
             from_cache=False,

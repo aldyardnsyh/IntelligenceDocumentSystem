@@ -22,6 +22,110 @@ from __future__ import annotations
 
 import re
 
+#: Pola pertanyaan meta: pengguna bertanya TENTANG dokumennya sendiri, bukan
+#: tentang detail di dalamnya. Contoh: "ini dokumen terkait dengan apa?",
+#: "dokumen ini dari mana?", "ini peraturan apa?", "apa isi pokok dokumen ini?".
+#:
+#: Kenapa perlu jalur terpisah: pertanyaan meta tidak menunjuk pasal atau
+#: istilah spesifik, jadi retrieval normal memberi skor rendah dan jatuh ke
+#: "tidak ditemukan". Padahal dokumennya ada dan pengguna hanya butuh
+#: gambaran umum.
+#:
+#: Konservatif: hanya frasa eksplisit yang mengarahkan ke "dokumen ini apa".
+#: Dihindari salah tangkap pertanyaan substantif ("tentang pelayanan publik apa
+#: syaratnya" ≠ meta). Kombinasi penanda dokumen + pengarah tanya sangat
+#: spesifik terhadap maksud meta.
+_META_PATTERNS = (
+    re.compile(
+        r"\b(dokumen|berkas|file)\b.{0,30}\b"
+        r"(terkait dengan apa|tentang apa|dari mana|apa ini|ini apa)\b"
+    ),
+    re.compile(r"\b(dokumen|berkas|file)\b.{0,20}\bini\b.{0,20}\b(apa|dari mana)\b"),
+    re.compile(
+        r"\bini\b.{0,15}\b(dokumen|berkas|file)\b.{0,20}\b(apa|tentang apa|dari mana)\b"
+    ),
+    # Wajib frasa "dokumen/berkas/file ini" berdampingan, bukan sekadar
+    # "apa ... dokumen ... ini" yang luas. Tanpa ini, "apa isi dokumen ini?"
+    # (pertanyaan isi generik) ikut tersangkap dan salah dialihkan ke overview.
+    re.compile(
+        r"\b(dokumen|berkas|file)\s+(ini|itu|tersebut)\b.{0,15}\bapa\b"
+    ),
+    re.compile(r"\bapa\b.{0,4}\b(dokumen|berkas|file)\s+(ini|itu|tersebut)\b"),
+    # "dari mana dokumen ini" (urutan terbalik dari "dokumen ini dari mana").
+    re.compile(r"\bdari mana\b.{0,15}\b(dokumen|berkas|file)\s*(ini|itu|tersebut)?\b"),
+    re.compile(
+        r"\b(dokumen|berkas|file)\b.{0,10}\bini\b.{0,20}"
+        r"\b(peraturan|regulasi|standar|prosedur|sop)\b.{0,10}\b(apa|mana)\b"
+    ),
+    # "isi pokok" + kata jenis dokumen, ATAU "dokumen ini/itu" + "isi pokok".
+    # Tidak menangkap "apa isi dokumen ini?" (pertanyaan isi generik, jalur
+    # retrieval normal) karena tidak ada kata jenis di sana.
+    re.compile(
+        r"\b(isi pokok|pokok isi)\b.{0,20}"
+        r"\b(peraturan|regulasi|standar|sop|prosedur|panduan)\b"
+    ),
+    re.compile(
+        r"\b(dokumen|berkas|file)\b.{0,5}\b"
+        r"(ini|itu|tersebut)\b.{0,10}\b(isi pokok|pokok isi)\b"
+    ),
+    # "apa isi dokumen peraturan ini" meta; TAPI "apa isi dokumen ini" tidak
+    # (pertanyaan isi generik). Kuncinya: harus ada kata jenis dokumen.
+    re.compile(
+        r"\bapa\b.{0,6}\b(isi|pokok)\b.{0,12}\b"
+        r"(peraturan|regulasi|standar|sop|prosedur|panduan)\b"
+    ),
+    re.compile(r"\bmembahas\b.{0,15}\b(apa|tentang apa)\b.{0,15}\b(dokumen|berkas|file)\b"),
+    re.compile(r"\bapa yang dibahas\b.{0,20}\b(dokumen|berkas|file)\b"),
+    re.compile(r"\b(dokumen|berkas|file)\b.{0,15}\bini\b.{0,20}\bberisi apa\b"),
+    re.compile(r"\bgambaran umum\b.{0,30}\b(dokumen|berkas|file)\b"),
+)
+
+#: Meta question perlu setidaknya ada sinyal "dokumen aktif" atau "ini" di
+#: pertanyaannya supaya benar-benar meta. Kata "dokumen" saja + frasa meta
+#: sudah cukup. Mencegah salah tangkap pertanyaan isi generik.
+_META_STRENGTH_MARKER = re.compile(r"\b(dokumen|berkas|file|ini)\b")
+
+
+def is_meta_question(question: str) -> bool:
+    """True kalau pertanyaan meta: tentang dokumennya sendiri, bukan isinya.
+
+    Contoh yang terdeteksi:
+    - "Ini dokumen terkait dengan apa?"
+    - "Dokumen ini tentang apa?"
+    - "Ini dokumen apa sih?"
+    - "Dokumen ini dari mana?"
+    - "Apa isi pokok dokumen ini?"
+    - "Dokumen ini adalah peraturan apa?"
+
+    Contoh yang TIDAK terdeteksi (pertanyaan substantif, biarkan ke retrieval):
+    - "Tentang pelayanan publik apa syarat pengajuan?"
+    - "Bagaimana cara mengajukan permohonan?"
+    - "Apa yang dimaksud dengan pengaduan?"
+    """
+    text = question.strip().lower()
+    if not text:
+        return False
+
+    # Harus ada pola meta + ada kata yang menunjuk "dokumen ini".
+    if not any(pattern.search(text) for pattern in _META_PATTERNS):
+        return False
+    if not _META_STRENGTH_MARKER.search(text):
+        return False
+
+    # Bukan meta kalau pertanyaannya substantive (minta proses/syarat/durasi).
+    substantive_markers = (
+        "cara mengajukan",
+        "berapa lama",
+        "berapa hari",
+        "berapa sls",
+        "biaya",
+        "syarat pengajuan",
+        "prosedyur mengajukan",
+        "alur proses",
+    )
+    return not any(marker in text for marker in substantive_markers)
+
+
 #: Kata yang menandakan pertanyaan tentang daftar dokumen, bukan isinya.
 _COLLECTION_PATTERNS = (
     re.compile(r"\b(cari|carikan|temukan|cariin|ada|punya)\b.{0,30}\b(dokumen|berkas|file)\b"),

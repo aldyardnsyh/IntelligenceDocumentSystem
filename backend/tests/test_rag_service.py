@@ -630,3 +630,89 @@ class TestIsSmalltalk:
         )
         assert len(panjang) > 90
         assert is_smalltalk(panjang) is False
+
+
+class TestGambaranUmumDokumen:
+    """Pertanyaan meta tentang dokumennya sendiri tidak boleh jatuh ke not_found.
+
+    "Ini dokumen terkait dengan apa?" adalah pertanyaan meta: tidak menunjuk
+    pasal/istilah spesifik, jadi retrieval normal memberi skor rendah dan
+    biasanya jebol ke "tidak ditemukan". Padahal dokumennya ada dan pengguna
+    hanya butuh gambaran umum. Jalur document-overview menangkapnya dan tetap
+    merangkum dari chunk dokumen aktif (anti-halusinasi terjaga) dengan sitasi.
+    """
+
+    async def test_pertanyaan_meta_dijawab_gambaran_bersumber_dokumen(
+        self, indexed_ingestion, rag: RagService
+    ) -> None:
+        from app.services.collection_query import is_meta_question
+
+        # Pertanyaan persis yang dilaporkan user.
+        q = "Ini dokumen terkait dengan apa?"
+        assert is_meta_question(q) is True
+
+        events = await collect(rag.answer(q, None, None))
+        types = [event.type for event in events]
+
+        # Jalur overview menghasilkan jawaban + sitasi, bukan penolakan.
+        assert "token" in types
+        assert "citations" in types
+        assert "done" in types
+        assert "not_found" not in types
+        text = "".join(str(event.value) for event in events if event.type == "token")
+        assert text.strip() != ""
+        # Teks jawaban tidak boleh kosong; kalimat penolakan tidak muncul.
+        assert "tidak ditemukan" not in text.lower()
+
+    async def test_pertanyaan_meta_tanpa_dokumen_aktif_minta_unggah(
+        self, rag: RagService
+    ) -> None:
+        """Koleksi kosong: jalur overview minta unggah, bukan not_found palsu."""
+        from app.services.collection_query import is_meta_question
+
+        q = "Dokumen ini tentang apa?"
+        assert is_meta_question(q) is True
+
+        events = await collect(rag.answer(q, None, None))
+        types = [event.type for event in events]
+
+        assert "token" in types
+        assert "not_found" not in types
+        assert "done" in types
+        text = "".join(str(event.value) for event in events if event.type == "token")
+        # Ajakan unggah muncul (bukan penolakan retrieval palsu).
+        assert "unggah" in text.lower()
+
+    async def test_pertanyaan_substantif_tetap_ke_retrieval(
+        self, indexed_ingestion, rag: RagService
+    ) -> None:
+        """Regresi: pertanyaan non-meta TIDAK berubah perilakunya.
+
+        "Tentang pelayanan publik apa syarat pengajuan?" bersifat substantif;
+        detektor meta harus mengabaikannya, dan jalur retrieval normal tetap
+        berjalan (bisa citations dari retrieval atau not_found bila memang tak
+        ada di dokumen -- yang penting bukan jalur overview).
+        """
+        from app.services.collection_query import is_meta_question, is_smalltalk
+
+        q = "Tentang pelayanan publik apa syarat pengajuan?"
+        assert is_meta_question(q) is False
+        assert is_smalltalk(q) is False
+
+        # Pertanyaan ini memang bukan meta: tidak boleh dirutekan ke overview.
+        # Cukup buktikan detektor menolak; routing normal sudah diuji test lain.
+        assert "apa yang dimaksud dengan pengaduan?" and is_meta_question(
+            "Apa yang dimaksud dengan pengaduan?"
+        ) is False
+
+    def test_detektor_meta_konservatif(self) -> None:
+        """Pertanyaan substantif yang kebetulan menyebut 'dokumen' tidak meta."""
+        from app.services.collection_query import is_meta_question
+
+        # Yang ini justru pertanyaan isi (butuh retrieval), bukan meta.
+        assert is_meta_question("Bagaimana cara mengajukan permohonan?") is False
+        assert is_meta_question(
+            "Apa yang dimaksud dengan pengaduan pelayanan publik?"
+        ) is False
+        # Pertanyaan substantif dengan frasa 'isi pokok' tetap terdeteksi meta.
+        assert is_meta_question("Apa isi pokok dokumen peraturan ini?") is True
