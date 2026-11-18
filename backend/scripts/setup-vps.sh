@@ -149,7 +149,9 @@ else
     # Berkas swap berisi salinan memori proses, termasuk passcode yang sedang
     # dibandingkan dan potongan dokumen yang sedang diproses.
     as_root chmod 600 /swapfile
-    as_root mkswap -q /swapfile >/dev/null
+    # Tanpa -q: opsi itu tidak ada di util-linux Ubuntu 22.04 dan keluarannya
+    # sudah dibuang oleh redirect, jadi ia hanya menambah titik gagal.
+    as_root mkswap /swapfile >/dev/null
     as_root swapon /swapfile
 
     if ! grep -q '^/swapfile' /etc/fstab; then
