@@ -50,8 +50,14 @@ export function DocumentsView() {
     },
   });
 
+  // Progres byte terkirim 0..100, dilaporkan XHR. Reset di onSettled agar
+  // bar hilang baik sukses maupun gagal.
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const uploadMutation = useMutation({
-    mutationFn: (file: File) => uploadDocument(file),
+    mutationFn: (file: File) =>
+      uploadDocument(file, { onProgress: setUploadProgress }),
+    onMutate: () => setUploadProgress(0),
+    onSettled: () => setUploadProgress(null),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.documents });
       notify.success(
@@ -109,6 +115,7 @@ export function DocumentsView() {
         <UploadDropzone
           compact
           busy={uploadMutation.isPending}
+          progress={uploadProgress}
           onSelect={(file) => uploadMutation.mutate(file)}
           className="shrink-0"
         />
@@ -217,7 +224,10 @@ export function DocumentsView() {
         ruang grid.
       */}
       {isEmptyCorpus ? (
-        <UploadDropzone onSelect={(file) => uploadMutation.mutate(file)} />
+        <UploadDropzone
+          progress={uploadProgress}
+          onSelect={(file) => uploadMutation.mutate(file)}
+        />
       ) : null}
     </div>
   );

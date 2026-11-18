@@ -14,6 +14,7 @@ import type {
 } from "@/types/api";
 import { streamChatQuery } from "./chat-stream";
 import { API_BASE_URL } from "./config";
+import { ApiError } from "./error";
 import { request } from "./http";
 
 /* --------------------------------------------------------------------------
@@ -83,15 +84,81 @@ export function getDocumentChunks(
   });
 }
 
-export async function uploadDocument(file: File, signal?: AbortSignal) {
+export interface UploadOptions {
+  signal?: AbortSignal;
+  /**
+   * Progres unggahan 0..100, dilaporkan browser untuk byte yang benar-benar
+   * terkirim. Ini BUKAN progres pemrosesan di server — setelah 100%, server
+   * masih melakukan ekstraksi/OCR yang dilaporkan lewat status kartu dokumen.
+   */
+  onProgress?: (percent: number) => void;
+}
+
+/**
+ * Unggah dokumen memakai XHR, bukan fetch.
+ *
+ * `fetch` tidak bisa melaporkan progres unggahan: janji-nya baru selesai
+ * setelah seluruh byte terkirim, sehingga pengguna menatap tombol diam tanpa
+ * tahu apakah prosesnya berjalan atau macet. XHR punya `upload.onprogress`,
+ * dan UI memakai angka itu untuk progress bar.
+ *
+ * Kegagalan jaringan dibedakan dari penolakan server: koneksi mati menghasilkan
+ * pesan yang menunjuk ke koneksi/backend, bukan "periksa format berkas" yang
+ * menyesatkan bila masalahnya bukan format.
+ */
+export async function uploadDocument(
+  file: File,
+  options: UploadOptions = {},
+): Promise<DocumentSummary> {
+  const { signal, onProgress } = options;
   const form = new FormData();
   form.append("file", file);
-  // Signal diteruskan supaya unggahan bisa dibatalkan. Tanpa itu, pengguna
-  // yang pindah halaman masih menunggu request yang tidak lagi relevan.
-  return request<DocumentSummary>("/api/v1/documents/upload", {
-    method: "POST",
-    body: form,
-    signal,
+
+  return new Promise<DocumentSummary>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${API_BASE_URL}/api/v1/documents/upload`);
+    // Signal diteruskan supaya unggahan bisa dibatalkan. Tanpa itu, pengguna
+    // yang pindah halaman masih menunggu request yang tidak lagi relevan.
+    signal?.addEventListener("abort", () => xhr.abort(), { once: true });
+
+    xhr.upload.onprogress = (event) => {
+      if (onProgress && event.lengthComputable) {
+        onProgress(Math.round((event.loaded / event.total) * 100));
+      }
+    };
+
+    xhr.onload = () => {
+      let body: unknown = null;
+      try {
+        body = JSON.parse(xhr.responseText);
+      } catch {
+        // Respons non-JSON (mis. halaman error proxy) tetap ditangani di bawah.
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(body as DocumentSummary);
+        return;
+      }
+      const detail =
+        (body as { detail?: string } | null)?.detail
+        ?? `Server menolak unggahan (HTTP ${xhr.status}).`;
+      reject(new ApiError(detail, xhr.status));
+    };
+
+    xhr.onerror = () => {
+      reject(
+        new ApiError(
+          "Tidak dapat terhubung ke server. Periksa koneksi, atau coba lagi "
+            + "sebentar bila server sedang tidak aktif.",
+          0,
+        ),
+      );
+    };
+
+    xhr.onabort = () => {
+      reject(new ApiError("Unggahan dibatalkan.", 0));
+    };
+
+    xhr.send(form);
   });
 }
 

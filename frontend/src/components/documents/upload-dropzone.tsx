@@ -4,12 +4,19 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { CloudUpload, Loader2 } from "lucide-react";
 import { cn } from "cn";
 import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
 import { ACCEPTED_EXTENSIONS, MAX_FILE_BYTES } from "@/lib/constants";
 import { formatBytes } from "@/lib/format";
 
 interface UploadDropzoneProps {
   onSelect: (file: File) => void;
   busy?: boolean;
+  /**
+   * Progres unggahan 0..100 dari browser. Selama ini berjalan, UI menunjukkan
+   * berapa byte yang sudah pergi — bukan spinner kosong yang tidak bisa
+   * dibedakan dari macet.
+   */
+  progress?: number | null;
   compact?: boolean;
   className?: string;
 }
@@ -18,7 +25,14 @@ interface UploadDropzoneProps {
  * Drop zone hanya ada di halaman dokumen. Di /chat, unggah dipanggil dari
  * tombol "Unggah dokumen" supaya area input tetap fokus pada pertanyaan.
  */
-export function UploadDropzone({ onSelect, busy = false, compact = false, className }: UploadDropzoneProps) {
+export function UploadDropzone({
+  onSelect,
+  busy = false,
+  progress = null,
+  compact = false,
+  className,
+}: UploadDropzoneProps) {
+  const uploading = busy && progress !== null;
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
@@ -90,7 +104,7 @@ export function UploadDropzone({ onSelect, busy = false, compact = false, classN
           className="gap-1.5"
         >
           {busy ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <CloudUpload className="size-4" aria-hidden />}
-          Unggah dokumen
+          {uploading ? `Mengunggah ${progress}%` : "Unggah dokumen"}
         </Button>
 
         {/*
@@ -149,6 +163,15 @@ export function UploadDropzone({ onSelect, busy = false, compact = false, classN
             PDF, TXT, atau Markdown sampai {formatBytes(MAX_FILE_BYTES)} per berkas. Ekstraksi teks
             dan pembuatan indeks berjalan otomatis setelah berkas diterima.
           </p>
+
+          {uploading ? (
+            <div className="flex w-full max-w-md flex-col gap-1.5 pt-1">
+              <Progress value={progress ?? 0} aria-label="Progres unggahan" />
+              <p className="text-[12px] text-muted-foreground tnum" aria-live="polite">
+                Mengunggah {progress}% — pemrosesan berlanjut di server setelah ini.
+              </p>
+            </div>
+          ) : null}
         </div>
 
         <input
