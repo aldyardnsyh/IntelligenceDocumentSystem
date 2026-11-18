@@ -60,11 +60,17 @@ jobs:
         # torch sengaja tidak dipasang. Test memakai stub embedding, dan
         # paket itu sendiri 200 MB lebih. Kalau nanti ada test yang benar
         # benar membutuhkannya, pasang di sini dengan index CPU.
+        #
+        # pypdfium2, pillow, dan PySastrawi ditambah eksplisit: ketiganya
+        # dependensi wajib di pyproject.toml (render PDF untuk pipeline vision
+        # OCR, backend bitmap pypdfium2, dan stemmer BM25 Bahasa Indonesia).
+        # Tanpa mereka, pytest merah — terbukti di repro lokal venv CI-exact.
         run: |
           python -m pip install --upgrade pip
           pip install fastapi "uvicorn[standard]" pydantic pydantic-settings \
             python-multipart httpx numpy chromadb pypdf redis \
-            pytest pytest-asyncio pytest-cov ruff "reportlab>=4.0"
+            pytest pytest-asyncio pytest-cov ruff "reportlab>=4.0" \
+            pypdfium2 pillow PySastrawi
 
       - name: Lint (ruff)
         run: python -m ruff check app tests scripts
@@ -204,6 +210,7 @@ jobs:
           pip install fastapi "uvicorn[standard]" pydantic pydantic-settings \
             python-multipart httpx numpy chromadb pypdf redis \
             pytest pytest-asyncio pytest-cov ruff "reportlab>=4.0" \
+            pypdfium2 pillow PySastrawi \
             sentence-transformers
 
       - name: Cache model embedding
