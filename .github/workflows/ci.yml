@@ -79,7 +79,35 @@ jobs:
         # Environment sengaja tidak diisi dari .env. conftest.py menyiapkan
         # semua variabel yang dibutuhkan, termasuk passcode uji, provider
         # mock, dan stub embedding.
-        run: python -m pytest
+        #
+        # Keluaran pipa ke tee: laporan coverage dari pytest-cov ditulis ke
+        # stdout, jadi tanpa ini tidak ada berkas log yang bisa diunggah saat
+        # gagal. Test tetap dijalankan persis `python -m pytest` (tanpa
+        # --no-cov); pipefail menjaga status keluar pytest, bukan status tee.
+        run: |
+          set -o pipefail
+          python -m pytest 2>&1 | tee pytest.log
+
+      - name: Salin versi paket saat gagal
+        # Log pekerja GitHub tidak bisa diambil dari API publik (403, butuh
+        # autentikasi), sehingga penyebab kegagalan pytest sebelumnya tidak
+        # terlihat dari luar. Artefak ini menyimpan versi paket yang persis
+        # dipakai runner agar kegagalan berikutnya bisa direproduksi dan
+        # didiagnosis. Hanya muncul saat langkah test gagal, jadi tidak
+        # mengubah hasil hijau dan tidak menjalankan ulang suite.
+        if: failure()
+        run: python -m pip freeze > pytest-env.txt
+
+      - name: Unggah log diagnostik
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-pytest-diagnostics
+          path: |
+            backend/pytest.log
+            backend/pytest-env.txt
+          retention-days: 7
+          if-no-files-found: ignore
 
   frontend:
     name: Frontend (typegen, tsc, eslint, build)
