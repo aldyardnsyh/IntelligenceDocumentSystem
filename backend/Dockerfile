@@ -64,10 +64,11 @@ COPY app/__init__.py app/__init__.py
 # Source lengkap, lalu satu-satunya `pip install .`. Versi dependency hidup di
 # pyproject; tidak ada daftar kedua yang bisa berubah sendiri.
 COPY app/ ./app/
-# Extra `[observability]` ikut dipasang: tanpa itu, `TRACING_ENABLED=1` di env
-# tidak pernah efektif di image karena langfuse tidak terpasang. Kegagalannya
-# hanya muncul sebagai warning di log saat tracing dimatikan diam-diam.
-RUN pip install --no-cache-dir ".[observability]"
+# Extra `[observability]` dan `[ocr]` ikut dipasang: tanpa itu,
+# `TRACING_ENABLED=1` tidak pernah efektif di image (langfuse tidak terpasang)
+# dan halaman pindai selalu jatuh ke model vision berbayar (RapidOCR tidak
+# terpasang). Kegagalan tracing hanya warning; kegagalan OCR memakan kuota API.
+RUN pip install --no-cache-dir ".[observability,ocr]"
 
 # --------------------------------------------------------------- runtime
 FROM python:3.11-slim-bookworm AS runtime
@@ -90,9 +91,13 @@ ENV PYTHONUNBUFFERED=1 \
     TRUST_PROXY_HEADERS=1
 
 # `curl` hanya untuk health check; `tini` untuk reaps proses zombie dan
-# meneruskan sinyal SIGTERM dengan benar.
+# meneruskan sinyal SIGTERM dengan benar. libgl1 + libglib2.0 untuk opencv
+# yang dibawa RapidOCR (mesin PP-OCR): runtime OnnxRuntime itu sendiri tidak
+# butuh keduanya, tapi opencv-python yang jadi dependensinya memuat libGL
+# saat import. Tanpa itu, halaman pindai gagal di-OCR dengan error yang
+# tidak menyebut penyebabnya.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl tini \
+    && apt-get install -y --no-install-recommends curl tini libgl1 libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --uid 10001 appuser \
     && mkdir -p /data && chown -R appuser:appuser /data

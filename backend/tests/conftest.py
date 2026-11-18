@@ -40,6 +40,20 @@ os.environ.update(
         "GROQ_API_KEY": "",
         "DEBUG": "true",
         "CORS_ORIGINS": "http://testserver",
+        # Supaya suite tetap sama hasilnya di mesin mana pun, env developer
+        # yang menyalakan dokumentasi API tidak boleh ikut memengaruhi test.
+        "API_DOCS_ENABLED": "0",
+        # Model reranker (1.1 GB) dan stemming tidak boleh diunduh/dihidupkan
+        # di test: suite harus tetap cepat dan hermetik. Perilaku reranker dan
+        # stemming diuji terpisah dengan stub.
+        "RERANK_ENABLED": "0",
+        "BM25_STEMMING_ENABLED": "0",
+        "INGEST_PDF_MODE": "auto",
+        "OCR_ENGINE": "auto",
+        # Gate harus tertutup di test: mode demo terbuka di .env developer akan
+        # membuat test auth (passcode salah → 200) gagal tanpa alasan jelas.
+        # Perilaku open mode diuji terpisah di test_security.
+        "AUTH_OPEN_MODE": "0",
     }
 )
 

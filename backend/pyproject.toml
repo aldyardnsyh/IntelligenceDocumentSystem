@@ -26,11 +26,32 @@ dependencies = [
     # sini datang dari pengguna, jadi jalur itu benar-benar terbuka.
     "pypdf>=6.19",
 
+    # Render halaman PDF ke gambar untuk pipeline vision OCR (dokumen hasil
+    # pindai). Dipilih karena murni wheel Python tanpa binary eksternal
+    # (poppler/ghostscript), sehingga Dockerfile dan Windows developer tidak
+    # perlu langkah instalasi tambahan.
+    "pypdfium2>=4.30",
+    # Backend render pypdfium2 (bitmap.to_pil()). Sudah ikut secara transitif
+    # lewat sentence-transformers, tapi dideklarasikan eksplisit karena
+    # langsung diimpor.
+    "pillow>=10.0",
+
     # Memory dan cache
     "redis>=5.2",
+
+    # Stemmer Bahasa Indonesia untuk BM25. Tanpa stemming, "pengaduan",
+    # "mengadu", dan "diadukan" adalah tiga token berbeda dan pertanyaan yang
+    # memakai salah satunya melewatkan chunk yang memakai dua lainnya.
+    "PySastrawi>=1.2",
 ]
 
 [project.optional-dependencies]
+# Mesin OCR lokal (PP-OCR via ONNX). Dipisah supaya instalasi dasar tetap
+# ringan dan test tidak memuat model; nyalakan dengan `pip install -e .[ocr]`.
+# Tanpa paket ini, halaman pindai langsung ditangani model vision.
+ocr = [
+    "rapidocr-onnxruntime>=1.4",
+]
 # Tracing dan evaluasi. Dipisah supaya instalasi dasar tetap ringan.
 observability = [
     "langfuse>=3.0",

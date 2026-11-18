@@ -160,9 +160,10 @@ class TestBatasSumberDayaPdf:
         )
         data = _make_pdf_with_pages(3)
         # Tiga halaman kosong: parsingnya jalan sampai akhir, lalu ditolak
-        # karena tidak ada teks. Yang penting bukan hasil akhirnya, tapi
-        # bahwa penolakannya BUKAN karena batas halaman.
-        with pytest.raises(ParseError, match="Tidak ada teks"):
+        # karena tidak ada teks DAN OCR vision tidak terkonfigurasi untuk
+        # menyelamatkannya (test env tanpa API key). Yang penting bukan hasil
+        # akhirnya, tapi bahwa penolakannya BUKAN karena batas halaman.
+        with pytest.raises(ParseError, match="hasil pindai"):
             parse_document("kecil.pdf", data, config)
 
     def test_menolak_pdf_yang_melewati_batas_waktu(

@@ -3,9 +3,11 @@
 Parsing sendiri bukan bagian yang rumit, tapi tiga hal di sini menentukan
 apakah hasilnya berguna:
 
-1. **PDF di luar scope OCR**. PDF hasil pindai tidak punya layer
-   teks, dan hasilnya dokumen kosong. Itu harus gagal dengan pesan yang
-   jelas, bukan diam-diam mengindeks nol byte.
+1. **PDF hasil pindai punya jalur sendiri.** PDF tanpa text-layer — atau
+   dengan text-layer OCR bawaan yang kacau, seperti Lembaran Negara dari
+   BPK — ditandai ``needs_ocr`` dan diselamatkan lewat jalur vision
+   (``ocr.py``). Kalau OCR tidak terkonfigurasi, barulah gagal dengan pesan
+   yang jelas, bukan diam-diam mengindeks teks sampah.
 2. **Nomor halaman harus dipertahankan.** Tanpa itu, Citation Card tidak
    bisa menampilkan "Hal. 12" dan yang bisa ditampilkan cuma nomor chunk.
 3. **Deteksi PDF terenkripsi.** Berkas seperti itu gagal dengan pesan
@@ -21,6 +23,9 @@ import time
 from dataclasses import dataclass, field
 
 from app.core.config import Settings
+from app.providers.base import vision_provider_ready
+from app.services.ingestion.cleanup import clean_page_text
+from app.services.ingestion.text_quality import TextQualityReport, assess_text_layer
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +75,13 @@ class ParsedDocument:
     #: pindai atau sebagian korup punya pola ini; pengguna perlu tahu kalau
     #: sebagian isi dokumennya tidak ikut terindeks.
     empty_pages: list[int] = field(default_factory=list)
+    #: True kalau teks PDF ini harus diekstraksi ulang lewat vision (OCR)
+    #: sebelum dipakai: text-layer kosong, atau ada tapi kualitasnya buruk.
+    #: Keputusan dijalankan di service ingestion; parser hanya menandai.
+    needs_ocr: bool = False
+    #: Laporan penilaian kualitas text-layer. None untuk dokumen non-PDF.
+    #: Disimpan supaya keputusan bisa diaudit lewat log dan test.
+    text_quality: TextQualityReport | None = None
 
     @property
     def full_text(self) -> str:
@@ -229,6 +241,11 @@ def _parse_pdf(data: bytes) -> ParsedDocument:
         except Exception as exc:  # noqa: BLE001
             logger.warning("Gagal ekstrak halaman %d: %s", index, exc)
             text = ""
+        # Artefak kaki halaman (nomor halaman, cap Lembaran Negara, penanda
+        # "...") dibuang di sini, bukan di chunker: polanya spesifik per
+        # halaman, dan kalau sampai ke chunker, baris noise sudah tercampur
+        # dengan isi paragraf.
+        text = clean_page_text(text)
         stripped = text.strip()
         if not stripped:
             empty_pages.append(index)
@@ -285,10 +302,34 @@ def parse_document(filename: str, data: bytes, settings: Settings) -> ParsedDocu
     lowered = filename.lower()
     parsed = _parse_pdf(data) if lowered.endswith(".pdf") else _parse_text(data, filename)
 
+    if parsed.is_pdf:
+        # Kualitas text-layer dinilai sekali di sini. Mode ``vision`` memaksa
+        # OCR untuk semua PDF; mode ``auto`` hanya untuk yang dinilai buruk;
+        # mode ``text`` tidak pernah meng-OCR — perilaku lama, dipakai test
+        # dan pemakai yang sengaja ingin teks mentah.
+        report = assess_text_layer(parsed.pages)
+        parsed.text_quality = report
+        mode = settings.ingest_pdf_mode
+        if mode == "vision" or (mode == "auto" and report.needs_ocr):
+            parsed.needs_ocr = True
+
     if parsed.looks_empty():
-        raise ParseError(
-            "Tidak ada teks yang bisa dibaca dari berkas ini. "
-            "Kalau ini hasil pindai, ekstraksi teksnya tidak didukung di versi ini."
-        )
+        if parsed.is_pdf and parsed.needs_ocr and vision_provider_ready(settings):
+            # PDF hasil pindai murni: text-layer kosong, tapi setiap halaman
+            # masih tersedia sebagai gambar dan OCR bisa mengekstraknya di
+            # background. Jangan tolak berkas yang sebenarnya bisa dibaca.
+            pass
+        elif parsed.is_pdf and parsed.needs_ocr:
+            raise ParseError(
+                "PDF ini hasil pindai dan tidak punya teks yang bisa dibaca. "
+                "Aktifkan OCR vision terlebih dahulu: set VISION_PROVIDER "
+                "(mis. groq) beserta kredensialnya (GROQ_API_KEY), lalu unggah ulang."
+            )
+        else:
+            raise ParseError(
+                "Tidak ada teks yang bisa dibaca dari berkas ini. "
+                "Kalau ini hasil pindai, aktifkan OCR vision atau gunakan "
+                "PDF yang punya layer teks."
+            )
 
     return parsed

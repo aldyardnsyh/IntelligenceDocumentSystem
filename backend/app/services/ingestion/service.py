@@ -14,10 +14,15 @@ import logging
 
 from app.core.config import Settings
 from app.models.domain import Chunk, Document, DocumentStatus
+from app.providers.base import build_vision_provider
 from app.providers.embedding import EmbeddingProvider, build_embedding_provider
 from app.repositories.sqlite_repo import MetadataRepository, new_id, utc_now
 from app.services.ingestion.chunker import TextSpan, chunk_text
+from app.services.ingestion.legal import build_legal_chunks, legal_structure_summary
+from app.services.ingestion.ocr import HybridOcrService, OcrError
+from app.services.ingestion.ocr_engine import paddle_available
 from app.services.ingestion.parser import ParsedDocument, ParseError, parse_document
+from app.services.ingestion.render import RenderError, render_pdf_pages
 from app.services.memory.store import ANSWER_CACHE_PREFIX, CACHE_PREFIX, MemoryStore
 from app.services.retrieval.retriever import COLLECTION, HybridRetriever, IndexEntry
 from app.services.retrieval.vector_store import VectorRecord, VectorStore, build_vector_store
@@ -194,8 +199,10 @@ class IngestionService:
         # Halaman kosong dilaporkan, bukan diterima diam-diam. PDF hasil pindai
         # atau sebagian korup akan terlihat "siap" padahal separuh isinya
         # tidak pernah terindeks, dan itu penyebab jawaban "tidak ditemukan"
-        # yang sangat sulit ditebak.
-        if parsed.empty_pages:
+        # yang sangat sulit ditebak. Kalau dokumen ditandai perlu OCR, halaman
+        # kosong inilah yang akan diekstraksi vision, jadi peringatan bukan
+        # tempatnya.
+        if parsed.empty_pages and not parsed.needs_ocr:
             shown = ", ".join(str(page) for page in parsed.empty_pages[:10])
             more = "" if len(parsed.empty_pages) <= 10 else ", ..."
             logger.warning(
@@ -219,7 +226,7 @@ class IngestionService:
         # Selesaikan di background supaya request upload tidak tertahan.
         # Referensi disimpan, kalau tidak event loop bisa mengumpulkan task
         # yang belum selesai dan membatalkannya di tengah jalan.
-        task = asyncio.create_task(self._process(document, parsed))
+        task = asyncio.create_task(self._process(document, parsed, data))
         self._tasks.add(task)
         self._tasks_by_document[document.id] = task
 
@@ -240,9 +247,14 @@ class IngestionService:
         if self._tasks:
             await asyncio.gather(*list(self._tasks), return_exceptions=True)
 
-    async def _process(self, document: Document, parsed: ParsedDocument) -> None:
-        """Chunking, embedding, lalu tulis ke vector store dan metadata."""
+    async def _process(
+        self, document: Document, parsed: ParsedDocument, pdf_data: bytes | None = None
+    ) -> None:
+        """Ekstraksi vision (bila perlu), chunking, embedding, lalu indexing."""
         try:
+            if parsed.needs_ocr and pdf_data:
+                parsed = await self._extract_scanned(document, parsed, pdf_data)
+
             spans = await asyncio.to_thread(self.build_spans, parsed)
             chunks = self.to_chunks(document.id, spans)
 
@@ -270,6 +282,7 @@ class IngestionService:
                         "page_number": chunk.page_number,
                         "content": chunk.content,
                         "token_count": chunk.token_count,
+                        "section": chunk.section,
                     },
                 )
                 for chunk, embedding in zip(chunks, embeddings, strict=True)
@@ -325,13 +338,101 @@ class IngestionService:
                 error_message=f"Pemrosesan gagal: {exc}",
             )
 
-    def build_spans(self, parsed: ParsedDocument) -> list[TextSpan]:
-        """Potong setiap halaman, pertahankan nomor halamannya.
+    async def _extract_scanned(
+        self, document: Document, parsed: ParsedDocument, pdf_data: bytes
+    ) -> ParsedDocument:
+        """Ganti text-layer dengan hasil OCR (PP-OCR lokal + vision), per halaman.
 
-        Halaman diproses terpisah supaya nomor halaman tidak hilang. Dokumen
-        tanpa paginasi menghasilkan satu halaman dengan nomor ``None``, dan
-        Citation Card lalu menampilkan nomor chunk.
+        Jika OCR gagal dan text-layer masih ada isinya, ingestion lanjut dengan
+        text-layer (degradasi terkontrol, bukan kegagalan): dokumen yang bisa
+        dibaca sebagian tetap lebih berguna daripada dokumen yang gagal total.
+        Yang gagal benar-benar hanya PDF tanpa text-layer sama sekali.
         """
+        mode = self._settings.ocr_engine
+        provider = None
+        if mode in ("auto", "vision"):
+            candidate = build_vision_provider(self._settings)
+            if candidate.is_configured():
+                provider = candidate
+        if provider is None and mode != "paddle" and not paddle_available():
+            logger.warning(
+                "Dokumen %s ditandai perlu OCR, tapi mesin lokal tidak "
+                "terpasang dan provider vision (VISION_PROVIDER=%s) belum "
+                "siap. Melanjutkan dengan text-layer.",
+                document.id,
+                self._settings.vision_provider,
+            )
+            return parsed
+
+        try:
+            rendered = await asyncio.to_thread(
+                render_pdf_pages, pdf_data, self._settings.pdf_render_scale
+            )
+        except RenderError as exc:
+            if parsed.looks_empty():
+                raise
+            logger.warning(
+                "Dokumen %s: render gagal (%s). Melanjutkan dengan text-layer.",
+                document.id,
+                exc,
+            )
+            return parsed
+
+        ocr = HybridOcrService(self._settings, vision_provider=provider)
+        try:
+            pages = await ocr.ocr_pages(rendered)
+        except OcrError as exc:
+            if parsed.looks_empty():
+                # Tidak ada text-layer untuk kembali; kegagalan OCR berarti
+                # kegagalan ingestion.
+                raise
+            logger.warning(
+                "Dokumen %s: OCR gagal (%s). Melanjutkan dengan text-layer.",
+                document.id,
+                exc,
+            )
+            return parsed
+
+        ocr_document = ParsedDocument(
+            pages=pages, page_count=len(pages), is_pdf=True
+        )
+        ocr_document.empty_pages = [
+            page.page_number
+            for page in pages
+            if page.page_number is not None and not page.text.strip()
+        ]
+        reason = ""
+        if parsed.text_quality is not None and parsed.text_quality.reasons:
+            reason = " (" + "; ".join(parsed.text_quality.reasons) + ")"
+        logger.info(
+            "Dokumen %s diekstraksi via vision OCR%s: %d halaman",
+            document.id,
+            reason,
+            len(pages),
+        )
+        return ocr_document
+
+    def build_spans(self, parsed: ParsedDocument) -> list[TextSpan]:
+        """Potong teks menjadi chunk, mengikuti struktur bila ada.
+
+        Dokumen yang terdeteksi sebagai peraturan (heading BAB/Pasal cukup
+        banyak) dipecah per Pasal dengan header konteksnya. Dokumen lain tetap
+        memakai jalur paragraf per halaman — halaman diproses terpisah supaya
+        nomor halaman tidak hilang.
+        """
+        if self._settings.legal_chunking_enabled:
+            spans = build_legal_chunks(
+                parsed.full_text,
+                max_chars=self._settings.legal_chunk_max_chars,
+                overlap=self._settings.chunk_overlap,
+            )
+            if spans:
+                logger.info(
+                    "Chunking legal aktif: %s", legal_structure_summary(spans)
+                )
+                return spans
+            logger.info("Struktur legal tidak terdeteksi; memakai chunking paragraf.")
+
         spans: list[TextSpan] = []
         for page in parsed.pages:
             spans.extend(
@@ -356,6 +457,7 @@ class IngestionService:
                 token_count=span.token_estimate(),
                 char_start=span.char_start,
                 char_end=span.char_end,
+                section=span.section,
             )
             for index, span in enumerate(spans)
         ]

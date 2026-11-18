@@ -35,6 +35,10 @@ class TextSpan:
     char_start: int
     char_end: int
     page_number: int | None = None
+    #: Label struktur bila chunk ini berasal dari chunking legal (mis.
+    #: "Pasal 5"). None untuk chunking paragraf generik. Dipakai UI untuk
+    #: badge dan metadata vector store untuk penyaringan.
+    section: str | None = None
 
     def token_estimate(self) -> int:
         """Perkiraan jumlah token.
