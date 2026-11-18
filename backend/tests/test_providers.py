@@ -670,3 +670,24 @@ class TestOpenAICompatibleEndpointProvider:
             )
         )
         assert [provider.name for provider in chain] == ["openai_compatible", "groq"]
+
+    def test_rantai_terbangun_dari_env_seperti_deployment(self) -> None:
+        """Rantai dibangun persis dari env aktif, bukan jatuh ke satu provider.
+
+        Deployment memakai provider utama endpoint OpenAI-compatible dengan
+        fallback ke provider berbeda katalognya. Kalau env tidak terbaca,
+        LLMChain diam-diam hanya memakai satu provider dan pengguna kehilangan
+        fallback tanpa tanda apa pun.
+        """
+        settings = Settings(
+            _env_file=None,
+            llm_provider="openai_compatible",
+            llm_fallback_chain="groq",
+            openai_compatible_api_key="kunci",
+            openai_compatible_base_url="https://contoh.invalid/v1",
+            groq_api_key="kunci-groq",
+        )
+        assert settings.effective_fallback_chain == ["openai_compatible", "groq"]
+        chain = LLMChain(build_fallback_chain(settings))
+        assert chain.provider_names == ["openai_compatible", "groq"]
+        assert all(provider.is_configured() for provider in chain.providers)

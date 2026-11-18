@@ -69,6 +69,35 @@ class TestAturanKeamananPrompt:
         assert "tetap jawab dari dokumen" in normalized
 
 
+class TestGayaJawabanNormal:
+    """Jawaban normal dibuka dengan mengulang inti pertanyaan pengguna.
+
+    Preferensi eksplisit pemilik produk: jawaban chatbot harus terasa manusiawi,
+    bukan tempelan kutipan chunk mentah. Karena itu gaya ini wajib tertulis di
+    SYSTEM_PROMPT, bukan hanya diharapkan dari model.
+    """
+
+    def test_minta_pengulangan_inti_pertanyaan(self) -> None:
+        normalized = " ".join(SYSTEM_PROMPT.split())
+        assert "mengulang inti pertanyaan" in normalized
+
+    def test_menyertakan_contoh_gaya(self) -> None:
+        # Contoh bentuk di prompt membuat gaya konkret, bukan abstrak.
+        normalized = " ".join(SYSTEM_PROMPT.split())
+        assert "Contoh gaya" in normalized
+
+    def test_prompt_konteks_konsisten_dengan_gaya(self) -> None:
+        """Penutup prompt konteks ikut meminta pengulangan inti pertanyaan."""
+        prompt = build_context_prompt(
+            "berapa lama prosesnya?",
+            [_chunk("Prosesnya lima hari kerja.")],
+            [],
+            6,
+        )
+        normalized = " ".join(prompt.split())
+        assert "mengulang inti pertanyaan pengguna" in normalized
+
+
 class TestBatasKonteks:
     """Blok konteks diberi penanda batas yang jelas."""
 

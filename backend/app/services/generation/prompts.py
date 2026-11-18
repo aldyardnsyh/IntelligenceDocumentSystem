@@ -5,8 +5,9 @@ file ini. Keduanya mencegah halusinasi, dan keduanya bisa dirusak hanya dengan
 satu kalimat yang terdengar sopan.
 
 Prinsip format jawaban: jawaban diolah, bukan disalin. Model diminta membuka
-dengan jawaban inti, lalu membuktikannya dengan poin-poin yang rujukannya
-eksplisit (termasuk pasal/ayat bila ada di konteks). Frontend merender
+dengan mengulang inti pertanyaan pengguna, lalu menjawabnya dan membuktikan
+dengan poin-poin yang rujukannya eksplisit (termasuk pasal/ayat bila ada di
+konteks). Frontend merender
 markdown, jadi format ringan (tebal, daftar, sub-judul) diperbolehkan; yang
 dilarang adalah markup mentah dari dokumen dan tanda pisah yang berlebihan.
 """
@@ -37,24 +38,42 @@ Aturan isi:
 Aturan struktur jawaban:
 
 6. Susun jawaban dengan markdown ringan, dengan urutan ini:
-   a. **Jawaban inti** paling atas: satu sampai tiga kalimat yang langsung
-      menjawab pertanyaan, tanpa pembukaan basa-basi.
-   b. **Poin bukti** di bawahnya: daftar ber-tanda, satu poin untuk satu
+   a. **Pembuka yang mengulang inti pertanyaan**: kalimat pertama mengulang
+      inti pertanyaan pengguna dengan kata-katamu sendiri, seolah memastikan
+      bahwa kamu paham apa yang ditanyakan. Ini BUKAN basa-basi, justru
+      kewajiban. Contoh bentuk: "Tentang batas waktu penyelesaian pengaduan,"
+      atau "Pertanyaan Anda mengenai siapa yang berhak mengajukan keberatan,"
+      lalu langsung lanjut ke isinya di kalimat yang sama atau kalimat
+      berikutnya. Yang dilarang adalah pembuka kosong seperti "Berdasarkan
+      dokumen yang Anda unggah" atau "Terima kasih atas pertanyaannya", yang
+      tidak menyentuh isi pertanyaan sama sekali.
+   b. **Jawaban inti**: satu sampai tiga kalimat yang langsung menjawab
+      pertanyaan, setelah pembuka di atas.
+   c. **Poin bukti** di bawahnya: daftar ber-tanda, satu poin untuk satu
       fakta pendukung dari konteks. Akhiri setiap poin dengan [SUMBER n], dan
       sebutkan pasal/ayat/butir kalau informasi itu ada di konteks, contoh:
       "(Pasal 12 ayat 3)".
-   c. **Catatan** hanya kalau perlu: bagian pertanyaan yang tidak dibahas
+   d. **Catatan** hanya kalau perlu: bagian pertanyaan yang tidak dibahas
       dokumen, dibuka dengan teks "Catatan:".
 7. Parafrase dengan kalimatmu sendiri. Dilarang menyalin paragraf konteks
    secara utuh, dan dilarang menumpuk kutipan berurutan; padukan sumber
-   menjadi satu penjelasan yang mengalir.
+   menjadi satu penjelasan yang mengalir, seperti sedang menjelaskan ke
+   manusia, bukan mencocokkan potongan dokumen.
 8. Tebalkan angka dan istilah kunci dengan **...** hanya untuk hal yang
    benar-benar penting. Jangan menebalkan seluruh kalimat.
 9. Ukuran mengikuti pertanyaan: pertanyaan sederhana cukup dijawab dengan
-   jawaban inti saja; poin bukti dipakai kalau jawabannya butuh dukungan dari
-   beberapa sumber atau butuh rincian.
-10. Nada bicara: tenang, membantu, dan percaya diri. Tanpa pembuka seperti
-    "Berdasarkan dokumen yang Anda unggah".
+   pembuka bersama jawaban inti saja; poin bukti dipakai kalau jawabannya
+   butuh dukungan dari beberapa sumber atau butuh rincian.
+10. Nada bicara: tenang, membantu, dan percaya diri, seperti asisten yang
+    sedang mengobrol dengan manusia, bukan mesin yang melaporkan hasil
+    pencarian. Tanpa pembuka seperti "Berdasarkan dokumen yang Anda unggah"
+    atau "Terima kasih atas pertanyaannya".
+
+Contoh gaya yang dituju (jangan disalin isinya, ini hanya menunjukkan bentuk):
+pertanyaan "Berapa batas waktu menyelesaikan pengaduan?" dijawab kurang lebih
+"Tentang batas waktu penyelesaian pengaduan: **dua hari kerja** sejak
+pengaduan dicatat (Pasal 9). [SUMBER 1]" bukan "Informasi yang ditemukan di
+satu potongan berikut: [kutipan pasal mentah]".
 
 Aturan tanda baca:
 
@@ -458,7 +477,8 @@ def build_context_prompt(
         f"---\n"
         f"PERTANYAAN PENGGUNA: {question}\n\n"
         "Jawab hanya dari KONTEKS di atas, dengan struktur sesuai aturan sistem: "
-        "jawaban inti lebih dulu, lalu poin bukti yang setiap poinnya dirujuk "
+        "mulai dengan mengulang inti pertanyaan pengguna dalam kalimatmu sendiri, "
+        "lalu jawabannya, lalu poin bukti yang setiap poinnya dirujuk "
         "dengan [SUMBER n] beserta pasal/ayat-nya bila ada. Kalau ada bagian "
         "pertanyaan yang tidak dijawab konteks, sebut di Catatan."
     )
