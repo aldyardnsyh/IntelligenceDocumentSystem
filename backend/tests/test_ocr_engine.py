@@ -420,6 +420,9 @@ class TestMakePreprocessVariants:
     def test_varian_asli_dan_derivatif_diemiten(self) -> None:
         import io
 
+        pytest.importorskip("cv2")
+        pytest.importorskip("PIL")
+
         from PIL import Image
 
         # Halaman krem polos dengan garis hitam: cukup membedakan CLAHE dari
@@ -449,6 +452,9 @@ class TestMakePreprocessVariants:
 
     def test_varian_tidak_dikenal_dibuang(self) -> None:
         import io
+
+        pytest.importorskip("cv2")
+        pytest.importorskip("PIL")
 
         from PIL import Image
 
