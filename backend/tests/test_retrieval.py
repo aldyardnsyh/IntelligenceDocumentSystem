@@ -128,15 +128,17 @@ class TestKeywordIndex:
         results = index.search("alphaword", top_k=5)
         # Kata lama harus hilang, karena kontennya sudah diganti.
         assert not any(identifier == "c1" for identifier, _ in results)
-        assert index.document_ids.count("c1") == 1
+        # Postingan tidak menghitung chunk yang sama dua kali.
+        assert len(index.postings.get("bravo", set())) == 1
+        assert "c1" in index.doc_freqs
 
     def test_remove_mengurangi_frekuensi_dokumen(self) -> None:
         index = KeywordIndex()
         index.add("c1", "kata unik di sini")
         index.add("c2", "kata unik di situ")
-        before = index.document_frequency["unik"]
+        before = len(index.postings["unik"])
         index.remove("c1")
-        assert index.document_frequency["unik"] == before - 1
+        assert len(index.postings["unik"]) == before - 1
 
     def test_remove_id_tidak_ada_aman(self) -> None:
         index = KeywordIndex()
@@ -343,7 +345,8 @@ class TestHybridRetriever:
         retriever.index([_entry("c1", "d1", "isi", None)])
         retriever.clear()
         # Setelah clear, pencarian hanya bersandar pada vektor.
-        assert retriever._keyword_index.document_ids == []
+        assert retriever._keyword_index.doc_freqs == {}
+        assert retriever._keyword_index.postings == {}
 
     def test_vektor_dimensi_berbeda_dilewati_bukan_gagal(self, store: InMemoryVectorStore) -> None:
         retriever = HybridRetriever(store)
@@ -669,3 +672,47 @@ def test_cosine_vector_nilai_ekstrem_tidak_menghasilkan_nan() -> None:
     right = [1e9, -1e9, 1e9]
     result = cosine_similarity(left, right)
     assert not math.isnan(result)
+
+    def test_scope_satu_dokumen_tidak_dicap_dua(
+        self, store: InMemoryVectorStore
+    ) -> None:
+        """Chat privat per dokumen: cap per-dokumen tidak boleh menyisakan 2.
+
+        Sebelumnya cap = max(2, top_k//2) membuat pertanyaan pada dokumen
+        tunggal hanya melihat 2 chunk, dan Pasal yang benar (kandidat ketiga)
+        terbuang - terverifikasi nyata di dokumen Perpres: jawaban "batas
+        waktu 60 hari" hilang karena Pasal 12 jadi kandidat ketiga.
+        """
+        retriever = HybridRetriever(store)
+        for index in range(6):
+            store.upsert(
+                [
+                    VectorRecord(
+                        id=f"c{index}",
+                        embedding=[1.0, 0.0],
+                        metadata={
+                            "document_id": "satu",
+                            "document_name": "perpres.pdf",
+                            "chunk_index": index,
+                            "content": f"chunk {index} pengaduan",
+                            "page_number": index + 1,
+                        },
+                    )
+                ]
+            )
+            retriever.index(
+                [
+                    IndexEntry(
+                        chunk_id=f"c{index}",
+                        document_id="satu",
+                        document_name="perpres.pdf",
+                        content=f"chunk {index} pengaduan",
+                        chunk_index=index,
+                        page_number=index + 1,
+                    )
+                ]
+            )
+        hasil = retriever.retrieve(
+            "pengaduan", [1.0, 0.0], 5, 0.0, document_ids=["satu"]
+        )
+        assert len(hasil) == 5

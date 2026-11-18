@@ -3,30 +3,30 @@
 ## Kenapa perlu
 
 Ambang tunggal pada cosine similarity tidak bisa memisahkan sempurna. Diukur
-pada dataset contoh dengan ``multilingual-e5-small``:
+pada dataset contoh:
 
-- chunk yang memuat jawaban: skor 0.804 sampai 0.875
-- chunk yang tidak memuat jawaban: skor 0.748 sampai 0.879
-
-Keduanya **tumpang tindih**. Tidak ada ambang yang benar untuk semua kasus:
-ambang rendah meloloskan chunk salah, ambang tinggi membuang chunk benar.
+- chunk yang memuat jawaban dan chunk yang tidak memuat jawaban punya rentang
+  skor cosine yang **tumpang tindih**. Tidak ada ambang yang benar untuk semua
+  kasus: ambang rendah meloloskan chunk salah, ambang tinggi membuang chunk
+  benar.
 
 ## Kenapa cross-encoder membantu
 
 Embedding membandingkan dua teks yang dihitung **terpisah**, jadi ia tidak
 pernah melihat bagaimana pertanyaan dan chunk saling berhubungan.
 Cross-encoder membaca keduanya **bersamaan** dalam satu forward pass, sehingga
-bisa menilai kecocokan yang tidak tertangkap oleh jarak vektor.
+bisa menilai kecocokan yang tidak tertangkap oleh jarak vektor. Diukur pada
+dataset contoh: ketepatan posisi pertama naik dari 4/11 menjadi 7/11.
 
-Hasil pengukuran pada dataset yang sama: ketepatan posisi pertama naik dari
-4/11 menjadi 7/11.
+## Kenapa ``bge-reranker-v2-m3``
 
-## Kenapa dimatikan secara default
-
-Cross-encoder menambah sekitar 80 MB model dan waktu respons sekitar 50
-sampai 150 ms per pertanyaan di CPU. Untuk aplikasi satu instance yang
-berjalan di CPU, itu trade-off yang harus dipilih dengan sadar, bukan
-default yang dipaksakan. Nyalakan dengan ``RERANK_ENABLED=1``.
+Model Inggris seperti ``cross-encoder/ms-marco-MiniLM-L-6-v2`` memberi skor
+yang praktis tidak bermakna untuk pasangan pertanyaan-chunk Bahasa Indonesia.
+``BAAI/bge-reranker-v2-m3`` multilingual (100+ bahasa, termasuk Indonesia)
+dan berlisensi Apache-2.0. Biayanya: sekitar 1.1 GB RAM dan 150 sampai 400 ms
+per pertanyaan di CPU. Model dimuat sekali; kegagalan memuat tidak menjatuhkan
+aplikasi (fallback ke urutan fusion), karena retrieval yang jalan tanpa
+reranking lebih berguna daripada aplikasi yang tidak bisa start.
 """
 
 from __future__ import annotations
@@ -53,14 +53,14 @@ class Reranker(Protocol):
 class CrossEncoderReranker:
     """Reranker berbasis cross-encoder sentence-transformers."""
 
-    def __init__(self, model_name: str) -> None:
+    def __init__(self, model_name: str, device: str = "cpu") -> None:
         from sentence_transformers import CrossEncoder  # noqa: PLC0415
 
         self.name = model_name
         # Model dimuat sekali saat dibuat, bukan per pertanyaan. Memuatnya
         # per pertanyaan menambah beberapa detik ke setiap jawaban.
-        self._model = CrossEncoder(model_name, device="cpu")
-        logger.info("Reranker siap: %s", model_name)
+        self._model = CrossEncoder(model_name, device=device)
+        logger.info("Reranker siap: %s (device=%s)", model_name, device)
 
     def rerank(
         self, question: str, candidates: list[str], top_k: int
@@ -106,7 +106,7 @@ _reranker: Reranker | None = None
 _reranker_lock = threading.Lock()
 
 
-def build_reranker(enabled: bool, model_name: str) -> Reranker:
+def build_reranker(enabled: bool, model_name: str, device: str = "cpu") -> Reranker:
     """Bangun reranker sekali, lalu pakai bersama.
 
     Kegagalan memuat model TIDAK menggagalkan aplikasi: yang terjadi adalah
@@ -127,7 +127,7 @@ def build_reranker(enabled: bool, model_name: str) -> Reranker:
             return _reranker
 
         try:
-            _reranker = CrossEncoderReranker(model_name)
+            _reranker = CrossEncoderReranker(model_name, device=device)
         except Exception:  # noqa: BLE001
             logger.warning(
                 "Reranker gagal dimuat (%s). Retrieval berjalan tanpa "
