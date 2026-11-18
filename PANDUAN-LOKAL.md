@@ -7,11 +7,12 @@ Ada dua cara, pilih sesuai kebutuhan:
 
 | Cara | Waktu | Yang didapat |
 |---|---|---|
-| [Cara A: mode demo](#cara-a-mode-demo-tanpa-backend-5-menit) | 5 menit | Semua halaman bisa diklik, data contoh dari browser |
 | [Cara B: lengkap](#cara-b-lengkap-dengan-backend-30-menit) | 30 menit | Benar-benar menjawab dari dokumen yang Anda unggah |
 
-Kalau tujuan Anda hanya "ingin tahu hasilnya seperti apa", **Cara A sudah
-cukup**. Cara B dipakai kalau Anda ingin menguji kualitas jawaban sungguhan.
+Cara A (mode demo tanpa backend) sudah dihapus seluruhnya: frontend selalu
+berbicara dengan backend FastAPI, jadi satu-satunya jalur menjalankan adalah
+Cara B. Sesuai keputusan produk, UI tiruan yang tampil ke pengunjung lebih
+merusak daripada pesan error yang jujur.
 
 ---
 
@@ -32,7 +33,7 @@ hanya hash-nya, jadi passcode tidak bisa dilihat lagi setelah itu. Kalau
 hilang, buat yang baru dengan `python -m scripts.make_passcode`.
 
 Perintah itu **tidak menimpa** berkas yang sudah ada, jadi aman dijalankan
-ulang. Kalau Anda memilih Cara A (mode demo), cukup singkirkan
+ulang. Kalau Anda hanya ingin melihat tampilannya tanpa backend, harapkan
 `frontend/.env.local` seperti dijelaskan di bawah.
 
 ---
@@ -63,97 +64,12 @@ opsi PATH dicentang.
 
 ---
 
-## Cara A: mode demo, tanpa backend (5 menit)
+## Cara A: sudah dihapus (mode demo tidak ada lagi)
 
-Cara ini menjalankan tampilan saja. Data contoh disimpan di browser, jadi
-perubahan hilang saat halaman dimuat ulang. Cocok untuk melihat seluruh
-halaman dan mencoba setiap tombol.
-
-### Sebelum mulai: periksa `.env.local`
-
-Buka folder `frontend`. Kalau ada berkas bernama `.env.local`, **ganti
-namanya sementara** (misalnya menjadi `.env.local.simpan`).
-
-```powershell
-cd "<folder-project>\frontend"
-if (Test-Path .env.local) { Rename-Item .env.local .env.local.simpan }
-```
-
-Alasannya: kalau berkas itu berisi `NEXT_PUBLIC_USE_BACKEND=1`, aplikasi
-mencoba memanggil backend yang tidak berjalan. Gejalanya membingungkan,
-karena halaman tetap terbuka dan passcode terlihat benar, tetapi login gagal
-tanpa pesan yang menjelaskan sebabnya. Nanti di Cara B berkas ini dipakai
-lagi.
-
-### Langkah 1: buka folder frontend
-
-```powershell
-cd "<folder-project>\frontend"
-```
-
-Sesuaikan alamatnya dengan tempat Anda menyimpan proyek ini.
-
-### Langkah 2: pasang dependency
-
-```powershell
-npm install
-```
-
-Sekali saja untuk pemasangan pertama. Prosesnya 1 sampai 3 menit dan
-mengunduh sekitar 400 MB. Kalau muncul peringatan `npm warn`, itu normal,
-bukan kegagalan.
-
-Kalau perintah ini gagal dengan pesan tentang peer dependency, jalankan
-sebagai gantinya:
-
-```powershell
-npm install --legacy-peer-deps
-```
-
-### Langkah 3: jalankan
-
-```powershell
-npm run dev
-```
-
-Tunggu sampai muncul tulisan seperti ini:
-
-```
-▲ Next.js 16.4.0 (Turbopack)
-- Local:  http://localhost:3000
-✓ Ready in 2.3s
-```
-
-### Langkah 4: buka di browser
-
-Buka **<http://localhost:3000>**, lalu masuk dengan passcode demo:
-**`demo-rag-2025`**
-
-Pakai `localhost`, bukan `127.0.0.1`. Di mode pengembangan, Next.js hanya
-mengizinkan berkas JavaScript-nya dimuat dari alamat tertentu. Kalau Anda
-membuka `127.0.0.1:3000`, halaman tampil normal tetapi semua tombol diam
-karena JavaScript-nya diblokir. Kalau itu terjadi, ganti alamatnya menjadi
-`localhost:3000` dan halaman akan berfungsi.
-
-Di bagian atas akan muncul banner **"Mode demo"**. Itu artinya data berasal
-dari browser, bukan dari server. Banner ini sengaja ada supaya tidak ada yang
-mengira sedang melihat data sungguhan.
-
-### Yang bisa Anda coba
-
-| Halaman | Yang bisa dilakukan |
-|---|---|
-| Chat | Tanya apa saja, lihat jawaban dan kartunya sitasi |
-| Dokumen | Unggah PDF, TXT, atau Markdown, lihat statusnya berubah |
-| Analitik | Latensi, log pertanyaan, tombol evaluasi |
-| Pengaturan | Ubah jumlah sumber dan ambang kemiripan |
-| Tentang | Penjelasan alur kerja dan pilihan teknologi |
-
-### Menghentikan
-
-Tekan `Ctrl + C` di terminal tempat `npm run dev` berjalan.
-
----
+Mode demo (fixture in-browser) telah dihapus dari kode: tidak ada
+`lib/mock`, tidak ada banner "Mode demo", dan tidak ada tombol masuk tanpa
+passcode. Frontend menolak menampilkan data tiruan ke pengunjung; tanpa
+backend, aplikasi menampilkan pesan error yang jujur. Ikuti Cara B di bawah.
 
 ## Cara B: lengkap, dengan backend (30 menit)
 
@@ -177,9 +93,8 @@ Perintah itu memeriksa dua hal yang paling sering salah:
 1. **`backend/.env` ada dan `ACCESS_PASSCODE_SHA256` terisi.** Tanpa nilai itu,
    backend menolak semua passcode dengan 401. Pesannya di log backend berbunyi
    "ACCESS_PASSCODE_SHA256 belum diisi", tetapi mudah tertimpa log request.
-2. **Konsistensi `frontend/.env.local`.** Kalau `NEXT_PUBLIC_USE_BACKEND=1`,
-   frontend memakai backend sungguhan, sehingga backend wajib berjalan. Kalau
-   nilainya kosong, frontend memakai mode demo dan backend tidak dipakai.
+2. **Konsistensi `frontend/.env.local`.** Frontend selalu memakai backend
+   sungguhan, sehingga backend wajib berjalan.
 
 Kalau ada masalah, perintah itu juga menyebutkan tindakannya.
 
@@ -336,17 +251,13 @@ cd "<folder-project>\frontend"
 Buat berkas `frontend/.env.local` berisi:
 
 ```ini
-NEXT_PUBLIC_USE_BACKEND=1
 BACKEND_ORIGIN=http://127.0.0.1:8000
 NEXT_PUBLIC_API_BASE_URL=
 ```
 
-`NEXT_PUBLIC_USE_BACKEND=1` adalah sakelar utama: dengan nilai itu, aplikasi
-memakai backend sungguhan dan bukan data demo.
+Frontend selalu memakai backend; tidak ada lagi mode demo tanpa model.
 
 #### Langkah 10: pasang dependency
-
-Lewati kalau Anda sudah menjalankan Cara A.
 
 ```powershell
 npm install
@@ -361,7 +272,7 @@ npm run dev
 Buka <http://localhost:3000> dan masuk dengan passcode yang Anda buat di
 Langkah 5.
 
-Kali ini **tidak ada banner "Mode demo"**. Itu artinya data berasal dari
+Data kini berasal dari
 backend sungguhan.
 
 ### Bagian 3: mencoba dengan dokumen sungguhan
@@ -403,7 +314,6 @@ sengaja berbeda, dan labelnya harus terlihat.
 |---|---|---|
 | `python` tidak dikenali | PATH tidak dicentang saat memasang | Pasang ulang Python, centang "Add Python to PATH", tutup dan buka ulang PowerShell |
 | `node` tidak dikenali | Node.js belum terpasang | Pasang dari <https://nodejs.org>, pilih LTS |
-| Banner "Mode demo" tetap muncul | `NEXT_PUBLIC_USE_BACKEND` belum `1` | Periksa `frontend/.env.local`, lalu hentikan frontend dengan `Ctrl + C` dan jalankan lagi |
 | Login selalu gagal, tidak ada pesan | Backend belum hidup, atau hash passcode salah | Buka <http://127.0.0.1:8000/api/v1/health>. Kalau gagal, lihat terminal backend |
 | "Gagal terhubung ke layanan" di dalam aplikasi | Terminal backend sudah ditutup | Jalankan lagi Langkah 7 |
 | Semua pertanyaan dijawab "tidak ditemukan" | Dokumen belum berstatus "Siap ditanyai" | Tunggu sampai kartunya berubah, lalu coba lagi |
@@ -411,7 +321,7 @@ sengaja berbeda, dan labelnya harus terlihat.
 | Port 3000 sudah dipakai | Ada aplikasi lain di port itu | Hentikan aplikasi itu, atau jalankan `npm run dev -- -p 3001` |
 | Port 8000 sudah dipakai | Backend lain masih berjalan | Tutup terminal backend yang lama |
 | Aplikasi lain muncul di <http://localhost:3000> | Port 3000 dipakai proyek lain | Pastikan terminal frontend menampilkan "Ready", lalu pakai port lain |
-| Halaman tampil tetapi tombol tidak bereaksi | Dibuka lewat `127.0.0.1`, atau `.env.local` masih berisi `NEXT_PUBLIC_USE_BACKEND=1` | Pakai `localhost:3000`, dan singkirkan `.env.local` untuk mode demo |
+| Halaman tampil tetapi tombol tidak bereaksi | Dibuka lewat `127.0.0.1` | Pakai `localhost:3000` |
 | Petunjuk passcode berbeda dari yang diterima | `.env.local` mengisi `NEXT_PUBLIC_DEV_PASSCODE_HINT` | Singkirkan `.env.local`, lalu muat ulang halaman |
 | Login selalu 401 padahal passcode benar | `backend/.env` hilang atau `ACCESS_PASSCODE_SHA256` kosong | Jalankan `python scripts/cek-kesiapan.py` dari akar proyek |
 
@@ -431,7 +341,7 @@ memeriksa hal yang sebenarnya tidak bermasalah.
 
 Untuk Anda yang sudah pernah melakukannya, ini ringkasannya.
 
-**Mode demo:**
+
 
 ```powershell
 cd frontend

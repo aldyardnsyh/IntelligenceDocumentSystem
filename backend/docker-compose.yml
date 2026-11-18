@@ -96,7 +96,6 @@ services:
         # dievaluasi saat build, bukan saat request. Nilai yang salah di sini
         # menghasilkan proxy yang menunjuk ke host yang tidak benar.
         BACKEND_ORIGIN: http://api:8000
-        NEXT_PUBLIC_USE_BACKEND: "1"
         # Sengaja kosong: request ke `/api/v1/...` jadi path relatif yang
         # diteruskan rewrite Next.js. URL absolut hanya perlu kalau browser
         # benar-benar menembak backend langsung -- dan itu merusak cookie
