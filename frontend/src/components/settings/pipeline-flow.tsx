@@ -10,11 +10,9 @@ import {
   ScanText,
   Scissors,
   Sparkles,
-  TextSearch,
   type LucideIcon,
 } from "lucide-react";
 import { getHealth } from "@/lib/api";
-import { isMockMode } from "@/lib/api/config";
 import { formatNumber } from "@/lib/format";
 import { useDocuments } from "@/lib/queries";
 import {
@@ -85,7 +83,6 @@ function useComponentHealth(): ComponentHealth | null {
   const health = useQuery({
     queryKey: ["health"],
     queryFn: ({ signal }) => getHealth(signal),
-    enabled: !isMockMode,
     refetchInterval: 60_000,
     retry: false,
   });
@@ -98,66 +95,7 @@ function useComponentHealth(): ComponentHealth | null {
     : null;
 }
 
-/**
- * Definisi enam tahap. Produksi dan demo berbeda pada tahap 2-5 karena
- * mekanismenya memang lain; menyalin narasi produksi ke demo berarti
- * mengklaim OCR, vektor, dan LLM yang tidak ada di sana.
- */
 function useStages(live: ReturnType<typeof useLiveCounts>): Stage[] {
-  if (isMockMode) {
-    return [
-      {
-        Icon: FileUp,
-        title: "Dokumen diunggah",
-        body: "Berkas PDF, TXT, atau Markdown dibaca langsung di peramban. Isinya tidak dikirim ke server mana pun — seluruh demo hidup di perangkat Anda.",
-        chips: ["PDF · TXT · Markdown", "diproses di peramban"],
-        Scene: UploadScene,
-        stats: live.hasDocuments
-          ? [
-              { value: live.documents, label: "dokumen" },
-              { value: live.pages, label: "halaman" },
-            ]
-          : undefined,
-      },
-      {
-        Icon: ScanText,
-        title: "Ekstraksi teks",
-        body: "Setiap halaman PDF dibaca satu per satu di peramban, lalu teksnya dibersihkan dari sisa pemenggalan baris sebelum dipotong.",
-        chips: ["pembaca PDF peramban", "tanpa OCR server"],
-        Scene: OcrScene,
-      },
-      {
-        Icon: Scissors,
-        title: "Chunking",
-        body: "Teks dipotong menjadi bagian sekitar 500 karakter dengan sedikit tumpang tindih — potongan terkecil yang kalimatnya masih bisa dibaca utuh.",
-        chips: ["±500 karakter", "sedikit overlap"],
-        Scene: ChunkScene,
-        stats: live.hasDocuments ? [{ value: live.chunks, label: "chunk" }] : undefined,
-      },
-      {
-        Icon: Database,
-        title: "Basis pengetahuan",
-        body: "Tidak ada vektor di demo ini. Pertanyaan dicocokkan kata per kata dengan isi setiap chunk, dihitung di peramban saat itu juga.",
-        chips: ["pencocokan kata", "tanpa embedding"],
-        Scene: IndexScene,
-      },
-      {
-        Icon: TextSearch,
-        title: "Penyusunan jawaban",
-        body: "Tidak ada model bahasa: kutipan chunk yang paling cocok dirangkai menjadi jawaban. Apa yang Anda baca benar-benar berasal dari dokumennya.",
-        chips: ["perangkatan kutipan", "tanpa LLM"],
-        Scene: RetrievalScene,
-      },
-      {
-        Icon: Sparkles,
-        title: "Jawaban & sumber",
-        body: "Setiap jawaban menyebut sumbernya dan bisa ditelusuri ke chunk asalnya. Seluruh data demo — dokumen, riwayat, catatan aktivitas — tersimpan di peramban.",
-        chips: ["sitasi ke chunk asal", "data demo lokal"],
-        Scene: AnswerScene,
-      },
-    ];
-  }
-
   return [
     {
       Icon: FileUp,
@@ -303,8 +241,7 @@ export function PipelineFlow() {
                 ) : null}
 
                 {status && health ? (
-                  // Di mode demo kueri health tidak berjalan, jadi baris ini
-                  // tidak pernah tampil tanpa data.
+                  // Tanpa data /health baris ini tidak dirender.
                   <StatusRow status={status} health={health} />
                 ) : null}
 

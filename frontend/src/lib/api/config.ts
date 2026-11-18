@@ -1,24 +1,16 @@
 /**
  * Konfigurasi runtime API.
  *
- * - `NEXT_PUBLIC_API_BASE_URL` diisi  -> talking ke FastAPI sungguhan.
- * - kosong                             -> memakai fixture retrieval in-browser
- *                                        (src/lib/mock) supaya UI tetap bisa
- *                                        diklik tanpa backend.
+ * Frontend selalu berbicara dengan FastAPI. Tidak ada mode demo: fixture
+ * in-browser sudah dihapus, karena UI tiruan yang tampil ke pengunjung lebih
+ * merusak kepercayaan daripada pesan error yang jujur.
  *
- * Fixture tidak pernah berpura-pura jadi backend: setiap halaman yang
- * bergantung padanya menampilkan banner "Mode demo".
+ * ## Kenapa dua env var
  *
- * ## Dua env var, bukan satu
- *
- * `NEXT_PUBLIC_USE_BACKEND` adalah sakelarnya: `1` berarti memakai FastAPI,
- * kosong berarti fixture lokal.
- *
- * `NEXT_PUBLIC_API_BASE_URL` hanya override untuk kasus khusus, dan sengaja
- * kosong di konfigurasi normal supaya request memakai path relatif
- * `/api/v1/...` yang diproxy oleh rewrite di `next.config.ts`. Bagi browser
- * semua request, termasuk `Set-Cookie` dari endpoint login, lalu berada di
- * satu origin, dan cookie ikut naik-turun bersama setiap permintaan.
+ * `NEXT_PUBLIC_API_BASE_URL` sengaja kosong di konfigurasi normal supaya
+ * request memakai path relatif `/api/v1/...` yang diproxy oleh rewrite di
+ * `next.config.ts` (nilai build-time `BACKEND_ORIGIN`). Bagi browser semua
+ * request, termasuk `Set-Cookie` dari endpoint login, berada di satu origin.
  *
  * Mengisi URL absolut membuat browser bicara langsung ke backend. Di localhost
  * itu masih jalan karena cookie berbagi domain, tapi `Set-Cookie` dari endpoint
@@ -27,20 +19,14 @@
  * terpisah, cookie lintas-domain juga butuh `SameSite=None; Secure` yang rapuh.
  */
 
-function readFlag(value: string | undefined): boolean {
-  return /^(1|true|yes|on)$/i.test(value?.trim() ?? "");
-}
-
-/** True kalau UI harus bicara dengan FastAPI, bukan fixture lokal. */
-export const isMockMode = !readFlag(process.env.NEXT_PUBLIC_USE_BACKEND);
-
 /**
  * Prefix untuk semua request API. String kosong berarti path relatif, yang
  * diteruskan rewrite Next.js ke backend.
  */
-export const API_BASE_URL = isMockMode
-  ? ""
-  : (process.env.NEXT_PUBLIC_API_BASE_URL ?? "").replace(/\/+$/, "");
+export const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "").replace(
+  /\/+$/,
+  "",
+);
 
 /**
  * Tautan keluar. Kosong berarti tombolnya sengaja nonaktif dengan label

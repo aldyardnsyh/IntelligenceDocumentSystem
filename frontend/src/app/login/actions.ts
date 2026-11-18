@@ -2,17 +2,9 @@
 
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { API_BASE_URL, isMockMode } from "@/lib/api/config";
+import { API_BASE_URL } from "@/lib/api/config";
 import { resolveRequestOrigin, safeNextPath } from "@/lib/api/origin";
-import {
-  SESSION_COOKIE,
-  SESSION_TTL_SECONDS,
-  clearAttempts,
-  registerFailedAttempt,
-  tooManyAttempts,
-  verifyPasscode,
-} from "@/lib/auth/session";
-import { isDemoEntryEnabled } from "@/lib/demo/profile";
+import { SESSION_COOKIE, SESSION_TTL_SECONDS } from "@/lib/auth/session";
 
 export interface LoginState {
   status: "idle" | "error" | "rate_limited";
@@ -21,12 +13,9 @@ export interface LoginState {
 }
 
 /**
- * Verifikasi passcode punya tepat satu sumber kebenaran.
- *
- * - Backend terhubung  : POST /api/v1/auth/verify yang memutuskan. Rate limit
- *   dan session token juga milik backend.
- * - Mode lokal         : passcode dicocokkan dengan hash dari env var
- *   DEMO_PASSCODE, supaya UI tetap bisa dicoba tanpa backend.
+ * Verifikasi passcode punya tepat satu sumber kebenaran:
+ * POST /api/v1/auth/verify yang memutuskan. Rate limit dan session token
+ * juga milik backend.
  */
 async function checkPasscode(passcode: string): Promise<{
   ok: boolean;
@@ -34,8 +23,7 @@ async function checkPasscode(passcode: string): Promise<{
   retryAfterSeconds?: number;
   setCookies: string[];
 }> {
-  if (!isMockMode) {
-    // URL harus absolut. `fetch` di server action berjalan di runtime Node,
+  // URL harus absolut. `fetch` di server action berjalan di runtime Node,
     // dan keandalan URL relatif di sana bergantung pada versi Next.js.
     // Mengandalkan itu di jalur auth terlalu berisiko: kalau gagal, gejalanya
     // "login selalu gagal" tanpa pesan yang jelas.
@@ -75,13 +63,6 @@ async function checkPasscode(passcode: string): Promise<{
       };
     }
     return { ok: false as const, rateLimited: false as const, setCookies: [] as string[] };
-  }
-
-  return {
-    ok: verifyPasscode(passcode),
-    rateLimited: false as const,
-    setCookies: [] as string[],
-  };
 }
 
 /**
@@ -91,9 +72,8 @@ async function checkPasscode(passcode: string): Promise<{
  * implementasi saja, karena dua salinan cookie yang berbeda atributnya adalah
  * cara paling mudah membuat salah satu jalur diam-diam tidak berfungsi.
  *
- * Cookie ini hanya penanda gerbang, bukan kredensial. Jalur passcode tetap
- * ditegakkan backend; jalur demo memang tidak membawa kredensial apa pun dan
- * karena itu hanya boleh hidup saat `isDemoEntryEnabled` bernilai true.
+ * Cookie ini hanya penanda gerbang, bukan kredensial; passcode tetap
+ * ditegakkan backend.
  *
  * `secure` mengikuti skema request, BUKAN `NODE_ENV`. Versi sebelumnya memakai
  * `NODE_ENV === "production"`, dan itu membuat login tidak pernah bertahan saat
@@ -113,58 +93,11 @@ async function setGateCookie(origin: string): Promise<void> {
   });
 }
 
-export interface DemoEntryState {
-  status: "idle" | "error";
-  message?: string;
-}
-
-/**
- * Jalur masuk tanpa passcode untuk demo publik.
- *
- * Gerbangnya `isDemoEntryEnabled`, bukan `isMockMode`: mode fixture juga aktif
- * saat pengembangan lokal, dan di sana melewati login justru menyembunyikan
- * bug alur auth. Saat sakelar produk itu mati, action ini hanya mengembalikan
- * pesan dan tidak menyentuh cookie sama sekali.
- */
-export async function enterDemo(
-  _prev: DemoEntryState,
-  formData: FormData,
-): Promise<DemoEntryState> {
-  if (!isDemoEntryEnabled) {
-    return { status: "error", message: "Masuk demo tidak tersedia di alur ini." };
-  }
-
-  // Skema request menentukan apakah cookie harus `Secure`.
-  await setGateCookie(resolveRequestOrigin(await headers()));
-
-  // `redirect` melempar error kendali milik Next.js, jadi ia harus berada di
-  // luar try/catch. Membungkusnya akan menelan pengalihan dan mengubahnya
-  // menjadi pesan error biasa.
-  redirect(safeNextPath(String(formData.get("next") ?? "")) || "/chat");
-}
-
 export async function submitPasscode(
   _prev: LoginState,
   formData: FormData,
 ): Promise<LoginState> {
   const passcode = String(formData.get("passcode") ?? "").trim();
-
-  // Rate limit lokal hanya berlaku di mode lokal. Saat backend aktif,
-  // reload per IP dijalankan di sana supaya berlaku lintas instance.
-  const ip =
-    (await headers()).get("x-forwarded-for")?.split(",")[0]?.trim()
-    ?? "local";
-
-  if (isMockMode) {
-    const waitSeconds = tooManyAttempts(ip);
-    if (waitSeconds > 0) {
-      return {
-        status: "rate_limited",
-        message: "Terlalu banyak percobaan gagal.",
-        retryAfterSeconds: waitSeconds,
-      };
-    }
-  }
 
   // Backend mati, DNS salah, atau origin salah bukan "passcode salah".
   // Tanpa try/catch di sini, error-nya dilempar keluar dari server action
@@ -188,14 +121,11 @@ export async function submitPasscode(
   }
 
   if (!result.ok) {
-    if (isMockMode) registerFailedAttempt(ip);
     return {
       status: "error",
       message: "Passcode salah. Periksa kembali atau hubungi penyedia demo.",
     };
   }
-
-  if (isMockMode) clearAttempts(ip);
 
   // Skema request menentukan apakah cookie harus `Secure`.
   const origin = resolveRequestOrigin(await headers());

@@ -9,7 +9,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { ACCEPTED_EXTENSIONS, MAX_FILE_BYTES } from "@/lib/mock/store";
+import { ACCEPTED_EXTENSIONS, MAX_FILE_BYTES } from "@/lib/constants";
 import { formatBytes } from "@/lib/format";
 
 export interface ChatInputHandle {

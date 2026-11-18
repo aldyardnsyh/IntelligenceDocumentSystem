@@ -22,7 +22,7 @@ import { formatNumber } from "@/lib/format";
  * - **Teks/Markdown**: teks hasil parsing ditampilkan berurutan, karena
  *   berkas aslinya tidak disimpan untuk jenis ini.
  *
- * Berkas tidak pernah dikirim ke server: di mode demo semuanya diolah di
+ * Berkas diambil langsung dari endpoint berkas backend:
  * browser (session storage + memori tab ini saja).
  */
 export function DocumentPreview({

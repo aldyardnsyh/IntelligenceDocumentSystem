@@ -28,8 +28,7 @@ import { useSessionActions } from "./use-session-actions";
 import { uploadDocument } from "@/lib/api";
 import { ApiError } from "@/lib/api/error";
 import { queryKeys, useDocuments, useSessions } from "@/lib/queries";
-import { isDemoEntryEnabled } from "@/lib/demo/profile";
-import { SESSION_TITLE_MAX_LENGTH } from "@/lib/mock/store";
+import { SESSION_TITLE_MAX_LENGTH } from "@/lib/constants";
 import type { ChatSession, DocumentSummary } from "@/types/api";
 
 interface ChatShellProps {
@@ -45,8 +44,9 @@ export function ChatShell({
 }: ChatShellProps) {
   const router = useRouter();
   const queryClient = useQueryClient();
-  // Demo publik: matikan default agar pertanyaan di luar korpus tampil "tidak ditemukan" (klaim inti demo).
-  const [allowUngrounded, setAllowUngrounded] = useState(!isDemoEntryEnabled);
+  // Default mati: jawaban dari pengetahuan umum hanya bila pengguna memilih
+  // mode "jawab tanpa dokumen" secara eksplisit.
+  const [allowUngrounded, setAllowUngrounded] = useState(false);
   // Pilihan dokumen untuk sesi BARU. Untuk sesi yang sudah berjalan, scope-nya
   // datang dari riwayat di server, bukan dari state ini, supaya klien yang
   // lupa mengirimnya tidak memperlebar pencarian.

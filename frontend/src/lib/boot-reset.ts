@@ -1,5 +1,4 @@
 import { getHealth } from "@/lib/api";
-import { isMockMode } from "@/lib/api/config";
 
 /**
  * Deteksi backend yang dijalankan ulang, lalu bersihkan state browser.
@@ -20,11 +19,6 @@ const BOOT_KEY = "ida_boot_id";
 
 /** Jalankan sekali saat aplikasi dibuka di browser. */
 export async function resetStaleBrowserState(): Promise<void> {
-  // Mode fixture tidak punya backend, jadi tidak ada proses yang bisa
-  // di-restart. Membersihkan di sini hanya akan menghapus state pengguna
-  // tanpa alasan.
-  if (isMockMode) return;
-
   let health;
   try {
     health = await getHealth();

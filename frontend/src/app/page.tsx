@@ -42,7 +42,7 @@ export default function PublicLandingPage() {
               Masuk
             </LinkButton>
             <LinkButton href="/login?next=/chat">
-              Coba Demo
+              Mulai
               <ArrowRight className="size-4" aria-hidden />
             </LinkButton>
           </nav>
@@ -68,7 +68,7 @@ export default function PublicLandingPage() {
           <div className="flex flex-col gap-2 sm:flex-row">
             <LinkButton size="lg" className="gap-2" href="/login?next=/chat">
               <Upload className="size-4" aria-hidden />
-              Coba Demo
+              Mulai sekarang
             </LinkButton>
             <LinkButton size="lg" variant="outline" className="gap-2" href="#cara-kerja">
               Lihat cara kerja
@@ -77,8 +77,8 @@ export default function PublicLandingPage() {
           </div>
 
           <p className="max-w-md text-[12px] leading-relaxed text-muted-foreground">
-            Demo portofolio dengan satu passcode akses. Isi dokumen Anda hanya
-            dipakai selama sesi demo berjalan.
+            Passcode akses ditetapkan operator. Dokumen Anda disimpan di server
+            aplikasi, bukan di peramban.
           </p>
         </section>
 
@@ -151,12 +151,11 @@ export default function PublicLandingPage() {
             Siap mencoba dengan dokumen Anda?
           </h2>
           <p className="mx-auto mt-2 max-w-md text-[14px] leading-relaxed text-muted-foreground">
-            Masuk dengan passcode demo, unggah satu berkas, dan ajukan
-            pertanyaan pertama.
+            Masuk, unggah satu berkas, dan ajukan pertanyaan pertama.
           </p>
           <div className="mt-6 flex justify-center">
             <LinkButton size="lg" className="gap-2" href="/login?next=/chat">
-              Masuk ke Demo
+              Mulai sekarang
               <ArrowRight className="size-4" aria-hidden />
             </LinkButton>
           </div>

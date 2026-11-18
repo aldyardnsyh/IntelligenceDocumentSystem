@@ -4,7 +4,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { CloudUpload, Loader2 } from "lucide-react";
 import { cn } from "cn";
 import { Button } from "@/components/ui/button";
-import { ACCEPTED_EXTENSIONS, MAX_FILE_BYTES } from "@/lib/mock/store";
+import { ACCEPTED_EXTENSIONS, MAX_FILE_BYTES } from "@/lib/constants";
 import { formatBytes } from "@/lib/format";
 
 interface UploadDropzoneProps {

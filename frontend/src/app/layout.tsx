@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
-import { isDemoEntryEnabled } from "@/lib/demo/profile";
 import { Toaster } from "@/components/ui/sonner";
 import { Providers } from "./providers";
 import "./globals.css";
@@ -47,11 +46,6 @@ export const metadata: Metadata = {
   },
   description:
     "Tanya dokumen Anda dalam bahasa natural dan dapatkan jawaban yang menyertakan sumbernya.",
-  // Profil demo publik (fixture in-browser dengan jalur demo aktif) memuat data
-  // contoh, bukan dokumen pengunjung, dan URL-nya tidak stabil antar deploy.
-  // Profil lain, termasuk fixture untuk pengembangan lokal, diindeks. Nilainya
-  // build-time dan konstan, jadi aman untuk metadata statis.
-  ...(isDemoEntryEnabled ? { robots: { index: false, follow: false } } : {}),
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

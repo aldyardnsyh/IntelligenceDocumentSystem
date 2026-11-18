@@ -7,7 +7,6 @@ import { BarChart3, FileText, LogOut, MessageSquare, Settings } from "lucide-rea
 import { Logo, Wordmark } from "@/components/brand/logo";
 import { Button } from "@/components/ui/button";
 import { getHealth } from "@/lib/api";
-import { isMockMode } from "@/lib/api/config";
 
 /**
  * Navigasi utama sengaja hanya berisi rute yang benar-benar ada
@@ -24,17 +23,14 @@ const NAV = [
 export function SiteHeader() {
   const pathname = usePathname();
 
-  // Status backend hanya dicek saat terhubung ke FastAPI sungguhan.
-  // Di mode demo, banner demo di bawah yang berlaku, bukan banner ini.
+  // Status backend dipoll ringan; banner di bawah bereaksi terhadapnya.
   const health = useQuery({
     queryKey: ["health"],
     queryFn: ({ signal }) => getHealth(signal),
-    enabled: !isMockMode,
     refetchInterval: 60_000,
     retry: false,
   });
-  const degraded = !isMockMode
-    && health.data
+  const degraded = health.data
     && (health.data.status === "degraded" || health.data.fallback?.mode === "reduced");
 
   /**
@@ -45,7 +41,7 @@ export function SiteHeader() {
    * jawabannya ngawur. Tanpa penanda ini, satu-satunya petunjuk ada di log
    * server, dan gejalanya mudah disalahartikan sebagai "dokumennya aneh".
    */
-  const embeddingMismatch = !isMockMode ? health.data?.fallback?.embedding_mismatch : undefined;
+  const embeddingMismatch = health.data?.fallback?.embedding_mismatch;
 
   return (
     // Blur dipakai di sini dan di sticky input chat, dua elemen yang memang
@@ -93,18 +89,13 @@ export function SiteHeader() {
 
         <div className="flex items-center gap-1">
           <form action="/api/logout" method="post">
-            <Button type="submit" variant="ghost" size="icon-sm" aria-label="Keluar dari demo">
+            <Button type="submit" variant="ghost" size="icon-sm" aria-label="Keluar">
               <LogOut className="size-4" aria-hidden />
             </Button>
           </form>
         </div>
       </div>
 
-      {isMockMode ? (
-        <p className="border-t border-border bg-brand-wash px-4 py-1.5 text-center text-[12px] text-brand-ink">
-          Jawaban diambil dari dokumen yang Anda unggah. Semua data tersimpan di peramban ini.
-        </p>
-      ) : null}
       {embeddingMismatch ? (
         <p
           role="alert"
