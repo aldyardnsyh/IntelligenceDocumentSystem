@@ -323,6 +323,26 @@ if [ "$SKIP_CONFIG" -eq 0 ]; then
         if ! printf '%s' "$DOMAIN" | grep -qE '^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$'; then
             warn "Format domain tidak valid: '${DOMAIN}'. Coba lagi."
             DOMAIN=""
+            continue
+        fi
+        # Sertifikat Let's Encrypt hanya bisa terbit kalau domain menunjuk ke
+        # server ini. Kasus nyata: pengguna menjawab "www.domain" yang mengarah
+        # ke Vercel, ACME challenge mendarat di Vercel, dan caddy berputar
+        # gagal selamanya tanpa pesan yang jelas. Deteksi sekarang, bukan
+        # lima menit kemudian di log caddy.
+        DOMAIN_IP=$(getent hosts "$DOMAIN" 2>/dev/null | awk '{print $1; exit}')
+        SERVER_IP=$(curl -s --max-time 10 https://api.ipify.org 2>/dev/null \
+            || curl -s --max-time 10 https://ifconfig.me 2>/dev/null)
+        if [ -n "$DOMAIN_IP" ] && [ -n "$SERVER_IP" ] && [ "$DOMAIN_IP" != "$SERVER_IP" ]; then
+            warn "'${DOMAIN}' menunjuk ke ${DOMAIN_IP}, tetapi IP publik server ini adalah ${SERVER_IP}."
+            warn "Sertifikat tidak akan pernah terbit sampai record DNS diubah ke IP server."
+            read -r -p "    Lanjutkan tetap? [y/N]: " JAWAB
+            case "$JAWAB" in
+                [yY]|[yY][eE][sS]) ;;
+                *) DOMAIN=""; warn "Ulangi setelah DNS diarahkan ke IP server ini."; ;;
+            esac
+        elif [ -z "$DOMAIN_IP" ]; then
+            warn "Domain '${DOMAIN}' belum bisa diresolusi. Lanjut boleh, tapi DNS wajib benar sebelum sertifikat diterbitkan."
         fi
     done
 
