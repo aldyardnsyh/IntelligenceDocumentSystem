@@ -107,6 +107,11 @@ COPY --from=builder --chown=appuser:appuser /opt/venv /opt/venv
 WORKDIR /app
 COPY --chown=appuser:appuser app ./app
 COPY --chown=appuser:appuser scripts ./scripts
+# Dataset evaluasi ikut ke image: tombol "Jalankan evaluasi" di /analytics
+# membaca berkas ini dari disk (evaluation_dataset_path relatif terhadap
+# workdir). Tanpa COPY ini, fitur itu 409 out of the box di deployment Docker
+# padahal kodenya benar. Ukurannya puluhan KB JSON, tidak berdampak.
+COPY --chown=appuser:appuser evaluation ./evaluation
 COPY --chown=appuser:appuser pyproject.toml ./
 
 # `scripts/` ikut ke image, bukan hanya `app`. Alasannya operasional:
