@@ -17,10 +17,10 @@ __pycache__
 .ruff_cache
 .mypy_cache
 
-# Test dan evaluasi: tidak ada di image produksi, dan men-copy-nya membuat
-# layer build lebih besar tanpa gunanya.
+# Test tidak ada di image produksi. Folder evaluation JANGAN di-ignore:
+# dataset bawaannya dibaca endpoint /analytics/evaluate dari disk
+# (evaluation_dataset_path), dan Dockerfile menyalinnya ke image.
 tests
-evaluation
 
 # Rahasia. `*.env*` sengaja memakai wildcard supaya `.env`, `.env.local`, dan
 # variasi lain ikut tertangkap. File ini hanya berisi konfigurasi lokal
