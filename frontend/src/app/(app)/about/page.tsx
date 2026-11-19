@@ -21,25 +21,25 @@ const PIPELINE = [
     Icon: Boxes,
     phase: "Tahap 01",
     title: "Ingestion dokumen",
-    body: "Berkas PDF, TXT, atau Markdown diekstrak teksnya, dibersihkan dari whitespace berlebih, lalu dipecah dengan RecursiveCharacterTextSplitter. Setiap chunk menyimpan document_id, chunk_index, dan nomor halaman bila tersedia.",
+    body: "Berkas PDF, TXT, atau Markdown diterima server. Halaman hasil pindai dibaca OCR yang berjalan lokal, teksnya dibersihkan dan dirapikan, lalu dipotong mengikuti struktur dokumen bila terdeteksi (mis. bab dan pasal) atau batas paragraf bila tidak. Setiap potongan menyimpan asal halamannya.",
   },
   {
     Icon: Database,
     phase: "Tahap 02",
-    title: "Vektorisasi dan indeks",
-    body: "Tiap chunk di-embed dan disimpan beserta metadatanya di vector store. Metadata dokumen disimpan terpisah di basis data relasional, sehingga daftar dokumen bisa difilter tanpa menyentuh indeks vektor.",
+    title: "Vektorisasi dan indeks ganda",
+    body: "Tiap potongan diubah menjadi vektor oleh model embedding lokal, disimpan di Chroma, dan sekaligus diindeks kata dengan BM25 ber-stemming Sastrawi. Pencarian nanti berjalan di kedua jalur ini bersamaan.",
   },
   {
     Icon: FileSearch,
     phase: "Tahap 03",
-    title: "Retrieval berbasis kemiripan",
-    body: "Pertanyaan diubah menjadi vektor lalu dicocokkan dengan cosine similarity. Ambang kemiripan menentukan apakah sebuah chunk dianggap relevan. Kalau tidak ada yang melewati ambang, sistem bilang tidak ditemukan, bukan menebak.",
+    title: "Retrieval hybrid dan reranking",
+    body: "Pertanyaan dicocokkan lewat dua jalur sekaligus, lalu kandidat terbaik dinilai ulang oleh cross-encoder multilingual. Gerbang kelayakan punya dua bar: kemiripan semantik atau kecocokan kata kunci yang benar-benar spesifik membuka jawaban utama; yang di antaranya tetap dijawab dengan label bukti terbatas; yang kosong ditolak disertai saran kata kunci.",
   },
   {
     Icon: History,
     phase: "Tahap 04",
     title: "Generation dan memori percakapan",
-    body: "Chunk yang lolos dikirim ke LLM bersama riwayat percakapan sesi. Jawaban di-stream per token, dan setiap jawaban menyertakan daftar sumber yang bisa ditelusuri ke chunk aslinya.",
+    body: "Potongan yang lolos dikirim ke model bahasa bersama riwayat percakapan sesi. Jawaban di-stream per token dan menyertakan daftar sumber yang bisa ditelusuri sampai ke halaman atau potongan aslinya. Pertanyaan lanjutan tetap memakai konteks sebelumnya.",
   },
 ] as const;
 

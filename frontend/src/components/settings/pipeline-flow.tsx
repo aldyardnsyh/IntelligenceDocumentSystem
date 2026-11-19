@@ -113,15 +113,15 @@ function useStages(live: ReturnType<typeof useLiveCounts>): Stage[] {
     {
       Icon: ScanText,
       title: "Ekstraksi teks (OCR)",
-      body: "Setiap halaman dirender jadi gambar lalu dibaca PP-OCRv6 di server. Hasilnya dirapikan bertahap: urutan baca dua kolom dipulihkan, kata yang menempel dipisah, penanda butir yang rusak dipulihkan, dan cap kaki halaman dibuang. Halaman yang masih dibaca dengan keyakinan rendah dieskalasi ke model vision. Lambang, tanda tangan, dan stempel ikut terdeteksi sebagai chunk tersendiri.",
+      body: "Setiap halaman dirender jadi gambar lalu dibaca PP-OCRv6 di server. Hasilnya dirapikan bertahap: urutan baca multi kolom dipulihkan, kata yang menempel dipisah, penanda daftar yang rusak dipulihkan, dan cap kaki halaman dibuang. Halaman yang masih dibaca dengan keyakinan rendah dieskalasi ke model vision. Elemen gambar seperti logo, tanda tangan, atau stempel ikut terdeteksi sebagai chunk tersendiri.",
       chips: ["PP-OCRv6 lokal", "koreksi leksikon korpus", "lambang & tanda tangan ikut diindeks"],
       Scene: OcrScene,
     },
     {
       Icon: Scissors,
-      title: "Chunking struktur hukum",
-      body: "Teks dipotong mengikuti struktur dokumen: satu Pasal menjadi satu chunk, sehingga sitasi menunjuk unit makna yang utuh. Pasal yang panjang dipecah per ayat, dan tiap pecahan tetap menyimpan badan Pasal utuhnya untuk dipakai sebagai konteks saat menjawab. Dokumen tanpa struktur hukum memakai jalur paragraf.",
-      chips: ["per-Pasal (BAB/Bagian)", "small-to-big: pecahan + induk utuh"],
+      title: "Chunking sadar struktur",
+      body: "Bila dokumen punya struktur (mis. bab, bagian, atau pasal), potongan mengikutinya sehingga sitasi menunjuk bagian yang utuh. Bagian yang panjang dipecah lagi per ayat atau butir, dan tiap pecahan menyimpan bagian induknya untuk dipakai sebagai konteks saat menjawab. Dokumen tanpa struktur memakai jalur paragraf biasa.",
+      chips: ["mengikuti struktur bila ada", "small-to-big: pecahan + induk utuh"],
       Scene: ChunkScene,
       stats: live.hasDocuments ? [{ value: live.chunks, label: "chunk" }] : undefined,
     },
@@ -140,7 +140,7 @@ function useStages(live: ReturnType<typeof useLiveCounts>): Stage[] {
     {
       Icon: Bot,
       title: "Retrieval & model bahasa",
-      body: "Pertanyaan dicocokkan dua jalur: semantik (vektor) dan kata kunci (BM25, dengan toleransi typo dan padanan kata). Kandidat yang lolos dinilai ulang oleh cross-encoder sebelum lima teratas dipakai. Masuk jawaban kuat butuh kecocokan semantik atau kata kunci yang benar-benar spesifik; di antara keduanya, pertanyaan tetap dijawab dengan label bukti terbatas. Induk Pasal dari tiap pecahan ikut dikirim sebagai konteks.",
+      body: "Pertanyaan dicocokkan dua jalur: semantik (vektor) dan kata kunci (BM25, dengan toleransi typo dan padanan kata). Kandidat yang lolos dinilai ulang oleh cross-encoder sebelum lima teratas dipakai. Masuk jawaban kuat butuh kecocokan semantik atau kata kunci yang benar-benar spesifik; di antara keduanya, pertanyaan tetap dijawab dengan label bukti terbatas. Bagian induk dari tiap pecahan ikut dikirim sebagai konteks.",
       chips: ["bge-reranker-v2-m3", "gate dua bar: 0,78 semantik / 0,85 leksikal", "Groq"],
       Scene: RetrievalScene,
       status: {
@@ -152,7 +152,7 @@ function useStages(live: ReturnType<typeof useLiveCounts>): Stage[] {
     {
       Icon: Sparkles,
       title: "Jawaban & insight",
-      body: "Jawaban disusun dari bukti terpilih dan selalu menyertakan sitasi yang bisa dibuka sampai ke Pasal atau halamannya. Sumber yang hasil pembacaannya meragukan ditandai, dan jawabannya menambahkan catatan otomatis soal itu. Bila bukti lemah, jawaban diberi label bukti terbatas; bila kosong, sistem menolak dan menawarkan kata kunci alternatif.",
+      body: "Jawaban disusun dari bukti terpilih dan selalu menyertakan sitasi yang bisa dibuka sampai ke halaman atau potongan asalnya. Sumber yang hasil pembacaannya meragukan ditandai, dan jawabannya menambahkan catatan otomatis soal itu. Bila bukti lemah, jawaban diberi label bukti terbatas; bila kosong, sistem menolak dan menawarkan kata kunci alternatif.",
       chips: ["sitasi [SUMBER n]", "cache jawaban 30 menit", "trace Langfuse"],
       Scene: AnswerScene,
       link: { href: "/analytics", label: "Lihat evaluasi & log" },
